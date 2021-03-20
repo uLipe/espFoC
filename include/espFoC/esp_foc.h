@@ -6,6 +6,7 @@
 #include "espFoC/modulator.h"
 #include "espFoC/pid_controller.h"
 #include "espFoC/inverter_interface.h"
+#include "espFoC/current_sensor_interface.h"
 #include "espFoC/rotor_sensor_interface.h"
 
 typedef enum {
