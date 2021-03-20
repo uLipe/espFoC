@@ -1,0 +1,41 @@
+menu "Frerunning FoC example menu"
+
+    config FOC_DEFAULT_MOTOR_POLE_PAIRS
+        int "Target motor pole pairs"
+        default 11
+        help
+            Motor pole pairs commonly found in the motor part 
+            datasheet, 11 pole pairs are a common value, but correct
+            value is important for correct electrical angle calculation.
+            
+    config FOC_PWM_U_PIN
+        int "Gpio number for PWM of phase U"
+        range 0 34
+        default 14
+
+    config FOC_PWM_V_PIN
+        int "Gpio number for PWM of phase V"
+        range 0 34
+        default 13
+
+    config FOC_PWM_W_PIN
+        int "Gpio number for PWM of phase W"
+        range 0 34
+        default 12
+
+    config FOC_SENSOR_COUNT_MAX
+        int "Rotor analog sensor top value"
+        range 0 4095
+        default 4080
+        
+    config FOC_SENSOR_COUNT_MIN
+        int "Rotor analog sensor bottom value"
+        range 0 4095
+        default 10
+        
+    config FOC_TASK_PRIORITY
+        int "Priority task of foc controller"
+        range 0 8
+        default 8
+
+endmenu

@@ -1,0 +1,47 @@
+name: Build
+on: push
+jobs:
+  build:
+    name: Test compiling 
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@main
+
+    - name: Install python
+      uses: actions/setup-python@v2
+      with:
+
+        # XXX install python 3.8 because the official python package
+        # segfaults when installing modules in the runner.
+        #
+        # 2020-09-03T02:29:58.2517141Z Successfully installed cffi-1.14.2 cryptography-3.1 future-0.18.2 pycparser-2.20 pyparsing-2.3.1 pyserial-3.4 setuptools-50.1.0 six-1.15.0
+        # 2020-09-03T02:30:09.0409148Z /home/runner/work/_temp/66c91304-eef8-456d-84a1-7299428a62f7.sh: line 5:  4140 Segmentation fault      (core dumped) python3 -m pip install --user -r ${IDF_PATH}/requirements.txt
+        # 2020-09-03T02:30:09.0414254Z ##[error]Process completed with exit code 139.
+        #
+        # possibly related issue:
+        # https://github.com/actions/virtual-environments/issues/159
+        python-version: 3.8
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get install \
+          bison \
+          ccache \
+          flex \
+          gcc \
+          git \
+          gperf \
+          libffi-dev \
+          libncurses-dev \
+          libssl-dev \
+          make \
+          wget
+
+    - name: Checkout the SDK
+      uses: actions/checkout@v2
+      with:
+        repository: espressif/esp-idf
+        path: idf
+        submodules: recursive
+        ref: master
