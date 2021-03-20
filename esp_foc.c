@@ -232,6 +232,9 @@ IRAM_ATTR esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis, float now)
                                             axis->v_uvw[0], 
                                             axis->v_uvw[1], 
                                             axis->v_uvw[2]);
+	#if CONFIG_ESP_FOC_SIMULATE_ROTOR_SENSOR
+	axis->rotor_sensor_driver->set_simulation_count(axis->rotor_sensor_driver, (axis->v_qd[0] * 0.1f) / axis->dc_link_voltage);
+	#endif
 
     return ESP_FOC_OK;
 }
