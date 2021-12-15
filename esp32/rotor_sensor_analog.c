@@ -1,7 +1,4 @@
-#include <unistd.h>
 #include <math.h>
-#include <sys/cdefs.h>
-#include "esp_heap_caps.h"
 #include "espFoC/rotor_sensor_analog.h"
 #include "esp_attr.h"
 
@@ -16,6 +13,8 @@ typedef struct {
 
     esp_foc_rotor_sensor_t interface;
 }esp_foc_analog_rotor_sensor_t;
+
+DRAM_ATTR static esp_foc_analog_rotor_sensor_t adc_sensor[CONFIG_NOOF_AXIS];
 
 static const adc_bits_width_t width = ADC_WIDTH_BIT_12;
 static const adc_atten_t atten = ADC_ATTEN_DB_0;
@@ -66,12 +65,6 @@ IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
     return obj->current_count + raw;
 }
 
-IRAM_ATTR static void  delay_ms(esp_foc_rotor_sensor_t *self, int ms)
-{
-    (void)self;
-    usleep(ms * 1000);    
-}
-
 esp_err_t rotor_sensor_analog_init()
 {
     adc1_config_width(width);
@@ -80,34 +73,29 @@ esp_err_t rotor_sensor_analog_init()
 
 esp_foc_rotor_sensor_t *rotor_sensor_analog_new(int adc_channel, 
                                                 int min_sensor_count,           
-                                               int max_sensor_count)
+                                               int max_sensor_count,
+                                               int port)
 {
-    esp_foc_analog_rotor_sensor_t *obj = 
-        heap_caps_malloc(
-            sizeof(esp_foc_analog_rotor_sensor_t), MALLOC_CAP_INTERNAL
-        );
-
-    if(!obj) {
+    if(port > CONFIG_NOOF_AXIS - 1) {
         return NULL;
     }
 
-    obj->interface.get_counts_per_revolution = get_counts_per_revolution;
-    obj->interface.read_counts = read_counts;
-    obj->interface.set_to_zero = set_to_zero;
-    obj->interface.delay_ms = delay_ms;
+    adc_sensor[port].interface.get_counts_per_revolution = get_counts_per_revolution;
+    adc_sensor[port].interface.read_counts = read_counts;
+    adc_sensor[port].interface.set_to_zero = set_to_zero;
 
-    obj->adc_channel = adc_channel;
+    adc_sensor[port].adc_channel = adc_channel;
     if(max_sensor_count < min_sensor_count) {
-        obj->counts_per_revolution = min_sensor_count - max_sensor_count;
+        adc_sensor[port].counts_per_revolution = min_sensor_count - max_sensor_count;
     } else {
-        obj->counts_per_revolution = max_sensor_count - min_sensor_count;
+        adc_sensor[port].counts_per_revolution = max_sensor_count - min_sensor_count;
     }
 
-    obj->limit_high = 100.0f * obj->counts_per_revolution;
-    obj->limit_low = -obj->limit_high;
+    adc_sensor[port].limit_high = 100.0f * adc_sensor[port].counts_per_revolution;
+    adc_sensor[port].limit_low = -adc_sensor[port].limit_high;
 
-    adc1_config_channel_atten(obj->adc_channel, atten);
-    obj->previous_read = read_adc(obj->adc_channel);
+    adc1_config_channel_atten(adc_sensor[port].adc_channel, atten);
+    adc_sensor[port].previous_read = read_adc(adc_sensor[port].adc_channel);
 
-    return &obj->interface;
+    return &adc_sensor[port].interface;
 }

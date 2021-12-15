@@ -1,5 +1,4 @@
 #include <sys/cdefs.h>
-#include "esp_heap_caps.h"
 #include "espFoC/inverter_3pwm_ledc.h"
 #include "esp_attr.h"
 
@@ -12,6 +11,8 @@ typedef struct {
     ledc_channel_t ledc_channel[3];
     esp_foc_inverter_t interface;
 }esp_foc_ledc_inverter;
+
+DRAM_ATTR static esp_foc_ledc_inverter ledc[CONFIG_NOOF_AXIS];
 
 IRAM_ATTR static float get_dc_link_voltage (esp_foc_inverter_t *self)
 {
@@ -94,21 +95,20 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
                                         int gpio_u,
                                         int gpio_v,
                                         int gpio_w,
-                                        float dc_link_voltage)
+                                        float dc_link_voltage,
+                                        int port)
 {
-    esp_foc_ledc_inverter *obj = 
-        heap_caps_malloc(sizeof(esp_foc_ledc_inverter), MALLOC_CAP_INTERNAL);
-
-    if(!obj) {
+    if(port > CONFIG_NOOF_AXIS - 1) {
         return NULL;
     }
 
-    obj->dc_link_voltage = dc_link_voltage;
-    obj->interface.get_dc_link_voltage = get_dc_link_voltage;
-    obj->interface.set_voltages = set_voltages;
-    obj->ledc_channel[0] = ch_u;
-    obj->ledc_channel[1] = ch_v;
-    obj->ledc_channel[2] = ch_w;
+
+    ledc[port].dc_link_voltage = dc_link_voltage;
+    ledc[port].interface.get_dc_link_voltage = get_dc_link_voltage;
+    ledc[port].interface.set_voltages = set_voltages;
+    ledc[port].ledc_channel[0] = ch_u;
+    ledc[port].ledc_channel[1] = ch_v;
+    ledc[port].ledc_channel[2] = ch_w;
 
     ledc_channel_config_t ledc_channel[3] =  {
         {
@@ -142,12 +142,11 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
     for (int ch = 0; ch < 3; ch++) {
         esp_err_t err = ledc_channel_config(&ledc_channel[ch]);
         if(err != ESP_OK) {
-            heap_caps_free(obj);
             return NULL;
         }
     }
 
-    obj->voltage_to_duty_ratio = LEDC_RESOLUTION_STEPS / obj->dc_link_voltage;
+    ledc[port].voltage_to_duty_ratio = LEDC_RESOLUTION_STEPS / ledc[port].dc_link_voltage;
 
-    return &obj->interface;
+    return &ledc[port].interface;
 }

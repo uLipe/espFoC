@@ -32,10 +32,5 @@ menu "Frerunning FoC example menu"
         int "Rotor analog sensor bottom value"
         range 0 4095
         default 10
-        
-    config FOC_TASK_PRIORITY
-        int "Priority task of foc controller"
-        range 0 8
-        default 8
 
 endmenu

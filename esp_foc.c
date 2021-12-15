@@ -19,6 +19,66 @@ static inline float esp_foc_ticks_to_radians_normalized(esp_foc_axis_t *axis)
     );
 }
 
+IRAM_ATTR void esp_foc_loop(void *arg)
+{
+    float now;
+    float theta;
+    float dt; 
+    esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
+
+    for(;;) {
+        now = (float) esp_foc_now_seconds();
+        dt =  now - axis->last_timestamp;
+        axis->last_timestamp = now;
+
+        theta = esp_foc_ticks_to_radians_normalized(axis); 
+
+        #if CONFIG_ESP_FOC_USE_VELOCITY_CONTROLLER
+            axis->inner_control_runs--;
+
+            if(axis->inner_control_runs == 0) {
+                float measured_velocity = 
+                    (axis->rotor_position - axis->rotor_position_prev) / dt;
+                axis->rotor_position_prev = axis->rotor_position;
+
+                axis->v_qd[0] = esp_foc_saturate(
+                    esp_foc_pid_update(
+                        &axis->velocity_controller,
+                        esp_foc_low_pass_filter_update(
+                            &axis->velocity_filter, axis->target_speed
+                        ),
+                        measured_velocity
+                    ),
+                    axis->biased_dc_link_voltage;
+                )
+                
+                axis->v_qd[1] = 0.0f;
+                axis->inner_control_runs = CONFIG_CONFIG_ESP_FOC_VELOCITY_CONTROLLER_RATE;
+                axis->velocity_dt = 0.0f;
+            }
+        #endif
+
+        esp_foc_modulate_dq_voltage(axis->biased_dc_link_voltage, 
+                    theta, 
+                    axis->v_qd[1], 
+                    axis->v_qd[0], 
+                    &axis->v_uvw[0], 
+                    &axis->v_uvw[1], 
+                    &axis->v_uvw[2]);
+
+        axis->inverter_driver->set_voltages(axis->inverter_driver,
+                                                axis->v_uvw[0], 
+                                                axis->v_uvw[1], 
+                                                axis->v_uvw[2]);
+
+        #if CONFIG_ESP_FOC_SIMULATE_ROTOR_SENSOR
+        axis->rotor_sensor_driver->set_simulation_count(axis->rotor_sensor_driver, (axis->v_qd[0] * 0.1f) / axis->dc_link_voltage);
+        #endif
+
+        esp_foc_runner_yield();
+    }
+}
+
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                     esp_foc_inverter_t *inverter,
                                     esp_foc_rotor_sensor_t *rotor,
@@ -65,7 +125,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->biased_dc_link_voltage = axis->dc_link_voltage * 0.5;
     axis->inverter_driver->set_voltages(axis->inverter_driver, 0.0, 0.0, 0.0);
 
-    axis->rotor_sensor_driver->delay_ms(axis->rotor_sensor_driver, 250);
+    esp_foc_sleep_ms(250);
     axis->rotor_aligned = ESP_FOC_ERR_NOT_ALIGNED;
 
     return ESP_FOC_OK;
@@ -103,8 +163,7 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
                                              axis->v_uvw[0], 
                                              axis->v_uvw[1], 
                                              axis->v_uvw[2]);
-        axis->rotor_sensor_driver->delay_ms(axis->rotor_sensor_driver, 
-                                            CONFIG_ESP_FOC_ALIGN_STEP_DELAY_MS);
+        esp_foc_sleep_ms(CONFIG_ESP_FOC_ALIGN_STEP_DELAY_MS);
     }
 
     for (float i = 500.0f; i != 0.0f; i -= 1.0f) {
@@ -124,13 +183,12 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
                                              axis->v_uvw[0], 
                                              axis->v_uvw[1], 
                                              axis->v_uvw[2]);
-        axis->rotor_sensor_driver->delay_ms(axis->rotor_sensor_driver, 
-                                            CONFIG_ESP_FOC_ALIGN_STEP_DELAY_MS);
+        esp_foc_sleep_ms(CONFIG_ESP_FOC_ALIGN_STEP_DELAY_MS);
     }
 
-    axis->rotor_sensor_driver->delay_ms(axis->rotor_sensor_driver, 250);
+    esp_foc_sleep_ms(250);
     axis->inverter_driver->set_voltages(axis->inverter_driver, 0.0, 0.0, 0.0);
-    axis->rotor_sensor_driver->delay_ms(axis->rotor_sensor_driver, 250);
+    esp_foc_sleep_ms(250);
     axis->rotor_sensor_driver->set_to_zero(axis->rotor_sensor_driver);
     axis->rotor_aligned = ESP_FOC_OK;
 
@@ -176,7 +234,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_set_target_velocity(esp_foc_axis_t *axis, float 
     return ESP_FOC_OK;
 }
 
-IRAM_ATTR esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis, float now)
+esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis)
 {
     if(axis == NULL) {
         return ESP_FOC_ERR_INVALID_ARG;
@@ -184,57 +242,11 @@ IRAM_ATTR esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis, float now)
     if(axis->rotor_aligned != ESP_FOC_OK) {
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
+    int ret = esp_foc_create_runner(esp_foc_loop, axis);
 
-    float dt = now - axis->last_timestamp;
-    axis->velocity_dt += dt;
-    if(dt == 0.0 || dt < 0.0f) {
-        return ESP_FOC_ERR_TIMESTEP_TOO_SMALL;
+    if (ret < 0) {
+        return ESP_FOC_ERR_UNKNOWN;
     }
-
-    axis->last_timestamp = now;
-
-    float theta = esp_foc_ticks_to_radians_normalized(axis);
-    
-    #if CONFIG_ESP_FOC_USE_VELOCITY_CONTROLLER
-        axis->inner_control_runs--;
-
-        if(axis->inner_control_runs == 0) {
-            float measured_velocity = 
-                (axis->rotor_position - axis->rotor_position_prev) / dt;
-            axis->rotor_position_prev = axis->rotor_position;
-
-            axis->v_qd[0] = esp_foc_saturate(
-                esp_foc_pid_update(
-                    &axis->velocity_controller,
-                    esp_foc_low_pass_filter_update(
-                        &axis->velocity_filter, axis->target_speed
-                    ),
-                    measured_velocity
-                ),
-                axis->biased_dc_link_voltage;
-            )
-            
-            axis->v_qd[1] = 0.0f;
-            axis->inner_control_runs = CONFIG_CONFIG_ESP_FOC_VELOCITY_CONTROLLER_RATE;
-            axis->velocity_dt = 0.0f;
-        }
-    #endif
-
-    esp_foc_modulate_dq_voltage(axis->biased_dc_link_voltage, 
-                theta, 
-                axis->v_qd[1], 
-                axis->v_qd[0], 
-                &axis->v_uvw[0], 
-                &axis->v_uvw[1], 
-                &axis->v_uvw[2]);
-
-    axis->inverter_driver->set_voltages(axis->inverter_driver,
-                                            axis->v_uvw[0], 
-                                            axis->v_uvw[1], 
-                                            axis->v_uvw[2]);
-	#if CONFIG_ESP_FOC_SIMULATE_ROTOR_SENSOR
-	axis->rotor_sensor_driver->set_simulation_count(axis->rotor_sensor_driver, (axis->v_qd[0] * 0.1f) / axis->dc_link_voltage);
-	#endif
 
     return ESP_FOC_OK;
 }

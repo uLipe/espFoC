@@ -1,11 +1,14 @@
 #pragma once 
 
+#ifdef CONFIG_ESP_FOC_CUSTOM_MATH
 extern const float ESP_FOC_FAST_PI;
 extern const float ESP_FOC_FAST_2PI;
 extern const float ESP_FOC_SIN_COS_APPROX_B;
 extern const float ESP_FOC_SIN_COS_APPROX_C;
 extern const float ESP_FOC_SIN_COS_APPROX_P;
-extern const float ESP_FOC_SIN_COS_APPROX_D; 
+extern const float ESP_FOC_SIN_COS_APPROX_D;
+#endif
+ 
 extern const float ESP_FOC_CLARKE_K1;
 extern const float ESP_FOC_CLARKE_K2;
 extern const float ESP_FOC_CLARKE_PARK_SQRT3;
@@ -13,17 +16,25 @@ extern const float ESP_FOC_CLARKE_K3;
 
 static inline float esp_foc_sine(float x) 
 {
+#ifdef CONFIG_ESP_FOC_CUSTOM_MATH
     float y = ESP_FOC_SIN_COS_APPROX_B * x + 
         ESP_FOC_SIN_COS_APPROX_C * x * (x < 0 ? -x : x);
     return ESP_FOC_SIN_COS_APPROX_P * (y * (y < 0 ? -y : y) - y) + y;
+#else
+    return sinf(x);
+#endif
 }
 
 static inline float esp_foc_cosine(float x)
 {
+#ifdef CONFIG_ESP_FOC_CUSTOM_MATH
     x = (x > 0) ? -x : x;
     x += ESP_FOC_SIN_COS_APPROX_D;
 
     return esp_foc_sine(x);
+#else
+    return cosf(x);
+#endif
 }
 
 static inline float esp_foc_mechanical_to_elec_angle(float mech_angle, 
@@ -34,11 +45,20 @@ static inline float esp_foc_mechanical_to_elec_angle(float mech_angle,
 
 static inline float esp_foc_normalize_angle(float angle)
 {
+#ifdef CONFIG_ESP_FOC_CUSTOM_MATH
     float result =  fmod(angle, ESP_FOC_FAST_2PI);
     if(result > ESP_FOC_FAST_PI) {
         result -= ESP_FOC_FAST_2PI;  
     }
-    
+#else 
+    const float full2pi = M_PI * 2.0f;
+    float result =  fmod(angle, full2pi);
+
+    if(result > M_PI) {
+        result -= full2pi;  
+    }
+#endif
+
     return result;
 }
 
@@ -54,7 +74,7 @@ static inline float esp_foc_saturate(float value, float limit)
     return result;
 }
 
-#ifdef ESP_FOC_USE_TORQUE_CONTROLLER
+#ifdef CONFIG_ESP_FOC_USE_TORQUE_CONTROLLER
 
 static inline void esp_foc_clarke_transform (float v_uvw[3], 
                                             float * v_aplha, 

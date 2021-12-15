@@ -12,4 +12,5 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
                                         int gpio_u,
                                         int gpio_v,
                                         int gpio_w,
-                                        float dc_link_voltage);
+                                        float dc_link_voltage,
+                                        int port);

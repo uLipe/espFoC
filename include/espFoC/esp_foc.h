@@ -8,6 +8,7 @@
 #include "espFoC/inverter_interface.h"
 #include "espFoC/current_sensor_interface.h"
 #include "espFoC/rotor_sensor_interface.h"
+#include "espFoC/os_interface.h"
 
 typedef enum {
     ESP_FOC_OK = 0,
@@ -85,4 +86,4 @@ esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis,
 
 esp_foc_err_t esp_foc_set_target_velocity(esp_foc_axis_t *axis, float radians);
 
-esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis, float now);
+esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis);

@@ -14,7 +14,6 @@ static const char *TAG = "esp-foc-example";
 static esp_foc_inverter_t *inverter;
 static esp_foc_rotor_sensor_t *sensor;
 static esp_foc_axis_t axis;
-static float now = 0;
 
 void app_main(void)
 {
@@ -33,7 +32,8 @@ void app_main(void)
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_V_PIN,
         CONFIG_FOC_PWM_W_PIN,
-        12.0f
+        12.0f,
+        0
     );
 
     if(inverter == NULL) {
@@ -44,7 +44,8 @@ void app_main(void)
     sensor = rotor_sensor_analog_new(
         ADC_CHANNEL_3, 
         CONFIG_FOC_SENSOR_COUNT_MIN,
-        CONFIG_FOC_SENSOR_COUNT_MAX
+        CONFIG_FOC_SENSOR_COUNT_MAX,
+        0
     );
 
     if(sensor == NULL) {
@@ -59,20 +60,12 @@ void app_main(void)
         CONFIG_FOC_DEFAULT_MOTOR_POLE_PAIRS
     );
 
-    vTaskPrioritySet(NULL, CONFIG_FOC_TASK_PRIORITY);
-
     vd.raw = 0.0f;
     vq.raw = 1.0f;
 
     esp_foc_align_axis(&axis);
     esp_foc_set_target_voltage(&axis, &vq, &vd);
-    now = (float)xTaskGetTickCount();
-
-    while (1) {
-        now = (float)(xTaskGetTickCount()) * 0.001f;
-        esp_foc_run(&axis, now);
-        vTaskDelay(1);
-    }
+    esp_foc_run(&axis);
 }
 
 
