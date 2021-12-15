@@ -45,6 +45,7 @@ typedef struct {
     float i_qd[2];
 
     float target_speed;
+    float current_speed;
 
     float rotor_position;
     float rotor_position_prev;
@@ -79,6 +80,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                     float motor_pole_pairs);
 
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis);
+
+float esp_foc_get_runner_dt(esp_foc_axis_t *axis);
 
 esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis,
                                         esp_foc_q_voltage *vq,

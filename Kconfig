@@ -34,13 +34,13 @@ menu "espFoC Settings"
         if ESP_FOC_USE_VELOCITY_CONTROLLER
             config ESP_FOC_VELOCITY_CONTROLLER_KP
                 int "Velocity controller proportional gain"
-                default 50
+                default 1
                 help
                 Proportional gain of the motor Velocity controller
             
             config ESP_FOC_VELOCITY_CONTROLLER_KI
                 int "Velocity controller integral gain"
-                default 1
+                default 0
                 help
                 Integral gain of the motor Velocity controller
             

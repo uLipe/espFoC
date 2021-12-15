@@ -18,8 +18,7 @@ static inline void esp_foc_pid_reset(esp_foc_pid_controller_t *self)
 
 static inline float  esp_foc_pid_update(esp_foc_pid_controller_t *self,
                                         float reference,
-                                        float measure,
-                                        float dt)
+                                        float measure)
 {
     float error = reference - measure;
     float error_diff = error - self->previous_error;
@@ -32,8 +31,8 @@ static inline float  esp_foc_pid_update(esp_foc_pid_controller_t *self,
     }
 
     float mv = self->kp * error + 
-            (self->ki * dt * self->accumulated_error) + 
-            ((self->kd * error_diff) / dt);
+            (self->ki * self->accumulated_error) + 
+            (self->kd * error_diff);
 
     self->previous_error = error;
 

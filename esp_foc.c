@@ -23,38 +23,36 @@ IRAM_ATTR void esp_foc_loop(void *arg)
 {
     float now;
     float theta;
-    float dt; 
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
 
     for(;;) {
         now = (float) esp_foc_now_seconds();
-        dt =  now - axis->last_timestamp;
+        axis->dt =  now - axis->last_timestamp;
         axis->last_timestamp = now;
 
         theta = esp_foc_ticks_to_radians_normalized(axis); 
 
         #if CONFIG_ESP_FOC_USE_VELOCITY_CONTROLLER
             axis->inner_control_runs--;
+            axis->current_speed = 
+                (axis->rotor_position - axis->rotor_position_prev) / axis->dt;
+            axis->rotor_position_prev = axis->rotor_position;
 
             if(axis->inner_control_runs == 0) {
-                float measured_velocity = 
-                    (axis->rotor_position - axis->rotor_position_prev) / dt;
-                axis->rotor_position_prev = axis->rotor_position;
 
                 axis->v_qd[0] = esp_foc_saturate(
                     esp_foc_pid_update(
                         &axis->velocity_controller,
                         esp_foc_low_pass_filter_update(
-                            &axis->velocity_filter, axis->target_speed
+                            &axis->velocity_filter, axis->current_speed
                         ),
-                        measured_velocity
+                        axis->target_speed
                     ),
                     axis->biased_dc_link_voltage;
                 )
                 
                 axis->v_qd[1] = 0.0f;
                 axis->inner_control_runs = CONFIG_CONFIG_ESP_FOC_VELOCITY_CONTROLLER_RATE;
-                axis->velocity_dt = 0.0f;
             }
         #endif
 
