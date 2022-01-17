@@ -5,7 +5,7 @@
 #include "esp_log.h"
 #include "esp_err.h"
 
-#include "espFoC/rotor_sensor_analog.h"
+#include "espFoC/rotor_sensor_as5600.h"
 #include "espFoC/inverter_3pwm_ledc.h"
 #include "espFoC/esp_foc.h"
 
@@ -23,7 +23,6 @@ void app_main(void)
     ESP_LOGI(TAG, "Initializing the esp foc motor controller!");
 
     inverter_3pwm_ledc_init();
-    rotor_sensor_analog_init();
 
     inverter = inverter_3pwm_ledc_new(
         LEDC_CHANNEL_0,
@@ -41,10 +40,9 @@ void app_main(void)
         ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
     }
 
-    sensor = rotor_sensor_analog_new(
-        ADC_CHANNEL_3, 
-        CONFIG_FOC_SENSOR_COUNT_MIN,
-        CONFIG_FOC_SENSOR_COUNT_MAX,
+    sensor = rotor_sensor_as5600_new(
+        CONFIG_FOC_ENCODER_SDA_PIN,
+        CONFIG_FOC_ENCODER_SCL_PIN,
         0
     );
 

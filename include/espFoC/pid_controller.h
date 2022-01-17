@@ -2,8 +2,8 @@
 
 typedef struct {
     float kp;
-    float ki;
-    float kd;
+    float ki; /** ki = kp ( 1 / n * Ts) */
+    float kd; /** kd = kp * n * Ts */
 
     float integrator_limit;
     float accumulated_error;
