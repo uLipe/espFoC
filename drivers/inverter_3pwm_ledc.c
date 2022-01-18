@@ -49,28 +49,28 @@ IRAM_ATTR static void set_voltages(esp_foc_inverter_t *self,
     }
 
     ledc_set_duty(
-        LEDC_HIGH_SPEED_MODE, 
+        LEDC_LOW_SPEED_MODE, 
         obj->ledc_channel[0], 
         obj->voltage_to_duty_ratio * v_u
     );
     
-    ledc_update_duty(LEDC_HIGH_SPEED_MODE, obj->ledc_channel[0]);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, obj->ledc_channel[0]);
 
     ledc_set_duty(
-        LEDC_HIGH_SPEED_MODE, 
+        LEDC_LOW_SPEED_MODE, 
         obj->ledc_channel[1], 
         obj->voltage_to_duty_ratio * v_v
     );
     
-    ledc_update_duty(LEDC_HIGH_SPEED_MODE, obj->ledc_channel[1]);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, obj->ledc_channel[1]);
 
     ledc_set_duty(
-        LEDC_HIGH_SPEED_MODE, 
+        LEDC_LOW_SPEED_MODE, 
         obj->ledc_channel[2], 
         obj->voltage_to_duty_ratio * v_w
     );
     
-    ledc_update_duty(LEDC_HIGH_SPEED_MODE, obj->ledc_channel[2]);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, obj->ledc_channel[2]);
 }
 
 IRAM_ATTR static void set_inverter_callback(esp_foc_inverter_t *self,
@@ -85,7 +85,7 @@ esp_err_t inverter_3pwm_ledc_init()
     ledc_timer_config_t ledc_timer = {
         .duty_resolution = LEDC_TIMER_8_BIT,
         .freq_hz = LEDC_FREQUENCY_HZ,
-        .speed_mode = LEDC_HIGH_SPEED_MODE,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
         .timer_num = LEDC_TIMER_0,
         .clk_cfg = LEDC_AUTO_CLK,
     };
@@ -122,7 +122,7 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
             .channel    = ch_u,
             .duty       = 0,
             .gpio_num   = gpio_u,
-            .speed_mode = LEDC_HIGH_SPEED_MODE,
+            .speed_mode = LEDC_LOW_SPEED_MODE,
             .hpoint     = 0,
             .timer_sel  = LEDC_TIMER_0
         },
@@ -131,7 +131,7 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
             .channel    = ch_v,
             .duty       = 0,
             .gpio_num   = gpio_v,
-            .speed_mode = LEDC_HIGH_SPEED_MODE,
+            .speed_mode = LEDC_LOW_SPEED_MODE,
             .hpoint     = 0,
             .timer_sel  = LEDC_TIMER_0
         },
@@ -140,7 +140,7 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
             .channel    = ch_w,
             .duty       = 0,
             .gpio_num   = gpio_v,
-            .speed_mode = LEDC_HIGH_SPEED_MODE,
+            .speed_mode = LEDC_LOW_SPEED_MODE,
             .hpoint     = 0,
             .timer_sel  = LEDC_TIMER_0
         },

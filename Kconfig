@@ -99,7 +99,7 @@ menu "espFoC Settings"
 
     config FOC_TASK_STACK_SIZE
         int "Task stack size of foc controller"
-        default 1536
+        default 3072
 
 endmenu
     

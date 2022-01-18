@@ -20,17 +20,22 @@ DRAM_ATTR static esp_foc_as5600_t rotor_sensors[CONFIG_NOOF_AXIS];
 IRAM_ATTR static float read_angle_sensor(int i2c_port) 
 {
     uint8_t write_buffer = AS5600_ANGLE_REGISTER_H;
-    uint16_t read_buffer;
+    uint8_t read_buffer[2];
+    uint16_t raw;
 
     i2c_master_write_read_device(i2c_port,
                             AS5600_SLAVE_ADDR,
                             &write_buffer,
                             1,
-                            (uint8_t *)&read_buffer,
+                            read_buffer,
                             2,
                             portMAX_DELAY);
 
-    return (float)(read_buffer);
+    raw = read_buffer[0];
+    raw <<= 8;
+    raw |= read_buffer[1];
+
+    return (float)(raw);
 }
 
 IRAM_ATTR  static void set_to_zero(esp_foc_rotor_sensor_t *self)
@@ -69,7 +74,7 @@ esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
     rotor_sensors[port].zero_offset = 0.0f;
 
     i2c_config_t conf = {
-        .mode = I2C_NUM_0,
+        .mode = I2C_MODE_MASTER,
         .sda_io_num = pin_sda,
         .scl_io_num = pin_scl,
         .sda_pullup_en = GPIO_PULLUP_ENABLE,

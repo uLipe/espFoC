@@ -1,7 +1,10 @@
 #include <string.h>
 #include <math.h>
 #include "esp_attr.h"
+#include "esp_log.h"
 #include "espFoC/esp_foc.h"
+
+static const char * tag = "ESP_FOC";
 
 static const float ALIGN_ANGLE_CONSTANT = ((3.0f * M_PI) / 2.0f) + (2.0f * M_PI); 
 
@@ -25,12 +28,16 @@ IRAM_ATTR void esp_foc_loop(void *arg)
     float theta;
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
 
+    ESP_LOGI(tag, "starting foc loop task for axis: %p", axis);
+
     for(;;) {
         now = (float) esp_foc_now_seconds();
         axis->dt =  now - axis->last_timestamp;
         axis->last_timestamp = now;
 
         theta = esp_foc_ticks_to_radians_normalized(axis); 
+
+        ESP_LOGD(tag, "rotor position: %f [ticks] at time: %f [s]", axis->rotor_shaft_ticks, now);
 
         #if CONFIG_ESP_FOC_USE_VELOCITY_CONTROLLER
             axis->inner_control_runs--;
@@ -64,6 +71,10 @@ IRAM_ATTR void esp_foc_loop(void *arg)
                     &axis->v_uvw[1], 
                     &axis->v_uvw[2]);
 
+        //ESP_LOGD(tag, "Calculated voltage U: %f [V]", axis->v_uvw[0]);
+        //ESP_LOGD(tag, "Calculated voltage V: %f [V]", axis->v_uvw[1]);
+        //ESP_LOGD(tag, "Calculated voltage W: %f [V]", axis->v_uvw[2]);
+
         axis->inverter_driver->set_voltages(axis->inverter_driver,
                                                 axis->v_uvw[0], 
                                                 axis->v_uvw[1], 
@@ -83,14 +94,17 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                     float motor_pole_pairs)
 {
     if(axis == NULL) {
+        ESP_LOGE(tag, "invalid axis object!");
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
     if(inverter == NULL) {
+        ESP_LOGE(tag, "invalid inverter driver!");
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
     if(rotor == NULL) {
+        ESP_LOGE(tag, "invalid rotor sensor driver!");
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
@@ -114,14 +128,18 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     #endif
 
     axis->motor_pole_pairs = motor_pole_pairs;
+    ESP_LOGI(tag, "Motor poler pairs: %f", motor_pole_pairs);
 
     axis->shaft_ticks_to_radians_ratio = ((2.0 * M_PI)) /
         axis->rotor_sensor_driver->get_counts_per_revolution(axis->rotor_sensor_driver);
+    ESP_LOGI(tag, "Shaft to ticks ratio: %f", axis->shaft_ticks_to_radians_ratio);
+
 
     axis->dc_link_voltage = 
         axis->inverter_driver->get_dc_link_voltage(axis->inverter_driver);
     axis->biased_dc_link_voltage = axis->dc_link_voltage * 0.5;
     axis->inverter_driver->set_voltages(axis->inverter_driver, 0.0, 0.0, 0.0);
+    ESP_LOGI(tag,"inverter dc-link voltage: %f[V]", axis->dc_link_voltage);
 
     esp_foc_sleep_ms(250);
     axis->rotor_aligned = ESP_FOC_ERR_NOT_ALIGNED;
@@ -132,9 +150,11 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 {
     if(axis == NULL) {
+        ESP_LOGE(tag, "Invalid axis object!");
         return ESP_FOC_ERR_INVALID_ARG;
     }
     if(axis->rotor_aligned != ESP_FOC_ERR_NOT_ALIGNED) {
+        ESP_LOGE(tag, "This rotor was aligned already!");
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
 
@@ -144,6 +164,8 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     axis->v_qd[0] = 0.1f * axis->biased_dc_link_voltage;
     axis->v_qd[1] = 0.0f;
     
+    ESP_LOGI(tag, "Starting to align the rotor");
+
     for (float i = 0.0f; i < 500.0f; i += 1.0f) {
         theta = esp_foc_normalize_angle(
             esp_foc_mechanical_to_elec_angle(
@@ -190,6 +212,8 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     axis->rotor_sensor_driver->set_to_zero(axis->rotor_sensor_driver);
     axis->rotor_aligned = ESP_FOC_OK;
 
+    ESP_LOGI(tag, "Done, rotor aligned!");
+
     return ESP_FOC_OK;
 }
 
@@ -198,15 +222,19 @@ IRAM_ATTR esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis,
                                         esp_foc_d_voltage *vd)
 {
     if(axis == NULL) {
+        ESP_LOGE(tag, "invalid axis object!");
         return ESP_FOC_ERR_INVALID_ARG;
     }
     if(vq == NULL) {
+        ESP_LOGE(tag, "invalid quadrature voltage");
         return ESP_FOC_ERR_INVALID_ARG;
     }
     if(vd == NULL) {
+        ESP_LOGE(tag, "invalid direct voltage");
         return ESP_FOC_ERR_INVALID_ARG;
     }
     if(axis->rotor_aligned != ESP_FOC_OK) {
+        ESP_LOGE(tag, "align rotor first!");
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
 
@@ -219,9 +247,11 @@ IRAM_ATTR esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis,
 IRAM_ATTR esp_foc_err_t esp_foc_set_target_velocity(esp_foc_axis_t *axis, float radians)
 {
     if(axis == NULL) {
+        ESP_LOGE(tag, "invalid axis object!");
         return ESP_FOC_ERR_INVALID_ARG;
     }
     if(axis->rotor_aligned != ESP_FOC_OK) {
+        ESP_LOGE(tag, "align rotor first!");
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
 
@@ -235,14 +265,17 @@ IRAM_ATTR esp_foc_err_t esp_foc_set_target_velocity(esp_foc_axis_t *axis, float 
 esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis)
 {
     if(axis == NULL) {
+        ESP_LOGE(tag, "invalid axis object!");
         return ESP_FOC_ERR_INVALID_ARG;
     }
     if(axis->rotor_aligned != ESP_FOC_OK) {
+        ESP_LOGE(tag, "align rotor first!");
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
     int ret = esp_foc_create_runner(esp_foc_loop, axis);
 
     if (ret < 0) {
+        ESP_LOGE(tag, "Check os interface, the runner creation has failed!");
         return ESP_FOC_ERR_UNKNOWN;
     }
 
