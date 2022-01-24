@@ -62,20 +62,6 @@ static inline float esp_foc_normalize_angle(float angle)
     return result;
 }
 
-static inline float esp_foc_saturate(float value, float limit) 
-{
-    float result = value;
-    if(value > limit) {
-        result = limit;
-    } else if (value < -limit) {
-        result = -limit;
-    }
-
-    return result;
-}
-
-#ifdef CONFIG_ESP_FOC_USE_TORQUE_CONTROLLER
-
 static inline void esp_foc_clarke_transform (float v_uvw[3], 
                                             float * v_aplha, 
                                             float *v_beta)
@@ -97,8 +83,6 @@ static inline void esp_foc_park_transform (float theta,
     *v_q = v_ab[1] * esp_foc_cosine(theta) -
         v_ab[0] * esp_foc_sine(theta);    
 }
-
-#endif
 
 static inline void esp_foc_inverse_clarke_transform (float v_ab[2],
                                                     float *v_u,

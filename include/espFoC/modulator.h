@@ -19,8 +19,6 @@ static inline void esp_foc_modulate_dq_voltage (float vbus_bias,
     *v_w += vbus_bias;   
 }
 
-#ifdef ESP_FOC_USE_TORQUE_CONTROLLER
-
 static inline void esp_foc_get_dq_currents(float theta,
                                         float i_u, 
                                         float i_v, 
@@ -33,5 +31,3 @@ static inline void esp_foc_get_dq_currents(float theta,
     esp_foc_clarke_transform(phase_current_frame,&ab_frame[0], &ab_frame[1]);
     esp_foc_park_transform(theta, ab_frame, i_d, i_q);
 }
-
-#endif

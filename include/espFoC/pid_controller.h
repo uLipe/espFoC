@@ -8,7 +8,21 @@ typedef struct {
     float integrator_limit;
     float accumulated_error;
     float previous_error;
+    float max_output_value;
+
 }esp_foc_pid_controller_t;
+
+static inline float esp_foc_saturate(float value, float limit) 
+{
+    float result = value;
+    if (value > limit) {
+        result = limit;
+    } else if (value < -limit) {
+        result = -limit;
+    }
+
+    return result;
+}
 
 static inline void esp_foc_pid_reset(esp_foc_pid_controller_t *self)
 {
@@ -35,6 +49,8 @@ static inline float  esp_foc_pid_update(esp_foc_pid_controller_t *self,
             (self->kd * error_diff);
 
     self->previous_error = error;
+
+    esp_foc_saturate(mv, self->max_output_value);
 
     return mv;
 }

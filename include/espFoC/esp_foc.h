@@ -9,6 +9,7 @@
 #include "espFoC/current_sensor_interface.h"
 #include "espFoC/rotor_sensor_interface.h"
 #include "espFoC/os_interface.h"
+#include "espFoC/esp_foc_units.h"
 
 typedef enum {
     ESP_FOC_OK = 0,
@@ -20,73 +21,40 @@ typedef enum {
     ESP_FOC_ERR_UNKNOWN = -128
 } esp_foc_err_t;
 
-typedef struct {
-    float raw;
-} esp_foc_q_voltage;
+#include "espFoC/esp_foc_axis.h"
 
 typedef struct {
-    float raw;
-} esp_foc_d_voltage;
+    float kp;
+    float ki;
+    float kd;
+    float integrator_limit;
+    float max_output_value;
+} esp_foc_control_settings_t;
 
 typedef struct {
-    float v_uvw[3];
-    float radians;
-    float shaft_ticks;
-    float v_qd[2];
-} esp_foc_telemetry_t;
-
-typedef struct {
-    float v_qd[2];
-    float v_ab[2];
-    float v_uvw[3];
-
-    float i_uvw[3];
-    float i_ab[2];
-    float i_qd[2];
-
-    float target_speed;
-    float current_speed;
-
-    float rotor_position;
-    float rotor_position_prev;
-    float rotor_shaft_ticks;
-    float shaft_ticks_to_radians_ratio;
-
-    float dt;
-    float velocity_dt;
-    float last_timestamp;
-    float dc_link_voltage;
-    float biased_dc_link_voltage;
-
-    float motor_pole_pairs;
-    int inner_control_runs;
-
-    esp_foc_err_t rotor_aligned;
-
-    esp_foc_pid_controller_t velocity_controller;
-    esp_foc_pid_controller_t torque_controller;
-    esp_foc_pid_controller_t position_control;
-    esp_foc_lp_filter_t velocity_filter;
-    esp_foc_lp_filter_t current_filters[2];
-
-    esp_foc_inverter_t * inverter_driver;
-    esp_foc_rotor_sensor_t *rotor_sensor_driver;
-
-} esp_foc_axis_t;
+    esp_foc_control_settings_t torque_control_settings[2];
+    esp_foc_control_settings_t velocity_control_settings;
+    esp_foc_control_settings_t position_control_settings;
+    int downsampling_speed_rate;
+    int downsampling_position_rate;
+    int motor_pole_pairs;
+} esp_foc_motor_control_settings_t;
 
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                     esp_foc_inverter_t *inverter,
                                     esp_foc_rotor_sensor_t *rotor,
-                                    float motor_pole_pairs);
+                                    esp_foc_motor_control_settings_t settings);
 
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis);
 
-float esp_foc_get_runner_dt(esp_foc_axis_t *axis);
+esp_foc_seconds esp_foc_get_runner_dt(esp_foc_axis_t *axis);
 
 esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis,
-                                        esp_foc_q_voltage *vq,
-                                        esp_foc_d_voltage *vd);
+                                        esp_foc_q_voltage uq,
+                                        esp_foc_d_voltage ud);                                        
 
-esp_foc_err_t esp_foc_set_target_velocity(esp_foc_axis_t *axis, float radians);
+esp_foc_err_t esp_foc_set_target_speed(esp_foc_axis_t *axis, esp_foc_radians_per_second speed);
+
+esp_foc_err_t esp_foc_set_target_position(esp_foc_axis_t *axis, esp_foc_radians position);
 
 esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis);

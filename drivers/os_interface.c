@@ -21,7 +21,7 @@ int esp_foc_create_runner(foc_loop_runner runner, void *argument)
 
 void esp_foc_sleep_ms(int sleep_ms)
 {
-    usleep(sleep_ms);
+    usleep(sleep_ms * 1000);
 }
 
 void esp_foc_runner_yield(void)
