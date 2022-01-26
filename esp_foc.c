@@ -32,7 +32,7 @@ static inline void esp_foc_position_control_loop(esp_foc_axis_t *axis)
         axis->target_speed = esp_foc_pid_update( &axis->position_controller,
                                             axis->target_position,
                                             axis->rotor_position);
-        axis->downsampling_speed = axis->downsampling_speed_reload_value;
+        axis->downsampling_position = axis->downsampling_position_reload_value;
     }
 }
 
