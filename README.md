@@ -1,4 +1,4 @@
-# [WIP] espFoC: Vector controller for PMSM motors for ESP-IDF
+# [WIP] espFoC: Vector FoC controller for PMSM motors for ESP-IDF
 
 ![Build](https://github.com/uLipe/espFoC/workflows/Build/badge.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -13,12 +13,11 @@ espressif framework.
 
 ## Features:
 * Voltage mode control;
-* Optional closed-loop velocity control;
+* Optional closed-loop velocity control and position control;
 * Single-precision Floating point implementation;
 
 ## Limitations:
-* Initial support for esp32 only;
-* No Sensorless control support;
+* Support for esp32 and esp32s3 only;
 * Requires and rotor position sensor, for example, incremental encoder.
 * No torque controller, but planned.
 
