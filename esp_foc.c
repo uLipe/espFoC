@@ -6,8 +6,6 @@
 
 static const char * tag = "ESP_FOC";
 
-static const float ALIGN_ANGLE_CONSTANT = ((3.0f * M_PI) / 2.0f) + (2.0f * M_PI); 
-
 static inline float esp_foc_ticks_to_radians_normalized(esp_foc_axis_t *axis)
 {
     axis->rotor_shaft_ticks = 
@@ -89,7 +87,7 @@ IRAM_ATTR void esp_foc_loop(void *arg)
 
         theta = esp_foc_ticks_to_radians_normalized(axis); 
 
-        ESP_LOGD(tag, "rotor position: %f [ticks] at time: %f [s]", axis->rotor_shaft_ticks, now);
+        ESP_LOGD(tag, "rotor position: %f [ticks] at time: %f [s], dt %f [s]", axis->rotor_shaft_ticks, now, axis->dt);
 
         esp_foc_position_control_loop(axis);
         esp_foc_velocity_control_loop(axis);
@@ -102,10 +100,6 @@ IRAM_ATTR void esp_foc_loop(void *arg)
                         &axis->u_u.raw, 
                         &axis->u_v.raw, 
                         &axis->u_w.raw);
-
-        ESP_LOGD(tag, "Calculated voltage U: %f [V]", axis->u_u.raw);
-        ESP_LOGD(tag, "Calculated voltage V: %f [V]", axis->u_v.raw);
-        ESP_LOGD(tag, "Calculated voltage W: %f [V]", axis->u_w.raw);
 
         axis->inverter_driver->set_voltages(axis->inverter_driver,
                                             axis->u_u.raw, 
@@ -220,64 +214,58 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
 
+    float current_ticks = 0.0f, previous_ticks = 0.0f;
     axis->rotor_aligned = ESP_FOC_ERR_ALIGNMENT_IN_PROGRESS;
-
-    float theta = 0.0;
-    axis->u_q.raw = 0.1f * axis->biased_dc_link_voltage;
-    axis->u_d.raw = 0.0f;
     
     ESP_LOGI(tag, "Starting to align the rotor");
 
-    for (float i = 0.0f; i < 500.0f; i += 1.0f) {
-        theta = esp_foc_normalize_angle(
-            esp_foc_mechanical_to_elec_angle(
-                (ALIGN_ANGLE_CONSTANT * i) / 500.0f, axis->motor_pole_pairs
-            )
-        );
-
-        esp_foc_modulate_dq_voltage(axis->biased_dc_link_voltage, 
-                        theta, 
-                        axis->u_d.raw, 
-                        axis->u_q.raw, 
-                        &axis->u_u.raw, 
-                        &axis->u_v.raw, 
-                        &axis->u_w.raw);
-
-        axis->inverter_driver->set_voltages(axis->inverter_driver,
-                                            axis->u_u.raw, 
-                                            axis->u_v.raw, 
-                                            axis->u_w.raw);
-        esp_foc_sleep_ms(CONFIG_ESP_FOC_ALIGN_STEP_DELAY_MS);
-    }
-
-    for (float i = 500.0f; i != 0.0f; i -= 1.0f) {
-        theta = esp_foc_normalize_angle(
-            esp_foc_mechanical_to_elec_angle(
-                (ALIGN_ANGLE_CONSTANT * i) / 500.0f, axis->motor_pole_pairs
-            )
-        );
-
-        esp_foc_modulate_dq_voltage(axis->biased_dc_link_voltage, 
-                        theta, 
-                        axis->u_d.raw, 
-                        axis->u_q.raw, 
-                        &axis->u_u.raw, 
-                        &axis->u_v.raw, 
-                        &axis->u_w.raw);
-
-        axis->inverter_driver->set_voltages(axis->inverter_driver,
-                                            axis->u_u.raw, 
-                                            axis->u_v.raw, 
-                                            axis->u_w.raw);
-        esp_foc_sleep_ms(CONFIG_ESP_FOC_ALIGN_STEP_DELAY_MS);
-    }
-
+    axis->inverter_driver->set_voltages(axis->inverter_driver,
+                                        0.0f,
+                                        0.0f,
+                                        0.0f);
     esp_foc_sleep_ms(250);
-    axis->inverter_driver->set_voltages(axis->inverter_driver, axis->dc_link_voltage * 0.2f, 0.0, 0.0);
+    current_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+    previous_ticks = current_ticks;
+
+    do {
+        axis->inverter_driver->set_voltages(axis->inverter_driver,
+                                            0.2 * axis->biased_dc_link_voltage,
+                                            0.0f,
+                                            0.0f);
+        current_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+        ESP_LOGD(tag, "rotor ticks reading: %f [ticks] for Coil U", current_ticks);
+        previous_ticks = current_ticks;
+    } while (fabs(current_ticks - previous_ticks) > 5.0f);
+
+    ESP_LOGI(tag, "rotor ticks offset: %f [ticks] for Coil U", current_ticks);
+
+    axis->inverter_driver->set_voltages(axis->inverter_driver,
+                                        0.0f,
+                                        0.0f,
+                                        0.0f);
     esp_foc_sleep_ms(250);
+    current_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+    previous_ticks = current_ticks;
+
+    do {
+        axis->inverter_driver->set_voltages(axis->inverter_driver,
+                                            0.0f,
+                                            0.2 * axis->biased_dc_link_voltage,
+                                            0.0f);
+        current_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+        ESP_LOGD(tag, "rotor ticks reading: %f [ticks] for Coil V", current_ticks);
+        previous_ticks = current_ticks;
+    } while (fabs(current_ticks - previous_ticks) > 5.0f);
+
+    ESP_LOGI(tag, "rotor ticks offset: %f [ticks] for Coil V", current_ticks);
+
     axis->rotor_sensor_driver->set_to_zero(axis->rotor_sensor_driver);
+    axis->inverter_driver->set_voltages(axis->inverter_driver,
+                                        0.0f,
+                                        0.0f,
+                                        0.0f);
+    esp_foc_sleep_ms(250);
     axis->rotor_aligned = ESP_FOC_OK;
-
     ESP_LOGI(tag, "Done, rotor aligned!");
 
     return ESP_FOC_OK;

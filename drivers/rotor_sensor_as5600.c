@@ -4,20 +4,24 @@
 #include "driver/i2c.h"
 #include "esp_err.h"
 #include "esp_attr.h"
+#include "esp_log.h"
 
 #define AS5600_SLAVE_ADDR 0x36
-#define AS5600_ANGLE_REGISTER_H 0x0C
+#define AS5600_ANGLE_REGISTER_H 0x0E
 #define AS5600_PULSES_PER_REVOLUTION 4096.0f
+#define AS5600_READING_MASK 0xFFF 
+
+const char *tag = "ROTOR_SENSOR_AS5600";
 
 typedef struct {
-    float zero_offset;
+    uint16_t zero_offset;
     int i2c_port;
     esp_foc_rotor_sensor_t interface;
 }esp_foc_as5600_t;
 
 DRAM_ATTR static esp_foc_as5600_t rotor_sensors[CONFIG_NOOF_AXIS];
 
-IRAM_ATTR static float read_angle_sensor(int i2c_port) 
+IRAM_ATTR static uint16_t read_angle_sensor(int i2c_port) 
 {
     uint8_t write_buffer = AS5600_ANGLE_REGISTER_H;
     uint8_t read_buffer[2];
@@ -35,14 +39,16 @@ IRAM_ATTR static float read_angle_sensor(int i2c_port)
     raw <<= 8;
     raw |= read_buffer[1];
 
-    return (float)(raw);
+    return raw;
 }
 
 IRAM_ATTR  static void set_to_zero(esp_foc_rotor_sensor_t *self)
 {
     esp_foc_as5600_t *obj =
         __containerof(self,esp_foc_as5600_t, interface);
+
     obj->zero_offset = read_angle_sensor(obj->i2c_port);
+    ESP_LOGI(tag, "Setting %d [ticks] as offset.", obj->zero_offset);
 }
 
 IRAM_ATTR static float get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
@@ -56,7 +62,7 @@ IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
     esp_foc_as5600_t *obj =
         __containerof(self,esp_foc_as5600_t, interface);
 
-    return(read_angle_sensor(obj->i2c_port) - obj->zero_offset);
+    return((float)((read_angle_sensor(obj->i2c_port) - obj->zero_offset) & AS5600_READING_MASK));
 }
 
 esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
@@ -71,7 +77,7 @@ esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
     rotor_sensors[port].interface.read_counts = read_counts;
     rotor_sensors[port].interface.set_to_zero = set_to_zero;
     rotor_sensors[port].i2c_port = I2C_NUM_0;
-    rotor_sensors[port].zero_offset = 0.0f;
+    rotor_sensors[port].zero_offset = 0;
 
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
