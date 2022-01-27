@@ -343,3 +343,92 @@ esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis)
 
     return ESP_FOC_OK;
 }
+
+esp_foc_err_t esp_foc_test_motor(esp_foc_inverter_t *inverter,
+                                esp_foc_rotor_sensor_t *rotor,
+                                esp_foc_motor_control_settings_t settings)
+{
+    if(inverter == NULL) {
+        ESP_LOGE(tag, "invalid inverter driver!");
+        return ESP_FOC_ERR_INVALID_ARG;
+    }
+
+    if(rotor == NULL) {
+        ESP_LOGE(tag, "invalid rotor sensor driver!");
+        return ESP_FOC_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(tag, "Starting motor test, check the spinning direction !");
+
+    inverter->set_voltages(inverter,
+                            0.2 * (inverter->get_dc_link_voltage(inverter) / 2) , 
+                            0.0f, 
+                            0.0f);
+    esp_foc_sleep_ms(250);
+
+    inverter->set_voltages(inverter,
+                            0.0f,
+                            0.2 * (inverter->get_dc_link_voltage(inverter) / 2) ,  
+                            0.0f);
+    esp_foc_sleep_ms(250);
+
+    /* Turn motor in one direction */
+    for(float i = 0.0f; i < 2 * M_PI * settings.motor_pole_pairs; i += 0.05) {
+        esp_foc_u_voltage u;
+        esp_foc_v_voltage v;
+        esp_foc_w_voltage w;
+        float electrical_angle = settings.motor_pole_pairs * rotor->read_counts(rotor) * 
+                                (((2.0 * M_PI)) / rotor->get_counts_per_revolution(rotor));
+
+        ESP_LOGI(tag, "SVM calculated angle: %f [rad] Caculated electrical angle: %f [rad]", i, electrical_angle);
+
+        esp_foc_modulate_dq_voltage(inverter->get_dc_link_voltage(inverter) / 2, 
+                i, 
+                0.2 * (inverter->get_dc_link_voltage(inverter) / 2), 
+                0.0, 
+                &u.raw, 
+                &v.raw, 
+                &w.raw);
+
+        inverter->set_voltages(inverter,
+                                u.raw, 
+                                v.raw, 
+                                w.raw);
+
+        esp_foc_sleep_ms(10);
+    }
+
+    /* Now in another: */
+    for(float i =  2 * M_PI * settings.motor_pole_pairs; i > 0.0f; i -= 0.05) {
+        esp_foc_u_voltage u;
+        esp_foc_v_voltage v;
+        esp_foc_w_voltage w;
+        float electrical_angle = settings.motor_pole_pairs * rotor->read_counts(rotor) * 
+                                (((2.0 * M_PI)) / rotor->get_counts_per_revolution(rotor));
+
+        ESP_LOGI(tag, "SVM calculated angle: %f [rad] Caculated electrical angle: %f [rad]", i, electrical_angle);
+
+        esp_foc_modulate_dq_voltage(inverter->get_dc_link_voltage(inverter) / 2, 
+                i, 
+                0.2 * (inverter->get_dc_link_voltage(inverter) / 2), 
+                0.0, 
+                &u.raw, 
+                &v.raw, 
+                &w.raw);
+
+        inverter->set_voltages(inverter,
+                                u.raw, 
+                                v.raw, 
+                                w.raw);
+
+        esp_foc_sleep_ms(10);
+    }
+
+    inverter->set_voltages(inverter,
+                            0.0f,
+                            0.0f,  
+                            0.0f);
+
+    ESP_LOGI(tag, "Test finished keep or switch motor phases depending on resultant motion");
+    return ESP_FOC_OK;
+}
