@@ -10,6 +10,9 @@ typedef struct {
     esp_foc_q_voltage u_q;
     esp_foc_d_voltage u_d;
 
+    esp_foc_q_voltage target_u_q;
+    esp_foc_d_voltage target_u_d;
+
     esp_foc_alpha_voltage u_alpha;
     esp_foc_beta_voltage u_beta;
 

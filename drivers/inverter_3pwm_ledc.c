@@ -139,7 +139,7 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
         {
             .channel    = ch_w,
             .duty       = 0,
-            .gpio_num   = gpio_v,
+            .gpio_num   = gpio_w,
             .speed_mode = LEDC_LOW_SPEED_MODE,
             .hpoint     = 0,
             .timer_sel  = LEDC_TIMER_0
