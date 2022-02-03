@@ -1,5 +1,6 @@
 #include <string.h>
 #include <math.h>
+#include <stdbool.h>
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "espFoC/esp_foc.h"
@@ -113,6 +114,106 @@ IRAM_ATTR void esp_foc_loop(void *arg)
     }
 }
 
+static esp_foc_err_t esp_foc_map_motor_phases(esp_foc_axis_t *axis)
+{
+    bool phase_seq_found;
+    uint8_t matches = 0;
+    float ticks = 0.0f, previous = 0.0f;
+
+    ESP_LOGI(tag, "Starting to search motor phase sequence!");
+    axis->inverter_driver->set_voltages(axis->inverter_driver,
+                                        0.0f,
+                                        0.0f,
+                                        0.0f);
+ 
+    
+    do {
+
+        float u = 0.4 * axis->biased_dc_link_voltage, v = 0.0f , w = 0.0f;
+        phase_seq_found = true;
+        ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+        previous = ticks;
+
+        ESP_LOGI(tag, "Initial ticks: %f", ticks);
+
+        do {
+            axis->inverter_driver->set_voltages(axis->inverter_driver,
+                                                u,
+                                                v,
+                                                w);
+            esp_foc_sleep_ms(100);
+            ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+            ESP_LOGI(tag, "ticks in CW: %f", ticks);
+
+            if(ticks > previous) {
+                matches++;
+                float tmp;
+
+                tmp = w;
+                w = v;
+                v = u;
+                u = tmp;
+
+            } else {
+                ESP_LOGE(tag, "Wrong phase sequence for CW, trying next...");
+                matches = 0;
+                u = 0.4 * axis->biased_dc_link_voltage, v = 0.0f , w = 0.0f;
+                axis->inverter_driver->phase_remap(axis->inverter_driver);
+            }
+            previous = ticks;
+
+        } while(matches > 4);
+
+        ESP_LOGI(tag, "Correct phases in CW, now the CCW");
+        matches = 0;
+        u = 0.0f , v = 0.0f , w = 0.4 * axis->biased_dc_link_voltage;
+        ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+        previous = ticks;
+        ESP_LOGI(tag, "Initial ticks: %f", ticks);
+
+        do {
+            axis->inverter_driver->set_voltages(axis->inverter_driver,
+                                                u,
+                                                v,
+                                                w);
+            esp_foc_sleep_ms(100);
+            ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+            ESP_LOGI(tag, "ticks in CCW: %f", ticks);
+            
+            if(ticks < previous) {
+                matches++;
+                float tmp;
+
+                tmp = u;
+                u = v;
+                v= w;
+                w = tmp;
+
+            } else {
+                ESP_LOGE(tag, "Wrong phase sequence for CCW, restarting all...");
+                axis->inverter_driver->phase_remap(axis->inverter_driver);
+                matches = 0;
+                phase_seq_found = false;
+                break;
+            }
+
+            previous = ticks;
+
+        } while(matches > 4);
+
+        axis->inverter_driver->set_voltages(axis->inverter_driver,
+                                            0.0f,
+                                            0.0f,
+                                            0.0f);
+
+    } while (!phase_seq_found);
+
+    ESP_LOGI(tag, "Motor correct phase found!");
+
+    return ESP_FOC_OK;
+}
+
+
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                     esp_foc_inverter_t *inverter,
                                     esp_foc_rotor_sensor_t *rotor,
@@ -218,6 +319,12 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
         ESP_LOGE(tag, "This rotor was aligned already!");
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
+
+    /* map phase sequenci before do anything. */
+    // if(esp_foc_map_motor_phases(axis) != ESP_FOC_OK) {
+    //     ESP_LOGE(tag, "Impossible to find correct phase sequence!");
+    //     return ESP_FOC_ERR_AXIS_INVALID_STATE;
+    // }
 
     float current_ticks = 0.0f, previous_ticks = 0.0f;
     axis->rotor_aligned = ESP_FOC_ERR_ALIGNMENT_IN_PROGRESS;

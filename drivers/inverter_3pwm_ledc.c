@@ -80,6 +80,11 @@ IRAM_ATTR static void set_inverter_callback(esp_foc_inverter_t *self,
     (void)callback;
 }
 
+IRAM_ATTR static void phase_remap(esp_foc_inverter_t *self)
+{
+    (void)self;
+}
+
 esp_err_t inverter_3pwm_ledc_init()
 {
     ledc_timer_config_t ledc_timer = {
@@ -113,6 +118,7 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
     ledc[port].interface.get_dc_link_voltage = get_dc_link_voltage;
     ledc[port].interface.set_voltages = set_voltages;
     ledc[port].interface.set_inverter_callback = set_inverter_callback;
+    ledc[port].interface.phase_remap = phase_remap;
     ledc[port].ledc_channel[0] = ch_u;
     ledc[port].ledc_channel[1] = ch_v;
     ledc[port].ledc_channel[2] = ch_w;

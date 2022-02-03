@@ -12,5 +12,5 @@ struct esp_foc_inverter_s {
                         float v_u,
                         float v_v,
                         float v_w);
-
+    void (*phase_remap)(esp_foc_inverter_t *self);
 };
