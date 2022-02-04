@@ -23,6 +23,11 @@ typedef enum {
 
 #include "espFoC/esp_foc_axis.h"
 
+typedef enum {
+    ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
+    ESP_FOC_MOTOR_NATURAL_DIRECTION_CCW,
+} esp_foc_motor_direction_t;
+
 typedef struct {
     float kp;
     float ki;
@@ -38,6 +43,7 @@ typedef struct {
     int downsampling_speed_rate;
     int downsampling_position_rate;
     int motor_pole_pairs;
+    esp_foc_motor_direction_t natural_direction;
 } esp_foc_motor_control_settings_t;
 
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,

@@ -45,6 +45,7 @@ typedef struct {
     float dc_link_voltage;
     float biased_dc_link_voltage;
     float motor_pole_pairs;
+    float natural_direction;
 
     esp_foc_err_t rotor_aligned;
     esp_foc_pid_controller_t velocity_controller;
