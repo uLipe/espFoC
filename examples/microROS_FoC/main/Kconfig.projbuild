@@ -1,0 +1,40 @@
+menu "MicroROS plus FoC example menu"
+    
+    config MICRO_ROS_APP_STACK
+        int "Stack the micro-ROS app (Bytes)"
+        default 16000
+        help
+        Stack size in Bytes of the micro-ROS app
+
+    config MICRO_ROS_APP_TASK_PRIO
+        int "Priority of the micro-ROS app"
+        default 5
+        help
+        Priority of micro-ros task higher value means higher priority
+
+    config FOC_PWM_U_PIN
+        int "Gpio number for PWM of phase U"
+        range 0 34
+        default 14
+
+    config FOC_PWM_V_PIN
+        int "Gpio number for PWM of phase V"
+        range 0 34
+        default 13
+
+    config FOC_PWM_W_PIN
+        int "Gpio number for PWM of phase W"
+        range 0 34
+        default 12
+
+    config FOC_ENCODER_SDA_PIN
+        int "Encoder sensor sda pin value"
+        range 0 34
+        default 18
+        
+    config FOC_ENCODER_SCL_PIN
+        int "Encoder sensor scl pin value"
+        range 0 34
+        default 19
+
+endmenu

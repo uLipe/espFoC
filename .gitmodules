@@ -1,0 +1,3 @@
+[submodule "examples/microROS_FoC/components/micro_ros_espidf"]
+	path = examples/microROS_FoC/components/micro_ros_espidf
+	url = https://github.com/micro-ROS/micro_ros_espidf_component
