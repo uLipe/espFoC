@@ -406,3 +406,28 @@ esp_foc_err_t esp_foc_test_motor(esp_foc_inverter_t *inverter,
     ESP_LOGI(tag, "Test finished keep or switch motor phases depending on resultant motion");
     return ESP_FOC_OK;
 }
+
+esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_data_t *control_data)
+{
+    if(axis == NULL) {
+        ESP_LOGE(tag, "invalid axis object!");
+        return ESP_FOC_ERR_INVALID_ARG;
+    }
+
+    if(control_data == NULL) {
+        ESP_LOGE(tag, "invalid control data object!");
+        return ESP_FOC_ERR_INVALID_ARG;
+    }
+
+    control_data->u = axis->u_u;
+    control_data->v = axis->u_v;
+    control_data->w = axis->u_w;
+
+    control_data->out_q = axis->u_q;
+    control_data->out_d = axis->u_d;
+
+    control_data->position.raw = axis->rotor_position / (axis->motor_pole_pairs);
+    control_data->speed.raw = axis->current_speed;
+
+    return ESP_FOC_OK;
+}

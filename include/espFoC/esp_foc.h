@@ -46,6 +46,19 @@ typedef struct {
     esp_foc_motor_direction_t natural_direction;
 } esp_foc_motor_control_settings_t;
 
+typedef struct {
+    esp_foc_u_voltage u;
+    esp_foc_v_voltage v;
+    esp_foc_w_voltage w;
+
+    esp_foc_q_voltage out_q;
+    esp_foc_d_voltage out_d;
+
+    esp_foc_radians position;
+    esp_foc_radians_per_second speed;
+} esp_foc_control_data_t;
+
+
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                     esp_foc_inverter_t *inverter,
                                     esp_foc_rotor_sensor_t *rotor,
@@ -62,6 +75,8 @@ esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis,
 esp_foc_err_t esp_foc_set_target_speed(esp_foc_axis_t *axis, esp_foc_radians_per_second speed);
 
 esp_foc_err_t esp_foc_set_target_position(esp_foc_axis_t *axis, esp_foc_radians position);
+
+esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_data_t *control_data);
 
 esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis);
 
