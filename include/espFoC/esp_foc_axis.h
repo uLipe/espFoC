@@ -39,6 +39,7 @@ typedef struct {
     float target_position;
     float rotor_position;
     float rotor_shaft_ticks;
+    float rotor_elec_angle;
     int downsampling_position_reload_value;
     int downsampling_position;
 
@@ -46,6 +47,7 @@ typedef struct {
     float biased_dc_link_voltage;
     float motor_pole_pairs;
     float natural_direction;
+    float sample_rate;
 
     esp_foc_err_t rotor_aligned;
     esp_foc_pid_controller_t velocity_controller;

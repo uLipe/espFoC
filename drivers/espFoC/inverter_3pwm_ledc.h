@@ -4,8 +4,6 @@
 #include "driver/ledc.h"
 #include "esp_err.h"
 
-esp_err_t inverter_3pwm_ledc_init();
-
 esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
                                         ledc_channel_t ch_v,
                                         ledc_channel_t ch_w,

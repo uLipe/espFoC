@@ -51,7 +51,7 @@ void subscription_callback(const void * msgin)
 {
     const std_msgs__msg__Float32 * msg = (const std_msgs__msg__Float32 *)msgin;
     ESP_LOGI(TAG, "Received new VQ command: %f [V]", msg->data);
-    esp_foc_set_target_voltage(&axis, (esp_foc_q_voltage){.raw = msg->data}, (esp_foc_d_voltage){.raw = 0.0});
+    esp_foc_set_target_voltage(&axis, (esp_foc_q_voltage){.raw = msg->data}, (esp_foc_d_voltage){.raw = -3.0});
 }
 
 static void micro_ros_task(void * arg)
@@ -92,7 +92,6 @@ static void micro_ros_task(void * arg)
 
 static void initialize_foc_drivers(void) 
 {
-    inverter_3pwm_ledc_init();
 
     inverter = inverter_3pwm_ledc_new(
         LEDC_CHANNEL_0,

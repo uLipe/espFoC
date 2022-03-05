@@ -15,7 +15,6 @@ static esp_foc_motor_control_settings_t settings = {
 
 static void initialize_foc_drivers(void) 
 {
-    inverter_3pwm_ledc_init();
 
     inverter = inverter_3pwm_ledc_new(
         LEDC_CHANNEL_0,

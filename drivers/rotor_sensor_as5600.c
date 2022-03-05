@@ -19,6 +19,8 @@ typedef struct {
     esp_foc_rotor_sensor_t interface;
 }esp_foc_as5600_t;
 
+static bool i2c_bus_configured = false;
+
 DRAM_ATTR static esp_foc_as5600_t rotor_sensors[CONFIG_NOOF_AXIS];
 
 IRAM_ATTR static uint16_t read_angle_sensor(int i2c_port) 
@@ -79,17 +81,21 @@ esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
     rotor_sensors[port].i2c_port = I2C_NUM_0;
     rotor_sensors[port].zero_offset = 0;
 
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = pin_sda,
-        .scl_io_num = pin_scl,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 400000,
-    };
+    if(!i2c_bus_configured) {
+        i2c_config_t conf = {
+            .mode = I2C_MODE_MASTER,
+            .sda_io_num = pin_sda,
+            .scl_io_num = pin_scl,
+            .sda_pullup_en = GPIO_PULLUP_ENABLE,
+            .scl_pullup_en = GPIO_PULLUP_ENABLE,
+            .master.clk_speed = 400000,
+        };
 
-    i2c_param_config(I2C_NUM_0, &conf);
-    i2c_driver_install(I2C_NUM_0, conf.mode, 0, 0, 0);
+        i2c_param_config(I2C_NUM_0, &conf);
+        i2c_driver_install(I2C_NUM_0, conf.mode, 0, 0, 0);
+
+        i2c_bus_configured = true;
+    }
 
     return &rotor_sensors[port].interface;
 }

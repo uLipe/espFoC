@@ -25,7 +25,6 @@ static esp_foc_motor_control_settings_t settings = {
 
 static void initialize_foc_drivers(void) 
 {
-    inverter_3pwm_ledc_init();
 
     inverter = inverter_3pwm_ledc_new(
         LEDC_CHANNEL_0,
@@ -60,6 +59,8 @@ static void initialize_foc_drivers(void)
 
 void app_main(void)
 {
+    esp_foc_control_data_t control_data;
+
     ESP_LOGI(TAG, "Initializing the esp foc motor controller!");
 
     initialize_foc_drivers();
@@ -76,4 +77,12 @@ void app_main(void)
 
     /* Set velocity by using state vector given by vq+vd */
     esp_foc_set_target_voltage(&axis, (esp_foc_q_voltage){.raw = 4.0}, (esp_foc_d_voltage){.raw = 0.0});
+
+    while(1) {
+        esp_foc_sleep_ms(100);
+        esp_foc_get_control_data(&axis, &control_data);        
+        ESP_LOGI(TAG, "Current quadrature voltage: %f [V]", control_data.out_q.raw);
+        ESP_LOGI(TAG, "Current direct voltage: %f [V]", control_data.out_d.raw);
+        ESP_LOGI(TAG, "Current mechanical position: %f [rad]", control_data.position.raw);
+    }
 }
