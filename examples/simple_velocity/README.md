@@ -16,4 +16,4 @@ $ idf.py menuconfig
 ```
 $ idf.py build flash monitor
 ```
-* The motor should start to moving with constant speed.
+* The motor should start to moving ramping up and down the speed.

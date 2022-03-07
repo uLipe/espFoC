@@ -58,5 +58,7 @@ typedef struct {
 
     esp_foc_inverter_t * inverter_driver;
     esp_foc_rotor_sensor_t *rotor_sensor_driver;
+    esp_foc_event_handle_t ev_handle;
+    esp_foc_event_handle_t control_handle;
 
 } esp_foc_axis_t;

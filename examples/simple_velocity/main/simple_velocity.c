@@ -60,6 +60,7 @@ static void initialize_foc_drivers(void)
 void app_main(void)
 {
     esp_foc_control_data_t control_data;
+    esp_foc_q_voltage uq = {.raw = -6.0f};
 
     ESP_LOGI(TAG, "Initializing the esp foc motor controller!");
 
@@ -76,13 +77,22 @@ void app_main(void)
     esp_foc_run(&axis);
 
     /* Set velocity by using state vector given by vq+vd */
-    esp_foc_set_target_voltage(&axis, (esp_foc_q_voltage){.raw = 4.0}, (esp_foc_d_voltage){.raw = 0.0});
+    esp_foc_set_target_voltage(&axis, (esp_foc_q_voltage){.raw = 0.0}, (esp_foc_d_voltage){.raw = 0.0});
 
     while(1) {
-        esp_foc_sleep_ms(100);
+        esp_foc_sleep_ms(200);
+
+        /* ramp the velocity */
+        if(uq.raw > 6.0f) {
+            uq.raw = -6.0f;
+        } else {
+            uq.raw += 0.2f;
+        }
+
         esp_foc_get_control_data(&axis, &control_data);        
         ESP_LOGI(TAG, "Current quadrature voltage: %f [V]", control_data.out_q.raw);
         ESP_LOGI(TAG, "Current direct voltage: %f [V]", control_data.out_d.raw);
         ESP_LOGI(TAG, "Current mechanical position: %f [rad]", control_data.position.raw);
+        esp_foc_set_target_voltage(&axis, uq, (esp_foc_d_voltage){.raw = 0.0});
     }
 }

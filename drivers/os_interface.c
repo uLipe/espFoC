@@ -10,10 +10,11 @@
 static const float scale = 0.000001f;
 static uint32_t cp0_regs[18];
 static uint32_t cp_state;
+static portMUX_TYPE spinlock =  portMUX_INITIALIZER_UNLOCKED;
 
-int esp_foc_create_runner(foc_loop_runner runner, void *argument)
+int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority)
 {
-    int ret = xTaskCreatePinnedToCore(runner,"", CONFIG_FOC_TASK_STACK_SIZE, argument, CONFIG_FOC_TASK_PRIORITY, NULL, PRO_CPU_NUM);
+    int ret = xTaskCreatePinnedToCore(runner,"", CONFIG_FOC_TASK_STACK_SIZE, argument, priority, NULL, APP_CPU_NUM);
 
     if (ret != pdPASS) {
         return -ESP_ERR_NO_MEM;
@@ -42,9 +43,10 @@ float esp_foc_now_seconds(void)
 void esp_foc_fpu_isr_enter(void)
 {
     cp_state = xthal_get_cpenable();
+
     if(cp_state) {
-        xthal_save_cp0(cp0_regs);
-    } else {        
+        xthal_save_cp0(cp0_regs);   
+    } else {
         xthal_set_cpenable(1);
     }
 }
@@ -56,6 +58,34 @@ void esp_foc_fpu_isr_leave(void)
     } else {
         xthal_set_cpenable(0);
     }
+
 }
 
+void esp_foc_critical_enter(void)
+{
+    portENTER_CRITICAL(&spinlock);
+}
 
+void esp_foc_critical_leave(void)
+{
+    portEXIT_CRITICAL(&spinlock);
+}
+
+esp_foc_event_handle_t esp_foc_get_event_handle(void)
+{
+    return ((esp_foc_event_handle_t) xTaskGetCurrentTaskHandle());
+}
+
+void esp_foc_wait_notifier(void)
+{
+    ulTaskNotifyTake(pdFALSE ,portMAX_DELAY);
+}
+
+void esp_foc_send_notification(esp_foc_event_handle_t handle)
+{
+    BaseType_t wake;
+    vTaskNotifyGiveFromISR((TaskHandle_t)handle, &wake);
+    if (wake == pdTRUE) {
+        portYIELD_FROM_ISR();
+    }
+}

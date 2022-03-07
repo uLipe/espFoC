@@ -11,9 +11,14 @@ static inline float esp_foc_ticks_to_radians_normalized(esp_foc_axis_t *axis)
 {
     axis->rotor_shaft_ticks = 
         axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+    
+    esp_foc_critical_enter();
+
     axis->rotor_position = 
         axis->rotor_shaft_ticks * axis->shaft_ticks_to_radians_ratio * axis->natural_direction;
-    
+
+    esp_foc_critical_leave();
+
     return esp_foc_normalize_angle(
         esp_foc_mechanical_to_elec_angle(
             axis->rotor_position, axis->motor_pole_pairs
@@ -79,7 +84,7 @@ static inline void esp_foc_torque_control_loop(esp_foc_axis_t *axis)
 IRAM_ATTR static void esp_foc_control_loop(void *arg)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
- 
+
     esp_foc_position_control_loop(axis);
     esp_foc_velocity_control_loop(axis);
     esp_foc_torque_control_loop(axis);
@@ -96,22 +101,26 @@ IRAM_ATTR static void esp_foc_control_loop(void *arg)
                                         axis->u_u.raw, 
                                         axis->u_v.raw, 
                                         axis->u_w.raw);
+    
+    if(axis->ev_handle) {
+        esp_foc_send_notification(axis->ev_handle);
+    }
 }
 
 IRAM_ATTR static void esp_foc_sensors_loop(void *arg)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
-
+    axis->ev_handle = esp_foc_get_event_handle();
     axis->inverter_driver->set_inverter_callback(axis->inverter_driver,
-                                           esp_foc_control_loop,
-                                           axis);
+                                    esp_foc_control_loop,
+                                    axis);
 
     ESP_LOGI(tag, "starting foc loop task for axis: %p", axis);
-    ESP_LOGI(tag, "Speed control loop rate [Samples/S]: %f", axis->sample_rate);
+    ESP_LOGI(tag, "Speed control loop rate [Samples/S]: %f", axis->inverter_driver->get_inverter_pwm_rate(axis->inverter_driver));
 
     for(;;) {
+        esp_foc_wait_notifier();
         axis->rotor_elec_angle = esp_foc_ticks_to_radians_normalized(axis); 
-        esp_foc_runner_yield();
     }
 }
 
@@ -265,10 +274,13 @@ IRAM_ATTR esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis,
         ESP_LOGE(tag, "align rotor first!");
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
+    esp_foc_critical_enter();
 
     axis->target_u_q = uq;
     axis->target_u_d = ud;
 
+    esp_foc_critical_leave();
+    
     return ESP_FOC_OK;
 }
 
@@ -284,8 +296,10 @@ IRAM_ATTR esp_foc_err_t esp_foc_set_target_speed(esp_foc_axis_t *axis,
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
 
+    esp_foc_critical_enter();
     axis->target_speed = speed.raw;
-
+    esp_foc_critical_leave();
+    
     return ESP_FOC_OK;
 }
 
@@ -301,7 +315,9 @@ IRAM_ATTR esp_foc_err_t esp_foc_set_target_position(esp_foc_axis_t *axis,
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
 
+    esp_foc_critical_enter();
     axis->target_position = position.raw;
+    esp_foc_critical_leave();
 
     return ESP_FOC_OK;
 }
@@ -316,7 +332,8 @@ esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis)
         ESP_LOGE(tag, "align rotor first!");
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
-    int ret = esp_foc_create_runner(esp_foc_sensors_loop, axis);
+
+    int ret = esp_foc_create_runner(esp_foc_sensors_loop, axis, CONFIG_FOC_TASK_PRIORITY);
 
     if (ret < 0) {
         ESP_LOGE(tag, "Check os interface, the runner creation has failed!");
@@ -427,6 +444,8 @@ esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_dat
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
+    esp_foc_critical_enter();
+
     control_data->u = axis->u_u;
     control_data->v = axis->u_v;
     control_data->w = axis->u_w;
@@ -436,6 +455,8 @@ esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_dat
 
     control_data->position.raw = axis->rotor_position;
     control_data->speed.raw = axis->current_speed;
+
+    esp_foc_critical_leave();
 
     return ESP_FOC_OK;
 }
