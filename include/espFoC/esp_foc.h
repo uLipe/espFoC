@@ -43,10 +43,12 @@ typedef struct {
     int downsampling_speed_rate;
     int downsampling_position_rate;
     int motor_pole_pairs;
+    int estimators_rate;
     esp_foc_motor_direction_t natural_direction;
 } esp_foc_motor_control_settings_t;
 
 typedef struct {
+    esp_foc_seconds dt;
     esp_foc_u_voltage u;
     esp_foc_v_voltage v;
     esp_foc_w_voltage w;

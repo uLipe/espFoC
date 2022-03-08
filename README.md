@@ -12,7 +12,8 @@ espressif framework.
 * For batteries included getting started, refer the examples folder.
 
 ## Features:
-* Voltage mode control, control a PMSM like a DC motor! ;
+* Voltage mode control, control a PMSM like a DC motor!;
+* Position and Speed closed-loop control;
 * Single-precision Floating point implementation;
 * Sample inverter driver based on esp32 LEDC PWM (easy to wire!);
 * Sample rotor position driver based on as5600 encoder (very popular!);

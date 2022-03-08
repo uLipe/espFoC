@@ -38,19 +38,17 @@ static inline float  esp_foc_pid_update(esp_foc_pid_controller_t *self,
     float error_diff = error - self->previous_error;
     self->accumulated_error += error;
 
+    self->previous_error = error;
+
     if(self->accumulated_error > self->integrator_limit) {
         self->accumulated_error = self->integrator_limit;
     } else if (self->accumulated_error < -self->integrator_limit) {
         self->accumulated_error = -self->integrator_limit;
     }
 
-    float mv = self->kp * error + 
+    float mv = (self->kp * error) + 
             (self->ki * self->accumulated_error) + 
             (self->kd * error_diff);
 
-    self->previous_error = error;
-
-    esp_foc_saturate(mv, self->max_output_value);
-
-    return mv;
+    return esp_foc_saturate(mv, self->max_output_value);
 }
