@@ -74,5 +74,11 @@ void app_main(void)
 
     esp_foc_align_axis(&axis);
     esp_foc_run(&axis);
-    esp_foc_set_target_speed(&axis, (esp_foc_radians_per_second){.raw = 6.28});
+    esp_foc_set_target_speed(&axis, (esp_foc_radians_per_second){.raw = 62.8});
+
+    while (1) {
+        esp_foc_get_control_data(&axis, &control_data);        
+        ESP_LOGI(TAG, "Current speed: %f [rad/S]", control_data.speed.raw);
+        esp_foc_sleep_ms(50);
+    }    
 }

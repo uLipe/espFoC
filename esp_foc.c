@@ -80,11 +80,13 @@ static inline void esp_foc_torque_control_loop(esp_foc_axis_t *axis)
 IRAM_ATTR static void esp_foc_motor_speed_estimator(esp_foc_axis_t * axis)
 {
     esp_foc_critical_enter();
-    float delta = (axis->rotor_position - axis->rotor_position_prev);
-    axis->current_speed =  delta * axis->estimators_sample_rate;
-    axis->rotor_position_prev = axis->rotor_position;
     axis->accumulated_rotor_position = axis->rotor_sensor_driver->read_accumulated_counts(axis->rotor_sensor_driver) *
         axis->shaft_ticks_to_radians_ratio;
+
+    axis->current_speed =  (axis->accumulated_rotor_position - axis->rotor_position_prev) * 
+                        axis->estimators_sample_rate;
+                        
+    axis->rotor_position_prev = axis->accumulated_rotor_position;
         
     esp_foc_critical_leave();
 }

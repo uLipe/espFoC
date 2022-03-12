@@ -26,6 +26,10 @@ menu "espFoC Settings"
     config FOC_TASK_STACK_SIZE
         int "Task stack size of foc controller"
         default 3072
+    
+    config ESP_FOC_CUSTOM_MATH
+        bool "Use custom espFoC fast math"
+        default y
 
 endmenu
     

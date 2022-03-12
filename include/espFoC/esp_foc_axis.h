@@ -29,7 +29,6 @@ typedef struct {
 
     float target_speed;
     float current_speed;
-    float rotor_position_prev;
     float shaft_ticks_to_radians_ratio;
     float dt;
     float last_timestamp;
@@ -39,6 +38,7 @@ typedef struct {
     float target_position;
     float rotor_position;
     float accumulated_rotor_position;
+    float rotor_position_prev;
     float rotor_shaft_ticks;
     float rotor_elec_angle;
     int downsampling_position_reload_value;
