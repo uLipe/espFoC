@@ -11,19 +11,19 @@ static esp_foc_inverter_t *inverter;
 static esp_foc_rotor_sensor_t *sensor;
 static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
-    .downsampling_position_rate = 20, // position control runs 1/4 rate speed control,
-    .downsampling_speed_rate = 5, //speed control runs 1/5 torque loop
+    .downsampling_position_rate = 160, // position control runs 1/4 rate speed control,
+    .downsampling_speed_rate = 40, //speed control runs 1/40 torque loop
     .motor_pole_pairs = 7, //Assuming HT2250 motor
     .position_control_settings.kp = 1.8f,
     .position_control_settings.ki = 0.0f,
     .position_control_settings.kd = 0.0f,
-    .position_control_settings.integrator_limit = 1000.0f,
+    .position_control_settings.integrator_limit = 20000.0f,
     .position_control_settings.max_output_value = 100.0f,
 
-    .velocity_control_settings.kp = 0.01f,
-    .velocity_control_settings.ki = 0.005f,
+    .velocity_control_settings.kp = 0.1f,
+    .velocity_control_settings.ki = 0.008f,
     .velocity_control_settings.kd = 0.0f,
-    .velocity_control_settings.integrator_limit = 1000.0f,
+    .velocity_control_settings.integrator_limit = 20000.0f,
     .velocity_control_settings.max_output_value = 6.0f, //conservative setpoint to the current controller
     .torque_control_settings[0].max_output_value = 6.0f, //Uses the max driver voltage allowed as limit
     .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
@@ -85,7 +85,7 @@ void app_main(void)
     while(1) {
         esp_foc_get_control_data(&axis, &control_data);        
         ESP_LOGI(TAG, "Current mechanical position: %f [rad]", control_data.position.raw);
-        esp_foc_sleep_ms(100);
+        esp_foc_sleep_ms(200);
     }
 
 }
