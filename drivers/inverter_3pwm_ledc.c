@@ -62,10 +62,7 @@ IRAM_ATTR static void ledc_update(esp_foc_ledc_inverter *obj, ledc_channel_t cha
 
 IRAM_ATTR static float get_dc_link_voltage (esp_foc_inverter_t *self)
 {
-    esp_foc_ledc_inverter *obj = 
-        __containerof(self, esp_foc_ledc_inverter, interface);
-
-    return obj->dc_link_voltage;
+    return 1.0f;
 }
 
 IRAM_ATTR static void set_voltages(esp_foc_inverter_t *self,
@@ -162,7 +159,10 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
         ledc_driver_configured = true;
     }
 
-    ledc[port].dc_link_voltage = dc_link_voltage;
+    /* the PWM arguments now are limited to range 0 -- 1.0 */
+    (void)dc_link_voltage;
+
+    ledc[port].dc_link_voltage = 1.0f;
     ledc[port].interface.get_dc_link_voltage = get_dc_link_voltage;
     ledc[port].interface.set_voltages = set_voltages;
     ledc[port].interface.set_inverter_callback = set_inverter_callback;

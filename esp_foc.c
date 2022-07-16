@@ -100,8 +100,7 @@ IRAM_ATTR static void esp_foc_control_loop(void *arg)
     esp_foc_velocity_control_loop(axis);
     esp_foc_torque_control_loop(axis);
 
-    esp_foc_modulate_dq_voltage(axis->biased_dc_link_voltage, 
-                    axis->rotor_elec_angle, 
+    esp_foc_modulate_dq_voltage(axis->rotor_elec_angle, 
                     axis->u_d.raw, 
                     axis->u_q.raw, 
                     &axis->u_u.raw, 
@@ -171,7 +170,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
     axis->dc_link_voltage = 
         axis->inverter_driver->get_dc_link_voltage(axis->inverter_driver);
-    axis->biased_dc_link_voltage = axis->dc_link_voltage * 0.5;
     axis->inverter_driver->set_voltages(axis->inverter_driver, 0.0, 0.0, 0.0);
     ESP_LOGI(tag,"inverter dc-link voltage: %f[V]", axis->dc_link_voltage);
 
@@ -270,10 +268,17 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
                                         0.0f);
     esp_foc_sleep_ms(500);
 
+    esp_foc_modulate_dq_voltage(-(M_PI /2.0f), 
+                    0.0f, 
+                    0.4f, 
+                    &axis->u_u.raw, 
+                    &axis->u_v.raw, 
+                    &axis->u_w.raw);
+
     axis->inverter_driver->set_voltages(axis->inverter_driver,
-                                        0.4 * axis->biased_dc_link_voltage,
-                                        0.0f,
-                                        0.0f);
+                                        axis->u_u.raw, 
+                                        axis->u_v.raw, 
+                                        axis->u_w.raw);
     esp_foc_sleep_ms(500);
     current_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
     ESP_LOGI(tag, "rotor ticks offset: %f [ticks] for Coil U", current_ticks);
@@ -382,14 +387,14 @@ esp_foc_err_t esp_foc_test_motor(esp_foc_inverter_t *inverter,
     ESP_LOGI(tag, "Starting motor test, check the spinning direction !");
 
     inverter->set_voltages(inverter,
-                            0.2 * (inverter->get_dc_link_voltage(inverter) / 2) , 
+                            0.2f, 
                             0.0f, 
                             0.0f);
     esp_foc_sleep_ms(250);
 
     inverter->set_voltages(inverter,
                             0.0f,
-                            0.2 * (inverter->get_dc_link_voltage(inverter) / 2) ,  
+                            0.2f,  
                             0.0f);
     esp_foc_sleep_ms(250);
 
@@ -403,10 +408,9 @@ esp_foc_err_t esp_foc_test_motor(esp_foc_inverter_t *inverter,
 
         ESP_LOGI(tag, "SVM calculated angle: %f [rad] Caculated electrical angle: %f [rad]", i, electrical_angle);
 
-        esp_foc_modulate_dq_voltage(inverter->get_dc_link_voltage(inverter) / 2, 
-                i, 
-                0.2 * (inverter->get_dc_link_voltage(inverter) / 2), 
-                0.0, 
+        esp_foc_modulate_dq_voltage(i, 
+                0.0f, 
+                0.2f, 
                 &u.raw, 
                 &v.raw, 
                 &w.raw);
@@ -429,10 +433,9 @@ esp_foc_err_t esp_foc_test_motor(esp_foc_inverter_t *inverter,
 
         ESP_LOGI(tag, "SVM calculated angle: %f [rad] Caculated electrical angle: %f [rad]", i, electrical_angle);
 
-        esp_foc_modulate_dq_voltage(inverter->get_dc_link_voltage(inverter) / 2, 
-                i, 
-                0.2 * (inverter->get_dc_link_voltage(inverter) / 2), 
-                0.0, 
+        esp_foc_modulate_dq_voltage(i, 
+                0.0f, 
+                0.2f, 
                 &u.raw, 
                 &v.raw, 
                 &w.raw);

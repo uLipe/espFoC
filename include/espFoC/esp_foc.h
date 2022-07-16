@@ -3,6 +3,7 @@
 #include <math.h>
 #include "espFoC/ema_low_pass_filter.h"
 #include "espFoC/foc_math.h"
+#include "espFoC/space_vector_modulator.h"
 #include "espFoC/modulator.h"
 #include "espFoC/pid_controller.h"
 #include "espFoC/inverter_interface.h"
