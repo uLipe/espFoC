@@ -125,6 +125,11 @@ IRAM_ATTR static void esp_foc_sensors_loop(void *arg)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
     float now;
+
+#ifdef CONFIG_ESP_FOC_SCOPE
+    esp_foc_control_data_t control_data;
+#endif
+
     axis->ev_handle = esp_foc_get_event_handle();
     axis->inverter_driver->set_inverter_callback(axis->inverter_driver,
                                     esp_foc_control_loop,
@@ -139,7 +144,11 @@ IRAM_ATTR static void esp_foc_sensors_loop(void *arg)
         now = esp_foc_now_seconds();
         axis->dt = now - axis->last_timestamp;
         axis->last_timestamp = now;
-        axis->rotor_elec_angle = esp_foc_ticks_to_radians_normalized(axis); 
+        axis->rotor_elec_angle = esp_foc_ticks_to_radians_normalized(axis);
+#ifdef CONFIG_ESP_FOC_SCOPE
+        esp_foc_get_control_data(axis, &control_data);
+        esp_foc_scope_data_push(&control_data);
+#endif
     }
 }
 
@@ -478,9 +487,14 @@ esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_dat
     control_data->out_q = axis->u_q;
     control_data->out_d = axis->u_d;
     control_data->dt.raw = axis->dt;
+    control_data->timestamp.raw = axis->last_timestamp;
 
     control_data->position.raw = axis->accumulated_rotor_position;
+    control_data->rotor_position.raw = axis->rotor_position;
     control_data->speed.raw = axis->current_speed;
+
+    control_data->target_position.raw = axis->target_position;
+    control_data->target_speed.raw = axis->target_speed;
 
     esp_foc_critical_leave();
 

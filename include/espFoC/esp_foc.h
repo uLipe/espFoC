@@ -49,6 +49,8 @@ typedef struct {
 } esp_foc_motor_control_settings_t;
 
 typedef struct {
+    esp_foc_seconds timestamp;
+    
     esp_foc_seconds dt;
     esp_foc_u_voltage u;
     esp_foc_v_voltage v;
@@ -57,10 +59,16 @@ typedef struct {
     esp_foc_q_voltage out_q;
     esp_foc_d_voltage out_d;
 
+    esp_foc_radians rotor_position;
     esp_foc_radians position;
     esp_foc_radians_per_second speed;
+
+    esp_foc_radians target_position;
+    esp_foc_radians_per_second target_speed;
+
 } esp_foc_control_data_t;
 
+#include "espFoC/esp_foc_scope.h"
 
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                     esp_foc_inverter_t *inverter,
