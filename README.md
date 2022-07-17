@@ -24,6 +24,13 @@ espressif framework.
 * Inside of your IDF project CMakeLists.txt set or add the path of this component to EXTRA_COMPONENT_DIRS for example: `set(EXTRA_COMPONENT_DIRS "path/to/this/component/")`
 * For batteries included getting started, refer the examples folder.
 * Inside of any of examples just build: `$ idf.py build flash`
+ 
+## Typical wiring:
+* espFoC is intended to run on ESP32 board plus a motor driver;
+* The current driver supports 3-PWM output suited to: L6230, DRV83xx and others;
+* The suggested wiring for quick get started is shown below: 
+![Wiring](/doc/images/wiring.png)
+
 
 ## Debug with Better Serial Plot:
 * Install Better Serial Plot from here: https://hackaday.io/project/181686-better-serial-plotter 
@@ -34,4 +41,5 @@ espressif framework.
 
 ## Support:
 If you find some trouble, open an issue, and if you are enjoying the project
-give it a star. Also, you can try reaching me at ryukokki.felipe@gmail.com
+give it a star or submir a PR. Also, you can try reaching me at:
+ryukokki.felipe@gmail.com
