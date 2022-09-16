@@ -11,7 +11,7 @@
 #define AS5600_PULSES_PER_REVOLUTION 4096.0f
 #define AS5600_READING_MASK 0xFFF 
 
-const char *tag = "ROTOR_SENSOR_AS5600";
+static const char *tag = "ROTOR_SENSOR_AS5600";
 
 typedef struct {
     float accumulated;
@@ -55,7 +55,7 @@ IRAM_ATTR static uint16_t read_angle_sensor(int i2c_port)
     return raw;
 }
 
-IRAM_ATTR float read_accumulated_counts (esp_foc_rotor_sensor_t *self)
+IRAM_ATTR static float read_accumulated_counts (esp_foc_rotor_sensor_t *self)
 {
     esp_foc_as5600_t *obj =
         __containerof(self,esp_foc_as5600_t, interface);
