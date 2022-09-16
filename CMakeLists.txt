@@ -7,6 +7,7 @@ set(includes "include" "drivers")
 list(APPEND srcs   "drivers/inverter_3pwm_ledc.c"
                     "drivers/rotor_sensor_as5600.c"
                     "drivers/rotor_sensor_dummy.c"
+                    "drivers/rotor_sensor_pcnt.c"
                     "drivers/os_interface.c")
 
 idf_component_register(SRCS "${srcs}"

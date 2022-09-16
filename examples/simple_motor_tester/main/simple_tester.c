@@ -2,6 +2,7 @@
 #include "esp_err.h"
 
 #include "espFoC/rotor_sensor_as5600.h"
+#include "espFoC/rotor_sensor_pcnt.h"
 #include "espFoC/rotor_sensor_dummy.h"
 #include "espFoC/inverter_3pwm_ledc.h"
 #include "espFoC/esp_foc.h"
@@ -10,6 +11,7 @@ static const char *TAG = "esp-foc-example";
 
 static esp_foc_inverter_t *inverter;
 static esp_foc_rotor_sensor_t *sensor;
+static esp_foc_rotor_sensor_t *sensor_enc;
 static esp_foc_motor_control_settings_t settings = {
     .motor_pole_pairs = 4, //Assuming HT2250 motor
 };
@@ -42,11 +44,17 @@ static void initialize_foc_drivers(void)
         abort();
     }
 
+    sensor_enc = rotor_sensor_pcnt_new(CONFIG_FOC_ENCODER_A_PIN, CONFIG_FOC_ENCODER_B_PIN, 0, 4096);
+    if(sensor_enc == NULL) {
+        ESP_LOGE(TAG, "failed to create the inverter driver, aborting!");
+        ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
+        abort();
+    }
 }
 
 void app_main(void)
 {
     ESP_LOGI(TAG, "espFoC simple Motor tester!");
     initialize_foc_drivers();
-    esp_foc_test_motor(inverter, sensor, settings);
+    esp_foc_test_motor(inverter, sensor_enc, settings);
 }
