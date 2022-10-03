@@ -1,3 +1,27 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2021 Felipe Neves
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+ 
 #include <sys/cdefs.h>
 #include "espFoC/inverter_3pwm_ledc.h"
 #include "hal/ledc_hal.h"
@@ -62,10 +86,7 @@ IRAM_ATTR static void ledc_update(esp_foc_ledc_inverter *obj, ledc_channel_t cha
 
 IRAM_ATTR static float get_dc_link_voltage (esp_foc_inverter_t *self)
 {
-    esp_foc_ledc_inverter *obj = 
-        __containerof(self, esp_foc_ledc_inverter, interface);
-
-    return obj->dc_link_voltage;
+    return 1.0f;
 }
 
 IRAM_ATTR static void set_voltages(esp_foc_inverter_t *self,
@@ -162,7 +183,10 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
         ledc_driver_configured = true;
     }
 
-    ledc[port].dc_link_voltage = dc_link_voltage;
+    /* the PWM arguments now are limited to range 0 -- 1.0 */
+    (void)dc_link_voltage;
+
+    ledc[port].dc_link_voltage = 1.0f;
     ledc[port].interface.get_dc_link_voltage = get_dc_link_voltage;
     ledc[port].interface.set_voltages = set_voltages;
     ledc[port].interface.set_inverter_callback = set_inverter_callback;

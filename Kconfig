@@ -31,6 +31,14 @@ menu "espFoC Settings"
         bool "Use custom espFoC fast math"
         default y
 
+    config ESP_FOC_SCOPE
+        bool "Enable scope data sending"
+        default n
+
+    config ESP_FOC_SCOPE_BUFFER_SIZE
+        int "Size of scope buffer in frames"
+        default 1536
+
 endmenu
     
     

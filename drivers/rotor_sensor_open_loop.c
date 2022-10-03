@@ -28,12 +28,14 @@
 #include "esp_attr.h"
 #include "esp_log.h"
 
-#define AS5600_SLAVE_ADDR 0x36
-#define AS5600_ANGLE_REGISTER_H 0x0E
-#define AS5600_PULSES_PER_REVOLUTION 4096.0f
-#define AS5600_READING_MASK 0xFFF 
+#define AS5600_PULSES_PER_REVOLUTION (2.0f * M_PI)
+
+const char *tag = "ROTOR_SENSOR_AS5600";
 
 typedef struct {
+    esp_foc_seconds sample_rate;
+    float radians_to_increment;
+    float *uq_wire;
     float accumulated;
     float raw;
     float previous;
@@ -42,7 +44,7 @@ typedef struct {
 
 DRAM_ATTR static esp_foc_dummy_t rotor_sensors[CONFIG_NOOF_AXIS];
 
-IRAM_ATTR static float read_accumulated_counts (esp_foc_rotor_sensor_t *self)
+IRAM_ATTR float read_accumulated_counts (esp_foc_rotor_sensor_t *self)
 {
     esp_foc_dummy_t *obj =
         __containerof(self,esp_foc_dummy_t, interface);
@@ -95,9 +97,9 @@ IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
     return(obj->raw);
 }
 
-esp_foc_rotor_sensor_t *rotor_sensor_dummy_new(int port)
-{
-    if(port > CONFIG_NOOF_AXIS - 1) {
+esp_foc_rotor_sensor_t *rotor_sensor_open_loop_new(float motor_kv, float *uq_wire, esp_foc_seconds sample_rate){
+
+    if(uq == NULL) {
         return NULL;
     }
 
