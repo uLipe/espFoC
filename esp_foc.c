@@ -179,7 +179,6 @@ IRAM_ATTR static void esp_foc_sensors_loop(void *arg)
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                     esp_foc_inverter_t *inverter,
                                     esp_foc_rotor_sensor_t *rotor,
-                                    esp_foc_isensor_t *isensor,
                                     esp_foc_motor_control_settings_t settings)
 {
     if(axis == NULL) {
@@ -199,7 +198,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
     axis->inverter_driver = inverter;
     axis->rotor_sensor_driver = rotor;
-    axis->isensor_driver = isensor;
 
     axis->dc_link_voltage = 
         axis->inverter_driver->get_dc_link_voltage(axis->inverter_driver);
@@ -301,17 +299,11 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
                                         0.0f);
     esp_foc_sleep_ms(500);
 
-    esp_foc_modulate_dq_voltage(-(M_PI /2.0f), 
-                    0.0f, 
-                    0.4f, 
-                    &axis->u_u.raw, 
-                    &axis->u_v.raw, 
-                    &axis->u_w.raw);
-
     axis->inverter_driver->set_voltages(axis->inverter_driver,
-                                        axis->u_u.raw, 
-                                        axis->u_v.raw, 
-                                        axis->u_w.raw);
+                                        0.4 * axis->biased_dc_link_voltage,
+                                        0.0f,
+                                        0.0f);
+
     esp_foc_sleep_ms(500);
     current_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
     ESP_LOGI(tag, "rotor ticks offset: %f [ticks] for Coil U", current_ticks);

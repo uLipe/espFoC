@@ -99,16 +99,16 @@ IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
 
 esp_foc_rotor_sensor_t *rotor_sensor_open_loop_new(float motor_kv, float *uq_wire, esp_foc_seconds sample_rate){
 
-    if(uq == NULL) {
+    if(uq_wire == NULL) {
         return NULL;
     }
 
-    rotor_sensors[port].interface.get_counts_per_revolution = get_counts_per_revolution;
-    rotor_sensors[port].interface.read_counts = read_counts;
-    rotor_sensors[port].interface.set_to_zero = set_to_zero;
-    rotor_sensors[port].interface.read_accumulated_counts = read_accumulated_counts;
-    rotor_sensors[port].raw = 0;
-    rotor_sensors[port].accumulated = 0;
+    rotor_sensors[0].interface.get_counts_per_revolution = get_counts_per_revolution;
+    rotor_sensors[0].interface.read_counts = read_counts;
+    rotor_sensors[0].interface.set_to_zero = set_to_zero;
+    rotor_sensors[0].interface.read_accumulated_counts = read_accumulated_counts;
+    rotor_sensors[0].raw = 0;
+    rotor_sensors[0].accumulated = 0;
 
-    return &rotor_sensors[port].interface;
+    return &rotor_sensors[0].interface;
 }

@@ -35,7 +35,7 @@ static inline void esp_foc_modulate_dq_voltage (float theta,
     float ab_frame[2];
 
     esp_foc_inverse_park_transform(theta, dq_frame, &ab_frame[0], &ab_frame[1]);
-    esp_foc_svm_set(ab_frame[0], ab_frame[1], v_u, v_v, v_w);
+    esp_foc_inverse_clarke_transform(ab_frame, v_u, v_v, v_w);
 }
 
 static inline void esp_foc_get_dq_currents(float theta,

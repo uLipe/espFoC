@@ -45,3 +45,11 @@ jobs:
         path: idf
         submodules: recursive
         ref: master
+
+    - name: Build samples
+      run: | 
+        ./idf/install.sh
+        . ./idf/export.sh 
+        cd examples/simple_velocity
+        idf.py set-target esp32
+        idf.py build
