@@ -46,10 +46,39 @@ jobs:
         submodules: recursive
         ref: master
 
-    - name: Build samples
+    - name: Build Samples
       run: | 
         ./idf/install.sh
         . ./idf/export.sh 
-        cd examples/simple_velocity
+        pushd examples/simple_velocity
         idf.py set-target esp32
         idf.py build
+        popd
+        pushd examples/simple_motor_tester
+        idf.py set-target esp32
+        idf.py build
+        popd
+        pushd examples/simple_servo
+        idf.py set-target esp32
+        idf.py build
+        popd
+        pushd examples/speed_control
+        idf.py set-target esp32
+        idf.py build
+        popd
+        pushd examples/simple_velocity
+        idf.py set-target esp32s3
+        idf.py build
+        popd
+        pushd examples/simple_motor_tester
+        idf.py set-target esp32s3
+        idf.py build
+        popd
+        pushd examples/simple_servo
+        idf.py set-target esp32s3
+        idf.py build
+        popd
+        pushd examples/speed_control
+        idf.py set-target esp32s3
+        idf.py build
+        popd
