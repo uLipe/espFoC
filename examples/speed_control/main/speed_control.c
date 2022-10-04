@@ -93,7 +93,6 @@ void app_main(void)
         &axis,
         inverter,
         sensor,
-        NULL,
         settings
     );
 
