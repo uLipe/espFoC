@@ -56,6 +56,11 @@ IRAM_ATTR static float get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
     return obj->pulses_per_revolution;
 }
 
+IRAM_ATTR static void fetch_sensor(esp_foc_rotor_sensor_t *self)
+{
+    esp_foc_wait_notifier();
+}
+
 IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
 {
     int16_t raw_count;
@@ -81,6 +86,7 @@ esp_foc_rotor_sensor_t *rotor_sensor_pcnt_new(int pin_a,
     rotor_sensors[port].interface.read_counts = read_counts;
     rotor_sensors[port].interface.set_to_zero = set_to_zero;
     rotor_sensors[port].interface.read_accumulated_counts = read_accumulated_counts;
+    rotor_sensors[port].interface.fetch_sensor = fetch_sensor;
     rotor_sensors[port].previous = 0;
     rotor_sensors[port].accumulated = 0;
     rotor_sensors[port].pulses_per_revolution = (float)pulses_per_revolution;

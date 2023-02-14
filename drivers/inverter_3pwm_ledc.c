@@ -27,7 +27,7 @@
 #include "hal/ledc_hal.h"
 #include "esp_attr.h"
 
-#define LEDC_FREQUENCY_HZ       20000
+#define LEDC_FREQUENCY_HZ       40000
 #define LEDC_RESOLUTION_STEPS   255.0
 
 typedef struct {

@@ -40,6 +40,7 @@ static const char *tag = "ROTOR_SENSOR_AS5600";
 typedef struct {
     float accumulated;
     float previous;
+    uint16_t counts;
     uint16_t zero_offset;
     int i2c_port;
     esp_foc_rotor_sensor_t interface;
@@ -102,12 +103,20 @@ IRAM_ATTR static float get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
     return AS5600_PULSES_PER_REVOLUTION;
 }
 
+IRAM_ATTR static void fetch_sensor(esp_foc_rotor_sensor_t *self)
+{
+    esp_foc_as5600_t *obj =
+        __containerof(self,esp_foc_as5600_t, interface);
+
+   obj->counts = read_angle_sensor(obj->i2c_port) & AS5600_READING_MASK;
+}
+
 IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
 {
     esp_foc_as5600_t *obj =
         __containerof(self,esp_foc_as5600_t, interface);
 
-    uint16_t raw = read_angle_sensor(obj->i2c_port) & AS5600_READING_MASK;
+    uint16_t raw = obj->counts;
 
     esp_foc_critical_enter();
 
@@ -137,6 +146,7 @@ esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
     rotor_sensors[port].interface.get_counts_per_revolution = get_counts_per_revolution;
     rotor_sensors[port].interface.read_counts = read_counts;
     rotor_sensors[port].interface.set_to_zero = set_to_zero;
+    rotor_sensors[port].interface.fetch_sensor = fetch_sensor;
     rotor_sensors[port].interface.read_accumulated_counts = read_accumulated_counts;
     rotor_sensors[port].i2c_port = I2C_NUM_0;
     rotor_sensors[port].zero_offset = 0;
