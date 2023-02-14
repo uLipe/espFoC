@@ -51,6 +51,9 @@ typedef struct {
     esp_foc_v_current i_v;
     esp_foc_w_current i_w;
 
+    int control_loop_downsampling;
+    int control_loop_reload_val;
+
     float target_speed;
     float current_speed;
     float shaft_ticks_to_radians_ratio;

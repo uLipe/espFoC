@@ -23,6 +23,11 @@ menu "espFoC Settings"
         range 16 25
         default 25
 
+    config FOC_CONTROL_LOOP_FREQUENCY
+        int "Rate of the foc controller in Hz"
+        range 1000 8000
+        default 4000
+
     config FOC_TASK_STACK_SIZE
         int "Task stack size of foc controller"
         default 3072

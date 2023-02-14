@@ -58,7 +58,7 @@ IRAM_ATTR static float get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
 
 IRAM_ATTR static void fetch_sensor(esp_foc_rotor_sensor_t *self)
 {
-    esp_foc_wait_notifier();
+    esp_foc_sleep_ms(10);
 }
 
 IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
@@ -117,10 +117,10 @@ esp_foc_rotor_sensor_t *rotor_sensor_pcnt_new(int pin_a,
 
         pcnt_counter_pause(rotor_sensors[port].pcnt_unit);
         pcnt_counter_clear(rotor_sensors[port].pcnt_unit);
-        pcnt_isr_handler_add(rotor_sensors[port].pcnt_unit, 
-            pcnt_overflow_handler, 
+        pcnt_isr_handler_add(rotor_sensors[port].pcnt_unit,
+            pcnt_overflow_handler,
             &rotor_sensors[port]);
- 
+
         pcnt_event_enable(rotor_sensors[port].pcnt_unit, PCNT_EVT_H_LIM);
         pcnt_event_enable(rotor_sensors[port].pcnt_unit, PCNT_EVT_L_LIM);
 
