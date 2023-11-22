@@ -1,4 +1,4 @@
-# espFoC: Vector FoC controller for PMSM motors for ESP-IDF
+# espFoC: Vector FoC controller for PMSM motors for ESP32 SoCs
 
 ![Build](https://github.com/uLipe/espFoC/workflows/Build/badge.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
