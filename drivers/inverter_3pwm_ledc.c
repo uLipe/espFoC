@@ -27,7 +27,7 @@
 #include "hal/ledc_hal.h"
 #include "esp_attr.h"
 
-#define LEDC_FREQUENCY_HZ       20000
+#define LEDC_FREQUENCY_HZ       40000
 #define LEDC_RESOLUTION_STEPS   255.0
 
 typedef struct {
@@ -48,8 +48,6 @@ DRAM_ATTR static esp_foc_ledc_inverter ledc[CONFIG_NOOF_AXIS];
 
 IRAM_ATTR static void ledc_isr(void *arg) 
 {
-    esp_foc_fpu_isr_enter();
-
     esp_foc_ledc_inverter *obj = (esp_foc_ledc_inverter *)arg;
 
     obj->hw->int_clr.val = (LEDC_LSTIMER0_OVF_INT_ENA |
@@ -60,8 +58,6 @@ IRAM_ATTR static void ledc_isr(void *arg)
     if(obj->notifier) {
         obj->notifier(obj->arg);
     }
-
-    esp_foc_fpu_isr_leave();
 }
 
 /* This function is required because the ledc driver does not support update from 

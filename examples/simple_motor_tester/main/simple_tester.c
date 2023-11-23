@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -36,11 +36,12 @@ static const char *TAG = "esp-foc-example";
 static esp_foc_inverter_t *inverter;
 static esp_foc_rotor_sensor_t *sensor;
 static esp_foc_rotor_sensor_t *sensor_enc;
+static esp_foc_rotor_sensor_t *sensor_as5600;
 static esp_foc_motor_control_settings_t settings = {
     .motor_pole_pairs = 4, //Assuming HT2250 motor
 };
 
-static void initialize_foc_drivers(void) 
+static void initialize_foc_drivers(void)
 {
 
     inverter = inverter_3pwm_ledc_new(
@@ -74,11 +75,28 @@ static void initialize_foc_drivers(void)
         ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
         abort();
     }
+
+    sensor_as5600 = rotor_sensor_as5600_new(
+        CONFIG_FOC_ENCODER_SDA_PIN,
+        CONFIG_FOC_ENCODER_SCL_PIN,
+        0
+    );
+
+    if(sensor_as5600 == NULL) {
+        ESP_LOGE(TAG, "failed to create the inverter driver, aborting!");
+        ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
+        abort();
+    }
+
 }
 
 void app_main(void)
 {
     ESP_LOGI(TAG, "espFoC simple Motor tester!");
     initialize_foc_drivers();
-    esp_foc_test_motor(inverter, sensor_enc, settings);
+    esp_foc_test_motor(inverter, sensor, settings);
+    for(;;) {
+        sensor_enc->fetch_sensor(sensor_enc);
+        ESP_LOGI(TAG, "Reading sensor: %f \n", sensor_enc->read_counts(sensor_enc));
+    }
 }
