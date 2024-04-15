@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -25,96 +25,38 @@
 #pragma once
 
 #include <math.h>
-#include "espFoC/ema_low_pass_filter.h"
-#include "espFoC/foc_math.h"
-#include "espFoC/space_vector_modulator.h"
-#include "espFoC/modulator.h"
-#include "espFoC/pid_controller.h"
-#include "espFoC/inverter_interface.h"
-#include "espFoC/current_sensor_interface.h"
-#include "espFoC/rotor_sensor_interface.h"
-#include "espFoC/os_interface.h"
-#include "espFoC/esp_foc_units.h"
+#include <errno.h>
+#include <espFoC/esp_foc_motor_interface.h>
+#include <espFoC/esp_foc_svm.h>
+#include <espFoC/esp_foc_pid.h>
 
-typedef enum {
-    ESP_FOC_OK = 0,
-    ESP_FOC_ERR_NOT_ALIGNED = -1,
-    ESP_FOC_ERR_INVALID_ARG = -2,
-    ESP_FOC_ERR_AXIS_INVALID_STATE = -3,
-    ESP_FOC_ERR_ALIGNMENT_IN_PROGRESS = -4,
-    ESP_FOC_ERR_TIMESTEP_TOO_SMALL = -5,
-    ESP_FOC_ERR_UNKNOWN = -128
-} esp_foc_err_t;
+struct esp_foc_motor_control {
+    struct esp_foc_motor_interface *motor_hw;
+    struct esp_foc_pid pid_position;
+    struct esp_foc_pid pid_velocity;
 
-#include "espFoC/esp_foc_axis.h"
+    int position_control_cntr;
+    int speed_control_cntr;
 
-typedef enum {
-    ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
-    ESP_FOC_MOTOR_NATURAL_DIRECTION_CCW,
-} esp_foc_motor_direction_t;
+    float target_speed_dps;
+    float target_position_degrees;
+    float current_speed_dps;
+    float current_position_degrees;
+};
 
-typedef struct {
-    float kp;
-    float ki;
-    float kd;
-    float integrator_limit;
-    float max_output_value;
-} esp_foc_control_settings_t;
+int esp_foc_init_controller(struct esp_foc_motor_control *ctl,
+                            const struct esp_foc_motor_interface *hw);
 
-typedef struct {
-    esp_foc_control_settings_t torque_control_settings[2];
-    esp_foc_control_settings_t velocity_control_settings;
-    esp_foc_control_settings_t position_control_settings;
-    int downsampling_speed_rate;
-    int downsampling_position_rate;
-    int motor_pole_pairs;
-    int estimators_rate;
-    esp_foc_motor_direction_t natural_direction;
-} esp_foc_motor_control_settings_t;
+int esp_foc_controller_set_speed(struct esp_foc_motor_control *ctl,
+                                float target_speed);
 
-typedef struct {
-    esp_foc_seconds timestamp;
-    
-    esp_foc_seconds dt;
-    esp_foc_u_voltage u;
-    esp_foc_v_voltage v;
-    esp_foc_w_voltage w;
+int esp_foc_controller_set_position(struct esp_foc_motor_control *ctl,
+                                float target_position);
 
-    esp_foc_q_voltage out_q;
-    esp_foc_d_voltage out_d;
+int esp_foc_add_position_control(struct esp_foc_motor_control *ctl,
+                                const struct esp_foc_pid *pos_pid);
 
-    esp_foc_radians rotor_position;
-    esp_foc_radians position;
-    esp_foc_radians_per_second speed;
+int esp_foc_add_speed_control(struct esp_foc_motor_control *ctl,
+                                const struct esp_foc_pid *speed_pid);
 
-    esp_foc_radians target_position;
-    esp_foc_radians_per_second target_speed;
-
-} esp_foc_control_data_t;
-
-#include "espFoC/esp_foc_scope.h"
-
-esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
-                                    esp_foc_inverter_t *inverter,
-                                    esp_foc_rotor_sensor_t *rotor,
-                                    esp_foc_motor_control_settings_t settings);
-
-esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis);
-
-esp_foc_seconds esp_foc_get_runner_dt(esp_foc_axis_t *axis);
-
-esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis,
-                                        esp_foc_q_voltage uq,
-                                        esp_foc_d_voltage ud);                                        
-
-esp_foc_err_t esp_foc_set_target_speed(esp_foc_axis_t *axis, esp_foc_radians_per_second speed);
-
-esp_foc_err_t esp_foc_set_target_position(esp_foc_axis_t *axis, esp_foc_radians position);
-
-esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_data_t *control_data);
-
-esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis);
-
-esp_foc_err_t esp_foc_test_motor(esp_foc_inverter_t *inverter,
-                                esp_foc_rotor_sensor_t *rotor,
-                                esp_foc_motor_control_settings_t settings);
+int esp_foc_controller_run(struct esp_foc_motor_control *ctl);
