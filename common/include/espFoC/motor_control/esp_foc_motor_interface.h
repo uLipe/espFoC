@@ -27,8 +27,10 @@
 struct esp_foc_motor_interface {
     int (*reset)(struct esp_foc_motor_interface *self);
     int (*enable)(struct esp_foc_motor_interface *self);
+    int (*disable)(struct esp_foc_motor_interface *self);
     int (*set_duty_cycles)(struct esp_foc_motor_interface *self, float a, float b, float c);
     int (*get_rotor_angle)(struct esp_foc_motor_interface *self, float *angle);
+    int (*get_electrical_angle)(struct esp_foc_motor_interface *self, float *angle);
     int (*get_rotor_speed_dps)(struct esp_foc_motor_interface *self, float *speed_dps);
     int (*align_rotor)(struct esp_foc_motor_interface *self);
     int (*get_acumulated_angle)(struct esp_foc_motor_interface *self, float *angle);
@@ -37,9 +39,10 @@ struct esp_foc_motor_interface {
     int (*get_currents)(struct esp_foc_motor_interface *self, float *ia, float *ib, float *ic);
     int (*number_of_shunts)(struct esp_foc_motor_interface *self, int *shunts);
     int (*fetch_sensors)(struct esp_foc_motor_interface *self);
+    int (*set_pole_pairs)(struct esp_foc_motor_interface *self, int32_t pole_pairs);
 };
 
-int esp_foc_motor_reset(struct esp_foc_motor_interface *self)
+static inline int esp_foc_motor_reset(struct esp_foc_motor_interface *self)
 {
     if(!self)
         return -EINVAL;
@@ -51,7 +54,7 @@ int esp_foc_motor_reset(struct esp_foc_motor_interface *self)
 
 }
 
-int esp_foc_motor_enable(struct esp_foc_motor_interface *self)
+static inline int esp_foc_motor_enable(struct esp_foc_motor_interface *self)
 {
     if(!self)
         return -EINVAL;
@@ -62,7 +65,18 @@ int esp_foc_motor_enable(struct esp_foc_motor_interface *self)
     return self->enable(self);
 }
 
-int esp_foc_motor_set_duty_cycles(struct esp_foc_motor_interface *self, float a, float b, float c)
+static inline int esp_foc_motor_disable(struct esp_foc_motor_interface *self)
+{
+    if(!self)
+        return -EINVAL;
+
+    if(!self->disable)
+        return -ENOTSUP;
+
+    return self->disable(self);
+}
+
+static inline int esp_foc_motor_set_duty_cycles(struct esp_foc_motor_interface *self, float a, float b, float c)
 {
     if(!self)
         return -EINVAL;
@@ -70,10 +84,10 @@ int esp_foc_motor_set_duty_cycles(struct esp_foc_motor_interface *self, float a,
     if(!self->set_duty_cycles)
         return -ENOTSUP;
 
-    return self->set_duty_cycles(Self, a, b, c);
+    return self->set_duty_cycles(self, a, b, c);
 }
 
-int esp_foc_motor_get_rotor_angle(struct esp_foc_motor_interface *self, float *angle)
+static inline int esp_foc_motor_get_rotor_angle(struct esp_foc_motor_interface *self, float *angle)
 {
     if(!self)
         return -EINVAL;
@@ -84,7 +98,18 @@ int esp_foc_motor_get_rotor_angle(struct esp_foc_motor_interface *self, float *a
     return self->get_rotor_angle(self, angle);
 }
 
-int esp_foc_motor_get_rotor_speed_dps(struct esp_foc_motor_interface *self, float *speed_dps)
+static inline int esp_foc_motor_get_electrical_angle(struct esp_foc_motor_interface *self, float *angle)
+{
+    if(!self)
+        return -EINVAL;
+
+    if(!self->get_electrical_angle)
+        return -ENOTSUP;
+
+    return self->get_electrical_angle(self, angle);
+}
+
+static inline int esp_foc_motor_get_rotor_speed_dps(struct esp_foc_motor_interface *self, float *speed_dps)
 {
     if(!self)
         return -EINVAL;
@@ -95,7 +120,7 @@ int esp_foc_motor_get_rotor_speed_dps(struct esp_foc_motor_interface *self, floa
     return self->get_rotor_speed_dps(self, speed_dps);
 }
 
-int esp_foc_motor_align_rotor(struct esp_foc_motor_interface *self)
+static inline int esp_foc_motor_align_rotor(struct esp_foc_motor_interface *self)
 {
     if(!self)
         return -EINVAL;
@@ -106,18 +131,18 @@ int esp_foc_motor_align_rotor(struct esp_foc_motor_interface *self)
     return self->align_rotor(self);
 }
 
-int esp_foc_motor_get_acumulated_angle(struct esp_foc_motor_interface *self, float *angle)
+static inline int esp_foc_motor_get_acumulated_angle(struct esp_foc_motor_interface *self, float *angle)
 {
     if(!self)
         return -EINVAL;
 
-    if(!self->get_acumulated_encoder)
+    if(!self->get_acumulated_angle)
         return -ENOTSUP;
 
     return self->get_acumulated_angle(self, angle);
 }
 
-int esp_foc_motor_get_encoder_ppr(struct esp_foc_motor_interface *self, float *ppr)
+static inline int esp_foc_motor_get_encoder_ppr(struct esp_foc_motor_interface *self, float *ppr)
 {
     if(!self)
         return -EINVAL;
@@ -128,7 +153,7 @@ int esp_foc_motor_get_encoder_ppr(struct esp_foc_motor_interface *self, float *p
     return self->get_encoder_ppr(self, ppr);
 }
 
-int esp_foc_motor_get_dc_bus_voltage(struct esp_foc_motor_interface *self, float *vdc)
+static inline int esp_foc_motor_get_dc_bus_voltage(struct esp_foc_motor_interface *self, float *vdc)
 {
     if(!self)
         return -EINVAL;
@@ -139,7 +164,7 @@ int esp_foc_motor_get_dc_bus_voltage(struct esp_foc_motor_interface *self, float
     return self->get_dc_bus_voltage(self, vdc);
 }
 
-int esp_foc_motor_get_currents(struct esp_foc_motor_interface *self, float *ia, float *ib, float *ic)
+static inline int esp_foc_motor_get_currents(struct esp_foc_motor_interface *self, float *ia, float *ib, float *ic)
 {
     if(!self)
         return -EINVAL;
@@ -150,7 +175,7 @@ int esp_foc_motor_get_currents(struct esp_foc_motor_interface *self, float *ia, 
     return self->get_currents(self, ia, ib, ic);
 }
 
-int esp_foc_motor_number_of_shunts(struct esp_foc_motor_interface *self, int *shunts)
+static inline int esp_foc_motor_number_of_shunts(struct esp_foc_motor_interface *self, int *shunts)
 {
     if(!self)
         return -EINVAL;
@@ -161,7 +186,7 @@ int esp_foc_motor_number_of_shunts(struct esp_foc_motor_interface *self, int *sh
     return self->number_of_shunts(self, shunts);
 }
 
-int esp_foc_motor_fetch_sensors(struct esp_foc_motor_interface *self)
+static inline int esp_foc_motor_fetch_sensors(struct esp_foc_motor_interface *self)
 {
     if(!self)
         return -EINVAL;
@@ -170,4 +195,15 @@ int esp_foc_motor_fetch_sensors(struct esp_foc_motor_interface *self)
         return -ENOTSUP;
 
     return self->fetch_sensors(self);
+}
+
+static inline int esp_foc_motor_set_pole_pairs(struct esp_foc_motor_interface *self, int32_t pole_pairs)
+{
+    if(!self)
+        return -EINVAL;
+
+    if(!self->set_pole_pairs)
+        return -ENOTSUP;
+
+    return self->set_pole_pairs(self, pole_pairs);
 }

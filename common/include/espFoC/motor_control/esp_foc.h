@@ -24,16 +24,21 @@
 
 #pragma once
 
+#include <string.h>
+#include <stdint.h>
+#include <stdbool.h>
 #include <math.h>
 #include <errno.h>
-#include <espFoC/esp_foc_motor_interface.h>
-#include <espFoC/esp_foc_svm.h>
-#include <espFoC/esp_foc_pid.h>
+#include "esp_foc_motor_interface.h"
+#include "esp_foc_svm.h"
+#include "esp_foc_pid.h"
+
+#define ESP_FOC_INNER_CONTROL_US_PERIOD     (250)
 
 struct esp_foc_motor_control {
     struct esp_foc_motor_interface *motor_hw;
-    struct esp_foc_pid pid_position;
-    struct esp_foc_pid pid_velocity;
+    struct esp_foc_pid *pid_position;
+    struct esp_foc_pid *pid_velocity;
 
     int position_control_cntr;
     int speed_control_cntr;
@@ -42,7 +47,12 @@ struct esp_foc_motor_control {
     float target_position_degrees;
     float current_speed_dps;
     float current_position_degrees;
+
+    bool is_enabled;
 };
+
+extern const int ESP_FOC_SPEED_CONTROL_RATIO;
+extern const int ESP_FOC_POSITION_CONTROL_RATIO;
 
 int esp_foc_init_controller(struct esp_foc_motor_control *ctl,
                             const struct esp_foc_motor_interface *hw);
@@ -58,5 +68,9 @@ int esp_foc_add_position_control(struct esp_foc_motor_control *ctl,
 
 int esp_foc_add_speed_control(struct esp_foc_motor_control *ctl,
                                 const struct esp_foc_pid *speed_pid);
+
+int esp_foc_enable_axis(struct esp_foc_motor_control *ctl);
+
+int esp_foc_disable_axis(struct esp_foc_motor_control *ctl);
 
 int esp_foc_controller_run(struct esp_foc_motor_control *ctl);

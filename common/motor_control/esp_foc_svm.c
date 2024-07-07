@@ -2,7 +2,7 @@
  * Copyright (c) 2021 Teslabs Engineering S.L.
  * SPDX-License-Identifier: Apache-2.0
  */
-#include <espFoC/esp_foc.h>
+#include <espFoC/motor_control/esp_foc.h>
 
 extern const float ESP_FOC_SQRT3;
 extern const float ESP_FOC_1_SQRT3;
@@ -45,25 +45,22 @@ int esp_foc_do_space_vector_pwm(const float v_alpha,
                         float *w)
 {
 	float a, b, c, mod;
+	float alpha = v_alpha, beta = v_beta;
 	float x, y, z;
-
-    if(!u || !v || !w)
-        return -EINVAL;
 
 	/* normalize and limit alpha-beta vector */
 	mod = sqrtf(v_alpha * v_alpha + v_beta * v_beta);
 	if (mod > ESP_FOC_SQRT3_2) {
-		v_alpha = v_alpha / mod * ESP_FOC_SQRT3_2;
-		v_beta = v_beta / mod * ESP_FOC_SQRT3_2;
+		alpha = v_alpha / mod * ESP_FOC_SQRT3_2;
+		beta = v_beta / mod * ESP_FOC_SQRT3_2;
 	}
 
 	/* do a modified inverse clarke transform to get an auxiliary frame
 	 * to compute the sector we are
 	 */
 
-
-	a = v_alpha - ESP_FOC_1_SQRT3 * v_beta;
-	b = ESP_FOC_2_SQRT3 * v_beta;
+	a = alpha - ESP_FOC_1_SQRT3 * beta;
+	b = ESP_FOC_2_SQRT3 * beta;
 	c = -(a + b);
 
 	switch (get_sector(a, b, c)) {

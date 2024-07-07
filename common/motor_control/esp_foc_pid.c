@@ -22,7 +22,8 @@
  * SOFTWARE.
  */
 
-#include <espFoc/esp_foc_pid.h>
+#include <errno.h>
+#include <espFoC/motor_control/esp_foc_pid.h>
 
 int esp_foc_pid_init(struct esp_foc_pid *p, float sample_time_seconds, float integral_limit)
 {

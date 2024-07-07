@@ -1,0 +1,29 @@
+/*
+ * Copyright (c) 2023 Felipe Neves <ryukokki.felipe@gmail.com>
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+ #include <zephyr/dt-bindings/i2c/i2c.h>
+ #include <zephyr/dt-bindings/pwm/pwm.h>
+
+ #include <zephyr/dt-bindings/pinctrl/esp-pinctrl-common.h>
+ #include <dt-bindings/pinctrl/esp32s3-pinctrl.h>
+ #include <zephyr/dt-bindings/pinctrl/esp32s3-gpio-sigmap.h>
+
+ / {
+	chosen {
+		/*
+		 * shared memory reserved for the inter-processor communication
+		 */
+		zephyr,ipc_shm = &shm0;
+		zephyr,ipc = &ipm0;
+	};
+};
+
+&ipm0 {
+	status = "okay";
+};
+
+&rtc {
+	status= "disabled";
+};

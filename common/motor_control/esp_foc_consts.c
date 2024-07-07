@@ -24,8 +24,8 @@
 
 const float ESP_FOC_M_PI = 3.14159f;
 const float ESP_FOC_2_M_PI = (2.0f * ESP_FOC_M_PI);
-const float ESP_FOC_2_3 = (2.0/3.0f);
-const float ESP_FOC_1_3 = (1.0/3.0f);
+const float ESP_FOC_2_3 = (2.0f/3.0f);
+const float ESP_FOC_1_3 = (1.0f/3.0f);
 const float ESP_FOC_SQRT3 = 1.73205080757f;
 const float ESP_FOC_1_SQRT3 = (1.0f / ESP_FOC_SQRT3);
 const float ESP_FOC_2_SQRT3 = (2.0f / ESP_FOC_SQRT3);

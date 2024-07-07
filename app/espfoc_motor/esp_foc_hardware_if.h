@@ -23,11 +23,13 @@
  */
 #pragma once
 
-#include <espFoc/esp_foc.h>
+#include <espFoC/motor_control/esp_foc.h>
 
-struct motor_hardware_stub {
-    struct esp_foc_motor_interface self;
+enum zephyr_esp_foc_instances {
+    Z_ESP_FOC_1 = 0,
+    Z_ESP_FOC_2,
+    Z_ESP_FOC_MAX,
 };
 
-int motor_hardware_stub_init(struct motor_hardware_stub *stub,
-                            struct esp_foc_motor_interface **itf);
+struct esp_foc_motor_interface* z_esp_foc_get_interface(enum zephyr_esp_foc_instances instance);
+int z_esp_foc_set_feedback(enum zephyr_esp_foc_instances instance, float value);
