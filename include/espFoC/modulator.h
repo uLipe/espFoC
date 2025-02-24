@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -39,12 +39,12 @@ static inline void esp_foc_modulate_dq_voltage (float theta,
 }
 
 static inline void esp_foc_get_dq_currents(float theta,
-                                        float i_u, 
-                                        float i_v, 
-                                        float i_w, 
-                                        float *i_q, 
+                                        float i_u,
+                                        float i_v,
+                                        float i_w,
+                                        float *i_q,
                                         float *i_d) {
-    
+
     float phase_current_frame[3] = {i_u, i_v, i_w};
     float ab_frame[2];
     esp_foc_clarke_transform(phase_current_frame,&ab_frame[0], &ab_frame[1]);

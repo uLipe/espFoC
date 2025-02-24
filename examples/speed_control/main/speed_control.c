@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -42,12 +42,12 @@ static esp_foc_motor_control_settings_t settings = {
     .velocity_control_settings.ki = 0.008f,
     .velocity_control_settings.kd = 0.0f,
     .velocity_control_settings.integrator_limit = 20000.0f,
-    .velocity_control_settings.max_output_value = 1.0f, //conservative setpoint to the current controller
+    .velocity_control_settings.max_output_value = 4.80f, //conservative setpoint to the current controller
     .torque_control_settings[0].max_output_value = 1.0f, //Uses the max driver voltage allowed as limit
     .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
 };
 
-static void initialize_foc_drivers(void) 
+static void initialize_foc_drivers(void)
 {
 
     inverter = inverter_3pwm_ledc_new(
@@ -57,6 +57,7 @@ static void initialize_foc_drivers(void)
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_V_PIN,
         CONFIG_FOC_PWM_W_PIN,
+        CONFIG_FOC_PWM_EN_PIN,
         12.0f,
         0
     );
@@ -101,8 +102,8 @@ void app_main(void)
     esp_foc_set_target_speed(&axis, (esp_foc_radians_per_second){.raw = -62.8});
 
     while (1) {
-        esp_foc_get_control_data(&axis, &control_data);        
+        esp_foc_get_control_data(&axis, &control_data);
         ESP_LOGI(TAG, "Current speed: %f [rad/S]", control_data.speed.raw);
         esp_foc_sleep_ms(200);
-    }    
+    }
 }
