@@ -29,6 +29,8 @@
 #include "esp_attr.h"
 #include "esp_log.h"
 
+#define ESP_FOC_ISENSOR_CALIBRATION_ROUNDS 100
+
 static const char * tag = "ESP_FOC";
 
 static inline float esp_foc_ticks_to_radians_normalized(esp_foc_axis_t *axis)
@@ -178,6 +180,9 @@ IRAM_ATTR static void esp_foc_sensors_loop(void *arg)
         axis->dt = now - axis->last_timestamp;
         axis->last_timestamp = now;
         axis->rotor_elec_angle = esp_foc_ticks_to_radians_normalized(axis);
+        if(axis->isensor_driver != NULL) {
+            axis->isensor_driver->sample_isensors(axis->isensor_driver);
+        }
 #ifdef CONFIG_ESP_FOC_SCOPE
         esp_foc_get_control_data(axis, &control_data);
         esp_foc_scope_data_push(&control_data);
@@ -188,6 +193,7 @@ IRAM_ATTR static void esp_foc_sensors_loop(void *arg)
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                     esp_foc_inverter_t *inverter,
                                     esp_foc_rotor_sensor_t *rotor,
+                                    esp_foc_isensor_t *isensor,
                                     esp_foc_motor_control_settings_t settings)
 {
     if(axis == NULL) {
@@ -207,6 +213,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
     axis->inverter_driver = inverter;
     axis->rotor_sensor_driver = rotor;
+    axis->isensor_driver = isensor;
 
     axis->dc_link_voltage =
         axis->inverter_driver->get_dc_link_voltage(axis->inverter_driver);
@@ -284,6 +291,32 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->natural_direction = (settings.natural_direction == ESP_FOC_MOTOR_NATURAL_DIRECTION_CW) ?
                                 1.0f : -1.0f;
 
+    if(axis->isensor_driver != NULL) {
+
+        axis->current_offsets[0] = 0.0f;
+        axis->current_offsets[1] = 0.0f;
+        axis->current_offsets[2] = 0.0f;
+
+        for(int i = 0; i < ESP_FOC_ISENSOR_CALIBRATION_ROUNDS; i++) {
+            isensor_values_t val;
+            axis->isensor_driver->sample_isensors(axis->isensor_driver);
+            esp_foc_sleep_ms(10);
+            axis->isensor_driver->fetch_isensors(axis->isensor_driver, &val);
+
+            axis->current_offsets[0] += val.iu_axis_0;
+            axis->current_offsets[1] += val.iv_axis_0;
+            axis->current_offsets[2] += val.iw_axis_0;
+        }
+
+        axis->current_offsets[0] /= ESP_FOC_ISENSOR_CALIBRATION_ROUNDS;
+        axis->current_offsets[1] /= ESP_FOC_ISENSOR_CALIBRATION_ROUNDS;
+        axis->current_offsets[2] /= ESP_FOC_ISENSOR_CALIBRATION_ROUNDS;
+
+        ESP_LOGI(tag, "ADC calibrated, phase current offsets are: %f, %f, %f",
+                axis->current_offsets[0],
+                axis->current_offsets[1],
+                axis->current_offsets[2] );
+    }
     return ESP_FOC_OK;
 }
 

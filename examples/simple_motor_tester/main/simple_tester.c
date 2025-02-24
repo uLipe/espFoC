@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -40,7 +40,7 @@ static esp_foc_motor_control_settings_t settings = {
     .motor_pole_pairs = 4, //Assuming HT2250 motor
 };
 
-static void initialize_foc_drivers(void) 
+static void initialize_foc_drivers(void)
 {
 
     inverter = inverter_3pwm_ledc_new(
