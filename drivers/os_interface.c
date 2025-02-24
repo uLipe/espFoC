@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,7 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
- 
+
 #include <sys/cdefs.h>
 #include <unistd.h>
 #include "espFoC/esp_foc.h"
@@ -30,10 +30,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "xtensa/hal.h"
+#include "esp_cpu.h"
 
 static const float scale = 0.000001f;
-static uint32_t cp0_regs[18];
-static uint32_t cp_state;
+static uint32_t cp0_regs[2][18];
+static uint32_t cp_state[2];
 static portMUX_TYPE spinlock =  portMUX_INITIALIZER_UNLOCKED;
 
 int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority)
@@ -64,27 +65,28 @@ float esp_foc_now_seconds(void)
 }
 
 /* the fpu in isr tricks below are required for xtensa based archs: */
-void esp_foc_fpu_isr_enter(void)
+void IRAM_ATTR esp_foc_fpu_isr_enter(void)
 {
-    cp_state = xthal_get_cpenable();
+    int cpu_id = esp_cpu_get_core_id();
+    cp_state[cpu_id] = xthal_get_cpenable();
 
-    if(cp_state) {
-        xthal_save_cp0(cp0_regs);   
+    if(cp_state[cpu_id]) {
+        xthal_save_cp0(&cp0_regs[cpu_id][0]);
     } else {
         xthal_set_cpenable(1);
     }
 }
 
-void esp_foc_fpu_isr_leave(void)
+void IRAM_ATTR esp_foc_fpu_isr_leave(void)
 {
-    if(cp_state) {
-        xthal_restore_cp0(cp0_regs);
+    int cpu_id = esp_cpu_get_core_id();
+
+    if(cp_state[cpu_id]) {
+        xthal_restore_cp0(&cp0_regs[cpu_id][0]);
     } else {
         xthal_set_cpenable(0);
     }
-
 }
-
 void esp_foc_critical_enter(void)
 {
     portENTER_CRITICAL(&spinlock);
