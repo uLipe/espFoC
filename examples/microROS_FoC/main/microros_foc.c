@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -114,7 +114,7 @@ static void micro_ros_task(void * arg)
     }
 }
 
-static void initialize_foc_drivers(void) 
+static void initialize_foc_drivers(void)
 {
 
     inverter = inverter_3pwm_ledc_new(
@@ -124,6 +124,7 @@ static void initialize_foc_drivers(void)
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_V_PIN,
         CONFIG_FOC_PWM_W_PIN,
+        CONFIG_FOC_PWM_EN_PIN,
         12.0f,
         0
     );

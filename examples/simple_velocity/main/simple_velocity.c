@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -47,7 +47,7 @@ static esp_foc_motor_control_settings_t settings = {
     .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
 };
 
-static void initialize_foc_drivers(void) 
+static void initialize_foc_drivers(void)
 {
 
     inverter = inverter_3pwm_ledc_new(
@@ -57,6 +57,7 @@ static void initialize_foc_drivers(void)
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_V_PIN,
         CONFIG_FOC_PWM_W_PIN,
+        CONFIG_FOC_PWM_EN_PIN,
         12.0f,
         0
     );
@@ -101,20 +102,16 @@ void app_main(void)
     esp_foc_run(&axis);
 
     /* Set velocity by using state vector given by vq+vd */
-    //esp_foc_set_target_voltage(&axis, (esp_foc_q_voltage){.raw = 0.0}, (esp_foc_d_voltage){.raw = 0.0});
-    esp_foc_set_target_speed(&axis, (esp_foc_radians_per_second){.raw = 6.28});
-    
+    esp_foc_set_target_voltage(&axis, (esp_foc_q_voltage){.raw = 0.0}, (esp_foc_d_voltage){.raw = 0.0});
+    /* ramp the velocity */
+    uq.raw = -1.0f;
+
     while(1) {
-        esp_foc_sleep_ms(200);
-
-        /* ramp the velocity */
-        if(uq.raw > 6.0f) {
-            uq.raw = -6.0f;
-        } else {
-            uq.raw += 0.2f;
-        }
-
-        esp_foc_get_control_data(&axis, &control_data);        
         esp_foc_set_target_voltage(&axis, uq, (esp_foc_d_voltage){.raw = 0.0});
+        uq.raw *= -1.0f;
+        esp_foc_sleep_ms(2000);
+        esp_foc_get_control_data(&axis, &control_data);
+        esp_foc_set_target_voltage(&axis, (esp_foc_q_voltage){.raw = 0.0}, (esp_foc_d_voltage){.raw = 0.0});
+        esp_foc_sleep_ms(100);
     }
 }

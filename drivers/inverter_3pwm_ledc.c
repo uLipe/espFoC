@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,16 +21,18 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
- 
+
 #include <sys/cdefs.h>
 #include "espFoC/inverter_3pwm_ledc.h"
 #include "hal/ledc_hal.h"
+#include "driver/gpio.h"
 #include "esp_attr.h"
 
 #define LEDC_FREQUENCY_HZ       20000
 #define LEDC_RESOLUTION_STEPS   255.0
 
 typedef struct {
+    int enable_gpio;
     ledc_dev_t *hw;
     float voltage_to_duty_ratio;
     float dc_link_voltage;
@@ -46,7 +48,7 @@ static bool ledc_driver_configured = false;
 
 DRAM_ATTR static esp_foc_ledc_inverter ledc[CONFIG_NOOF_AXIS];
 
-IRAM_ATTR static void ledc_isr(void *arg) 
+IRAM_ATTR static void ledc_isr(void *arg)
 {
     esp_foc_fpu_isr_enter();
 
@@ -64,7 +66,7 @@ IRAM_ATTR static void ledc_isr(void *arg)
     esp_foc_fpu_isr_leave();
 }
 
-/* This function is required because the ledc driver does not support update from 
+/* This function is required because the ledc driver does not support update from
  * ISR
  */
 IRAM_ATTR static void ledc_update(esp_foc_ledc_inverter *obj, ledc_channel_t channel, float duty)
@@ -72,12 +74,12 @@ IRAM_ATTR static void ledc_update(esp_foc_ledc_inverter *obj, ledc_channel_t cha
     /* set duty parameters */
     ledc_ll_set_hpoint(obj->hw, LEDC_LOW_SPEED_MODE, channel, 0);
     ledc_ll_set_duty_int_part(obj->hw, LEDC_LOW_SPEED_MODE, channel, duty);
-    ledc_ll_set_duty_direction(obj->hw, LEDC_LOW_SPEED_MODE, channel, LEDC_DUTY_DIR_INCREASE);    
+    ledc_ll_set_duty_direction(obj->hw, LEDC_LOW_SPEED_MODE, channel, LEDC_DUTY_DIR_INCREASE);
     ledc_ll_set_duty_num(obj->hw, LEDC_LOW_SPEED_MODE, channel, 1);
-    ledc_ll_set_duty_cycle(obj->hw, LEDC_LOW_SPEED_MODE, channel, 1);    
+    ledc_ll_set_duty_cycle(obj->hw, LEDC_LOW_SPEED_MODE, channel, 1);
     ledc_ll_set_duty_scale(obj->hw, LEDC_LOW_SPEED_MODE, channel, 0);
     ledc_ll_ls_channel_update(obj->hw, LEDC_LOW_SPEED_MODE, channel);
-    
+
     /* trigger the duty update */
     ledc_ll_set_sig_out_en(obj->hw, LEDC_LOW_SPEED_MODE, channel, true);
     ledc_ll_set_duty_start(obj->hw, LEDC_LOW_SPEED_MODE, channel, true);
@@ -86,7 +88,10 @@ IRAM_ATTR static void ledc_update(esp_foc_ledc_inverter *obj, ledc_channel_t cha
 
 IRAM_ATTR static float get_dc_link_voltage (esp_foc_inverter_t *self)
 {
-    return 1.0f;
+    esp_foc_ledc_inverter *obj =
+    __containerof(self, esp_foc_ledc_inverter, interface);
+
+    return obj->dc_link_voltage;
 }
 
 IRAM_ATTR static void set_voltages(esp_foc_inverter_t *self,
@@ -94,7 +99,7 @@ IRAM_ATTR static void set_voltages(esp_foc_inverter_t *self,
                     float v_v,
                     float v_w)
 {
-    esp_foc_ledc_inverter *obj = 
+    esp_foc_ledc_inverter *obj =
         __containerof(self, esp_foc_ledc_inverter, interface);
 
     if(v_u > obj->dc_link_voltage) {
@@ -124,7 +129,7 @@ IRAM_ATTR static void set_inverter_callback(esp_foc_inverter_t *self,
                         esp_foc_inverter_callback_t callback,
                         void *argument)
 {
-    esp_foc_ledc_inverter *obj = 
+    esp_foc_ledc_inverter *obj =
     __containerof(self, esp_foc_ledc_inverter, interface);
 
     obj->notifier = callback;
@@ -147,6 +152,23 @@ IRAM_ATTR static float get_inverter_pwm_rate (esp_foc_inverter_t *self)
     (void)self;
     return (float)LEDC_FREQUENCY_HZ;
 }
+
+IRAM_ATTR static void inverter_enable(esp_foc_inverter_t *self)
+{
+    esp_foc_ledc_inverter *obj =
+    __containerof(self, esp_foc_ledc_inverter, interface);
+
+    gpio_set_level(obj->enable_gpio, true);
+}
+
+IRAM_ATTR static void inverter_disable(esp_foc_inverter_t *self)
+{
+    esp_foc_ledc_inverter *obj =
+    __containerof(self, esp_foc_ledc_inverter, interface);
+
+    gpio_set_level(obj->enable_gpio, false);
+}
+
 
 static esp_err_t inverter_3pwm_ledc_init()
 {
@@ -171,6 +193,7 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
                                         int gpio_u,
                                         int gpio_v,
                                         int gpio_w,
+                                        int gpio_enable,
                                         float dc_link_voltage,
                                         int port)
 {
@@ -183,15 +206,25 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
         ledc_driver_configured = true;
     }
 
-    /* the PWM arguments now are limited to range 0 -- 1.0 */
-    (void)dc_link_voltage;
+    gpio_config_t drv_en_config = {
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = 1ULL << gpio_enable,
+    };
 
-    ledc[port].dc_link_voltage = 1.0f;
+    gpio_config(&drv_en_config);
+    gpio_set_level(gpio_enable, false);
+
+    /* the PWM arguments now are limited to range 0 -- 1.0 */
+    ledc[port].enable_gpio = gpio_enable;
+    ledc[port].dc_link_voltage = dc_link_voltage;
     ledc[port].interface.get_dc_link_voltage = get_dc_link_voltage;
     ledc[port].interface.set_voltages = set_voltages;
     ledc[port].interface.set_inverter_callback = set_inverter_callback;
     ledc[port].interface.phase_remap = phase_remap;
     ledc[port].interface.get_inverter_pwm_rate = get_inverter_pwm_rate;
+    ledc[port].interface.enable = inverter_enable;
+    ledc[port].interface.disable = inverter_disable;
+
     ledc[port].ledc_channel[0] = ch_u;
     ledc[port].ledc_channel[1] = ch_v;
     ledc[port].ledc_channel[2] = ch_w;
