@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -74,7 +74,7 @@ typedef struct {
 
 typedef struct {
     esp_foc_seconds timestamp;
-    
+
     esp_foc_seconds dt;
     esp_foc_u_voltage u;
     esp_foc_v_voltage v;
@@ -97,6 +97,7 @@ typedef struct {
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                     esp_foc_inverter_t *inverter,
                                     esp_foc_rotor_sensor_t *rotor,
+                                    esp_foc_isensor_t *isensor,
                                     esp_foc_motor_control_settings_t settings);
 
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis);
@@ -105,7 +106,7 @@ esp_foc_seconds esp_foc_get_runner_dt(esp_foc_axis_t *axis);
 
 esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis,
                                         esp_foc_q_voltage uq,
-                                        esp_foc_d_voltage ud);                                        
+                                        esp_foc_d_voltage ud);
 
 esp_foc_err_t esp_foc_set_target_speed(esp_foc_axis_t *axis, esp_foc_radians_per_second speed);
 

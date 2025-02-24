@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,19 +21,19 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
- 
-#pragma once 
+
+#pragma once
 
 #include "espFoC/esp_foc.h"
-#include "driver/adc.h"
+#include "esp_adc/adc_continuous.h"
 #include "esp_err.h"
 
 typedef struct {
-    adc_bits_width_t width;
     adc_channel_t axis_channels[4];
-    int noof_axis;
+    float amp_gain;
+    float shunt_resistance;
+    int number_of_channels;
 }esp_foc_isensor_adc_config_t;
 
 
-esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config,
-                                float adc_to_current_scale);
+esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config);

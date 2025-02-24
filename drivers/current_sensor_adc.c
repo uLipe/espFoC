@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,134 +24,147 @@
 
 #include <sys/cdefs.h>
 #include <stdbool.h>
+#include <sdkconfig.h>
 #include "espFoC/current_sensor_adc.h"
 #include "hal/adc_hal.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 
-#if CONFIG_IDF_TARGET_ESP32S3
-
-#define ADC_RESULT_BYTE     4
-#define ADC_CONV_LIMIT_EN   0
-#define ADC_CONV_MODE       ADC_CONV_BOTH_UNIT
-#define ADC_OUTPUT_TYPE     ADC_DIGI_OUTPUT_FORMAT_TYPE2
-
-#define ISENSOR_ADC_BUFFER_SIZE      1024
-#define GET_UNIT(x)        ((x>>3) & 0x1)
+#if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S2
+#define ADC_GET_CHANNEL(p_data)     ((p_data)->type1.channel)
+#define ADC_GET_DATA(p_data)        ((p_data)->type1.data)
+#else
+#define ADC_GET_CHANNEL(p_data)     ((p_data)->type2.channel)
+#define ADC_GET_DATA(p_data)        ((p_data)->type2.data)
+#endif
 
 static const char *TAG = "ESP_FOC_ISENSOR";
 
 typedef struct {
+    adc_channel_t channels[4];
+    adc_continuous_handle_t handle;
     float adc_to_current_scale;
-    isensor_values_t currents;
+    float currents[4];
     esp_foc_isensor_t interface;
-    uint8_t noof_channels;
+    int number_of_channels;
 }isensor_adc_t;
+
+static adc_continuous_handle_cfg_t adc_config = {
+    .max_store_buf_size = 1024 * SOC_ADC_DIGI_RESULT_BYTES,
+    .conv_frame_size = 4 * SOC_ADC_DIGI_RESULT_BYTES,
+    .flags = {
+        .flush_pool = 1,
+    },
+};
+
+static adc_continuous_config_t dig_cfg = {
+#if CONFIG_IDF_TARGET_ESP32
+    .sample_freq_hz = 500000,
+#else
+    .sample_freq_hz = 83333,
+#endif
+    .conv_mode = ADC_CONV_SINGLE_UNIT_1,
+    .pattern_num = 2,
+#if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S2
+    .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1,
+#else
+    .format = ADC_DIGI_OUTPUT_FORMAT_TYPE2,
+#endif
+};
 
 DRAM_ATTR static isensor_adc_t isensor_adc;
 static bool adc_initialized = false;
+static const float adc_to_volts = ((3.9f) / 4096.0f);
 
-static void continuous_adc_init(uint16_t adc1_chan_mask, uint16_t adc2_chan_mask, adc_channel_t *channel, uint8_t channel_num)
+static bool IRAM_ATTR isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
 {
-    adc_digi_init_config_t adc_dma_config = {
-        .max_store_buf_size = ISENSOR_ADC_BUFFER_SIZE,
-        .conv_num_each_intr = channel_num,
-        .adc1_chan_mask = adc1_chan_mask,
-        .adc2_chan_mask = adc2_chan_mask,
-    };
-   adc_digi_initialize(&adc_dma_config);
+    adc_hal_digi_connect(false);
+    adc_hal_digi_enable(false);
 
-    adc_digi_configuration_t dig_cfg = {
-        .conv_limit_en = ADC_CONV_LIMIT_EN,
-        .conv_limit_num = 250,
-        .sample_freq_hz = SOC_ADC_SAMPLE_FREQ_THRES_HIGH,
-        .conv_mode = ADC_CONV_MODE,
-        .format = ADC_OUTPUT_TYPE,
-    };
+    esp_foc_fpu_isr_enter();
+    isensor_adc_t *isensor = (isensor_adc_t *)user_data;
+    adc_digi_output_data_t *p = (adc_digi_output_data_t *)edata->conv_frame_buffer;
 
-    adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
-    dig_cfg.pattern_num = channel_num;
-    for (int i = 0; i < channel_num; i++) {
-        uint8_t unit = GET_UNIT(channel[i]);
-        uint8_t ch = channel[i] & 0x7;
-        adc_pattern[i].atten = ADC_ATTEN_DB_0;
-        adc_pattern[i].channel = ch;
-        adc_pattern[i].unit = unit;
-        adc_pattern[i].bit_width = SOC_ADC_DIGI_MAX_BITWIDTH;
-
-        ESP_LOGI(TAG, "adc_pattern[%d].atten is :%x", i, adc_pattern[i].atten);
-        ESP_LOGI(TAG, "adc_pattern[%d].channel is :%x", i, adc_pattern[i].channel);
-        ESP_LOGI(TAG, "adc_pattern[%d].unit is :%x", i, adc_pattern[i].unit);
+    for(int i = 0; i < isensor->number_of_channels; i++) {
+        isensor->currents[i] = ((float)ADC_GET_DATA(p)) * isensor->adc_to_current_scale;
+        p++;
     }
-    dig_cfg.adc_pattern = adc_pattern;
-    adc_digi_controller_configure(&dig_cfg);
+
+    esp_foc_fpu_isr_leave();
+    return false;
 }
 
+static const adc_continuous_evt_cbs_t cbs = {
+    .on_conv_done = isensor_adc_done_callback,
+};
+
+static void continuous_adc_init(isensor_adc_t *isensor)
+{
+    adc_config.conv_frame_size = isensor->number_of_channels * SOC_ADC_DIGI_RESULT_BYTES;
+    adc_continuous_new_handle(&adc_config, &isensor->handle);
+
+    adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
+    for (int i = 0; i < isensor->number_of_channels; i++) {
+        adc_pattern[i].atten = ADC_ATTEN_DB_12;
+        adc_pattern[i].channel = isensor->channels[i] & 0x7;
+        adc_pattern[i].unit = 0;
+        adc_pattern[i].bit_width = SOC_ADC_DIGI_MAX_BITWIDTH;
+
+        ESP_LOGI(TAG, "adc_pattern[%d].atten is :%"PRIx8, i, adc_pattern[i].atten);
+        ESP_LOGI(TAG, "adc_pattern[%d].channel is :%"PRIx8, i, adc_pattern[i].channel);
+        ESP_LOGI(TAG, "adc_pattern[%d].unit is :%"PRIx8, i, adc_pattern[i].unit);
+    }
+
+    dig_cfg.adc_pattern = adc_pattern;
+    adc_continuous_config(isensor->handle, &dig_cfg);
+    adc_continuous_register_event_callbacks(isensor->handle, &cbs, isensor);
+    adc_continuous_start(isensor->handle);
+}
 
 IRAM_ATTR static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
 {
-    isensor_adc_t *obj = 
+    isensor_adc_t *obj =
         __containerof(self, isensor_adc_t, interface);
 
-    uint32_t ret_num;
-    adc_digi_output_data_t result[obj->noof_channels];
- 
-    esp_err_t err = adc_digi_read_bytes((uint8_t *)&result, 
-                                    obj->noof_channels * sizeof(adc_digi_output_data_t),
-                                    &ret_num,
-                                    0);
+    esp_foc_critical_enter();
 
-    if(err == ESP_OK) {
+    values->iu_axis_0 = obj->currents[0];
+    values->iv_axis_0 = obj->currents[1];
+    values->iw_axis_0 = -(obj->currents[0] + obj->currents[1]);
+    values->iu_axis_1 = obj->currents[2];
+    values->iv_axis_1 = obj->currents[3];
+    values->iw_axis_1 = -(obj->currents[2] + obj->currents[3]);
 
-        obj->currents.iu_axis_0 = (float)result[0].type2.data * obj->adc_to_current_scale;
-        obj->currents.iv_axis_0 = (float)result[1].type2.data * obj->adc_to_current_scale;
-        obj->currents.iw_axis_0 = obj->currents.iu_axis_0 + obj->currents.iv_axis_0;
-
-        if(obj->noof_channels > 2) {
-            obj->currents.iu_axis_1 = (float)result[2].type2.data * obj->adc_to_current_scale;
-            obj->currents.iv_axis_1 = (float)result[3].type2.data * obj->adc_to_current_scale;
-            obj->currents.iw_axis_1 = obj->currents.iu_axis_1 + obj->currents.iv_axis_1;
-        } 
-    }
+    esp_foc_critical_leave();
 }
 
 IRAM_ATTR static void sample_isensors(esp_foc_isensor_t *self)
 {
-    (void)self;    
-    adc_digi_start();
+    (void)self;
+    adc_hal_digi_connect(true);
+    adc_hal_digi_enable(true);
 }
 
-
-esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config,
-                                float adc_to_current_scale)
-
+esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
 {
-    uint16_t adc1_chan_mask = 0;
-    uint16_t adc2_chan_mask = 0;
-    uint8_t noof_channels = config->noof_axis * 2;
 
     if(adc_initialized == true) {
         return &isensor_adc.interface;
     }
 
-    adc_initialized = true;
+    isensor_adc.adc_to_current_scale = (1.0f / config->amp_gain / config->shunt_resistance) *
+                                        adc_to_volts;
 
-    adc_digi_stop();
-
-    for(uint8_t i = 0; i < noof_channels; i++) {
-        if(config->axis_channels[i] != 0xFF) {
-            adc1_chan_mask |= (1 << config->axis_channels[i]);
-        }
-    } 
-
-    continuous_adc_init(adc1_chan_mask, adc2_chan_mask, config->axis_channels, noof_channels);
-
-    isensor_adc.adc_to_current_scale = adc_to_current_scale;
     isensor_adc.interface.fetch_isensors = fetch_isensors;
     isensor_adc.interface.sample_isensors = sample_isensors;
-    isensor_adc.noof_channels = noof_channels;
+    isensor_adc.number_of_channels = config->number_of_channels;
+    isensor_adc.channels[0] = config->axis_channels[0];
+    isensor_adc.channels[1] = config->axis_channels[1];
+    isensor_adc.channels[2] = config->axis_channels[2];
+    isensor_adc.channels[3] = config->axis_channels[3];
+
+    continuous_adc_init(&isensor_adc);
+    adc_initialized = true;
 
     return &isensor_adc.interface;
 }
-
-#endif

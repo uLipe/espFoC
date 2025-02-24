@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -72,10 +72,12 @@ typedef struct {
     float biased_dc_link_voltage;
     float motor_pole_pairs;
     float natural_direction;
-    
+
     float estimators_sample_rate;
     int downsampling_estimators;
     int downsampling_estimators_reload_val;
+
+    float current_offsets[3];
 
     esp_foc_err_t rotor_aligned;
     esp_foc_pid_controller_t velocity_controller;
