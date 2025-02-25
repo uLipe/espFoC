@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-#pragma once 
+#pragma once
 
 #ifdef CONFIG_ESP_FOC_CUSTOM_MATH
 extern const float ESP_FOC_FAST_PI;
@@ -32,18 +32,17 @@ extern const float ESP_FOC_SIN_COS_APPROX_C;
 extern const float ESP_FOC_SIN_COS_APPROX_P;
 extern const float ESP_FOC_SIN_COS_APPROX_D;
 #endif
- 
+
 extern const float ESP_FOC_CLARKE_K1;
 extern const float ESP_FOC_CLARKE_K2;
 extern const float ESP_FOC_CLARKE_PARK_SQRT3;
 extern const float ESP_FOC_CLARKE_K3;
 
-static inline float esp_foc_sine(float x) 
+static inline float esp_foc_sine(float x)
 {
 #ifdef CONFIG_ESP_FOC_CUSTOM_MATH
-    float y = ESP_FOC_SIN_COS_APPROX_B * x + 
-        ESP_FOC_SIN_COS_APPROX_C * x * (x < 0 ? -x : x);
-    return ESP_FOC_SIN_COS_APPROX_P * (y * (y < 0 ? -y : y) - y) + y;
+    extern float esp_foc_fast_sine(float angle);
+    return esp_foc_fast_sine(x);
 #else
     return sinf(x);
 #endif
@@ -52,16 +51,14 @@ static inline float esp_foc_sine(float x)
 static inline float esp_foc_cosine(float x)
 {
 #ifdef CONFIG_ESP_FOC_CUSTOM_MATH
-    x = (x > 0) ? -x : x;
-    x += ESP_FOC_SIN_COS_APPROX_D;
-
-    return esp_foc_sine(x);
+    extern float esp_foc_fast_cosine(float angle);
+    return esp_foc_fast_cosine(x);
 #else
     return cosf(x);
 #endif
 }
 
-static inline float esp_foc_mechanical_to_elec_angle(float mech_angle, 
+static inline float esp_foc_mechanical_to_elec_angle(float mech_angle,
                                                     float pole_pairs)
 {
     return(mech_angle * pole_pairs);
@@ -69,28 +66,24 @@ static inline float esp_foc_mechanical_to_elec_angle(float mech_angle,
 
 static inline float esp_foc_normalize_angle(float angle)
 {
-#ifdef CONFIG_ESP_FOC_CUSTOM_MATH
-    float result =  fmod(angle, ESP_FOC_FAST_2PI);
-    if(result > ESP_FOC_FAST_PI) {
-        result -= ESP_FOC_FAST_2PI;  
-    }
-#else 
+#ifndef CONFIG_ESP_FOC_CUSTOM_MATH
     const float full2pi = M_PI * 2.0f;
     float result =  fmod(angle, full2pi);
 
     if(result > M_PI) {
-        result -= full2pi;  
+        result -= full2pi;
     }
-#endif
-
     return result;
+#else
+    return angle;
+#endif
 }
 
-static inline void esp_foc_clarke_transform (float v_uvw[3], 
-                                            float * v_aplha, 
+static inline void esp_foc_clarke_transform (float v_uvw[3],
+                                            float * v_aplha,
                                             float *v_beta)
 {
-    *v_aplha = ESP_FOC_CLARKE_K1 * v_uvw[0] - 
+    *v_aplha = ESP_FOC_CLARKE_K1 * v_uvw[0] -
         ESP_FOC_CLARKE_K2 * (v_uvw[1] - v_uvw[2]);
 
     *v_beta = ESP_FOC_CLARKE_K3  * (v_uvw[1] - v_uvw[2]);
@@ -106,9 +99,9 @@ static inline void esp_foc_park_transform (float theta,
 
     *v_d = v_ab[0] * cos +
         v_ab[1] * sin;
-    
+
     *v_q = v_ab[1] * cos -
-        v_ab[0] * sin;    
+        v_ab[0] * sin;
 }
 
 static inline void esp_foc_inverse_clarke_transform (float v_ab[2],
@@ -118,7 +111,7 @@ static inline void esp_foc_inverse_clarke_transform (float v_ab[2],
 {
     *v_u = v_ab[0];
     *v_v = (-v_ab[0] + ESP_FOC_CLARKE_PARK_SQRT3 * v_ab[1]) * 0.5f;
-    *v_w = (-v_ab[0] - ESP_FOC_CLARKE_PARK_SQRT3 * v_ab[1]) * 0.5f;  
+    *v_w = (-v_ab[0] - ESP_FOC_CLARKE_PARK_SQRT3 * v_ab[1]) * 0.5f;
 }
 
 static inline void esp_foc_inverse_park_transform (float theta,
@@ -131,7 +124,7 @@ static inline void esp_foc_inverse_park_transform (float theta,
 
     *v_alpha = v_dq[0] * cos -
         v_dq[1] * sin;
-    
+
     *v_beta = v_dq[1] * cos +
-        v_dq[0] * sin;    
+        v_dq[0] * sin;
 }
