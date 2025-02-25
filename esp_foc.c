@@ -305,7 +305,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
             axis->current_offsets[0] += val.iu_axis_0;
             axis->current_offsets[1] += val.iv_axis_0;
-            axis->current_offsets[2] += val.iw_axis_0;
+            axis->current_offsets[2] += val.iv_axis_0;
         }
 
         axis->current_offsets[0] /= ESP_FOC_ISENSOR_CALIBRATION_ROUNDS;

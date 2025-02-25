@@ -50,6 +50,7 @@ static void initialize_foc_drivers(void)
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_V_PIN,
         CONFIG_FOC_PWM_W_PIN,
+        CONFIG_FOC_PWM_EN_PIN,
         12.0f,
         0
     );
