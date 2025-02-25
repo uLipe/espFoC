@@ -50,10 +50,10 @@ typedef struct {
 }isensor_adc_t;
 
 static adc_continuous_handle_cfg_t adc_config = {
-    .max_store_buf_size = 1024 * SOC_ADC_DIGI_RESULT_BYTES,
-    .conv_frame_size = 4 * SOC_ADC_DIGI_RESULT_BYTES,
+    .max_store_buf_size = 256 * SOC_ADC_DIGI_RESULT_BYTES,
+    .conv_frame_size = 2 * SOC_ADC_DIGI_RESULT_BYTES,
     .flags = {
-        .flush_pool = 1,
+        .flush_pool = 0,
     },
 };
 
@@ -72,9 +72,11 @@ static adc_continuous_config_t dig_cfg = {
 #endif
 };
 
+static adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
+
 DRAM_ATTR static isensor_adc_t isensor_adc;
 static bool adc_initialized = false;
-static const float adc_to_volts = ((3.9f) / 4096.0f);
+static const float adc_to_volts = ((3.9f)/ 4096.0f);
 
 static bool IRAM_ATTR isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
 {
@@ -103,7 +105,6 @@ static void continuous_adc_init(isensor_adc_t *isensor)
     adc_config.conv_frame_size = isensor->number_of_channels * SOC_ADC_DIGI_RESULT_BYTES;
     adc_continuous_new_handle(&adc_config, &isensor->handle);
 
-    adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
     for (int i = 0; i < isensor->number_of_channels; i++) {
         adc_pattern[i].atten = ADC_ATTEN_DB_12;
         adc_pattern[i].channel = isensor->channels[i] & 0x7;
@@ -116,6 +117,7 @@ static void continuous_adc_init(isensor_adc_t *isensor)
     }
 
     dig_cfg.adc_pattern = adc_pattern;
+    dig_cfg.pattern_num =  isensor->number_of_channels;
     adc_continuous_config(isensor->handle, &dig_cfg);
     adc_continuous_register_event_callbacks(isensor->handle, &cbs, isensor);
     adc_continuous_start(isensor->handle);
