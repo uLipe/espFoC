@@ -37,6 +37,7 @@ extern const float ESP_FOC_CLARKE_K1;
 extern const float ESP_FOC_CLARKE_K2;
 extern const float ESP_FOC_CLARKE_PARK_SQRT3;
 extern const float ESP_FOC_CLARKE_K3;
+extern const float ESP_FOC_SQRT3_TWO;
 
 static inline float esp_foc_sine(float x)
 {
@@ -55,6 +56,16 @@ static inline float esp_foc_cosine(float x)
     return esp_foc_fast_cosine(x);
 #else
     return cosf(x);
+#endif
+}
+
+static inline float esp_foc_sqrtf(float x)
+{
+#ifdef CONFIG_ESP_FOC_CUSTOM_MATH
+    extern float esp_foc_fast_sqrt(float x);
+    return esp_foc_fast_sqrt(x);
+#else
+    return sqrtf(x);
 #endif
 }
 
@@ -109,9 +120,15 @@ static inline void esp_foc_inverse_clarke_transform (float v_ab[2],
                                                     float *v_v,
                                                     float *v_w)
 {
-    *v_u = v_ab[0];
-    *v_v = (-v_ab[0] + ESP_FOC_CLARKE_PARK_SQRT3 * v_ab[1]) * 0.5f;
-    *v_w = (-v_ab[0] - ESP_FOC_CLARKE_PARK_SQRT3 * v_ab[1]) * 0.5f;
+    float a,b,c;
+
+    a = v_ab[0];
+    b = ((ESP_FOC_CLARKE_PARK_SQRT3 * v_ab[1]) - v_ab[0]) * 0.5f;
+    c = -a - b;
+
+    *v_u = a;
+    *v_v = b;
+    *v_w = c;
 }
 
 static inline void esp_foc_inverse_park_transform (float theta,
@@ -127,4 +144,39 @@ static inline void esp_foc_inverse_park_transform (float theta,
 
     *v_beta = v_dq[1] * cos +
         v_dq[0] * sin;
+}
+
+static inline void esp_foc_limit_voltage(float *v_alpha, float *v_beta, float v_dc)
+{
+    float v_max = v_dc;
+    float v_mag = esp_foc_sqrtf((*v_alpha) * (*v_alpha) + (*v_beta) * (*v_beta));
+
+    if (v_mag > v_max) {
+        float scale = v_max / v_mag;
+        *v_alpha *= scale;
+        *v_beta *= scale;
+    }
+}
+
+static inline void esp_foc_apply_bias(float *v_alpha, float *v_beta)
+{
+    *v_alpha = (*v_alpha * 0.5f) + 0.5f;
+    *v_beta = (*v_beta * 0.5f) + 0.5f;
+}
+
+static inline void esp_foc_third_harmonic_injection(float *v_alpha, float *v_beta)
+{
+
+#ifdef CONFIG_ESP_FOC_COMP_THI
+    float v_max = fmaxf(fmaxf(*v_alpha, *v_beta), 0.0f);
+    float v_min = fminf(fminf(*v_alpha, *v_beta), 0.0f);
+    float v_offset = (v_max + v_min) * 0.5f;
+
+    *v_alpha -= v_offset;
+    *v_beta  -= v_offset;
+
+    *v_alpha *= 0.95f;
+    *v_beta  *= 0.95f;
+#endif
+
 }

@@ -102,20 +102,20 @@ IRAM_ATTR static void set_voltages(esp_foc_inverter_t *self,
     esp_foc_ledc_inverter *obj =
         __containerof(self, esp_foc_ledc_inverter, interface);
 
-    if(v_u > obj->dc_link_voltage) {
-        v_u = obj->dc_link_voltage;
+    if(v_u > 1.0f) {
+        v_u = 1.0f;
     } else if (v_u < 0.0f) {
         v_u = 0.0f;
     }
 
-    if(v_v > obj->dc_link_voltage) {
-        v_v = obj->dc_link_voltage;
+    if(v_v > 1.0f) {
+        v_v = 1.0f;
     } else if (v_v < 0.0f) {
         v_v = 0.0f;
     }
 
-    if(v_w > obj->dc_link_voltage) {
-        v_w = obj->dc_link_voltage;
+    if(v_w > 1.0f) {
+        v_w = 1.0f;
     } else if (v_w < 0.0f) {
         v_w = 0.0f;
     }
@@ -266,7 +266,8 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
     }
 
     ledc[port].hw = LEDC_LL_GET_HW();
-    ledc[port].voltage_to_duty_ratio = LEDC_RESOLUTION_STEPS / ledc[port].dc_link_voltage;
+
+    ledc[port].voltage_to_duty_ratio = LEDC_RESOLUTION_STEPS;
 
     return &ledc[port].interface;
 }
