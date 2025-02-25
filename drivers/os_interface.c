@@ -29,12 +29,20 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
+#ifdef __XTENSA__
 #include "xtensa/hal.h"
+#endif
+
 #include "esp_cpu.h"
 
 static const float scale = 0.000001f;
+
+#ifdef __XTENSA__
 static uint32_t cp0_regs[2][18];
 static uint32_t cp_state[2];
+#endif
+
 static portMUX_TYPE spinlock =  portMUX_INITIALIZER_UNLOCKED;
 
 int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority)
@@ -67,6 +75,8 @@ float esp_foc_now_seconds(void)
 /* the fpu in isr tricks below are required for xtensa based archs: */
 void IRAM_ATTR esp_foc_fpu_isr_enter(void)
 {
+
+#ifdef __XTENSA__
     int cpu_id = esp_cpu_get_core_id();
     cp_state[cpu_id] = xthal_get_cpenable();
 
@@ -75,10 +85,14 @@ void IRAM_ATTR esp_foc_fpu_isr_enter(void)
     } else {
         xthal_set_cpenable(1);
     }
+#endif
+
 }
 
 void IRAM_ATTR esp_foc_fpu_isr_leave(void)
 {
+
+#ifdef __XTENSA__
     int cpu_id = esp_cpu_get_core_id();
 
     if(cp_state[cpu_id]) {
@@ -86,6 +100,8 @@ void IRAM_ATTR esp_foc_fpu_isr_leave(void)
     } else {
         xthal_set_cpenable(0);
     }
+#endif
+
 }
 void esp_foc_critical_enter(void)
 {

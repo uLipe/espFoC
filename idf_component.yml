@@ -6,6 +6,7 @@ version: 0.0.1
 targets:
   - esp32
   - esp32s3
+  - esp32p4
 tags:
   - industrial
   - motor
