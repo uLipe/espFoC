@@ -2,3 +2,4 @@
 /.vscode/
 *.o
 *.lock
+/dist/

@@ -37,7 +37,7 @@ static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
     .downsampling_position_rate = 160, // position control runs 1/4 rate speed control,
     .downsampling_speed_rate = 40, //speed control runs 1/40 torque loop
-    .motor_pole_pairs = 7, //Assuming HT2250 motor
+    .motor_pole_pairs = 4, //Assuming HT2250 motor
     .position_control_settings.kp = 1.8f,
     .position_control_settings.ki = 0.0f,
     .position_control_settings.kd = 0.0f,
@@ -64,7 +64,7 @@ static void initialize_foc_drivers(void)
         CONFIG_FOC_PWM_V_PIN,
         CONFIG_FOC_PWM_W_PIN,
         CONFIG_FOC_PWM_EN_PIN,
-        12.0f,
+        24.0f,
         0
     );
 
@@ -108,7 +108,7 @@ void app_main(void)
     esp_foc_run(&axis);
 
     while(1) {
-        esp_foc_set_target_position(&axis, (esp_foc_radians){.raw = 3.1416});
+        esp_foc_set_target_position(&axis, (esp_foc_radians){.raw = -3.1416});
         esp_foc_sleep_ms(2500);
         esp_foc_get_control_data(&axis, &control_data);
         ESP_LOGI(TAG, "Current mechanical position: %f [rad]", control_data.position.raw);
