@@ -1,4 +1,7 @@
 dependencies:
+  uLipe/espFoC:
+    version: "*"
+    registry_url: https://components-staging.espressif.com
   idf: '>=5.0'
 description: ESP32 FoC Motor controller
 repository: git://github.com/uLipe/espFoC.git
