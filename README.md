@@ -3,7 +3,9 @@
 ![Build](https://github.com/uLipe/espFoC/workflows/Build/badge.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-espFoC is a simple implementation of voltage mode, vector controller intended to be used with permanent-magnet synchronous motors (PMSM), and general brushless motors. This component was developed to be used with the ESP-IDF 
+![alt text](doc/images/pos_ctl.gif)
+
+espFoC is a simple implementation of voltage mode, vector controller intended to be used with permanent-magnet synchronous motors (PMSM), and general brushless motors. This component was developed to be used with the ESP-IDF
 espressif framework.
 
 ## Features:
@@ -24,16 +26,16 @@ espressif framework.
 * Inside of your IDF project CMakeLists.txt set or add the path of this component to EXTRA_COMPONENT_DIRS for example: `set(EXTRA_COMPONENT_DIRS "path/to/this/component/")`
 * For batteries included getting started, refer the examples folder.
 * Inside of any of examples just build: `$ idf.py build flash`
- 
+
 ## Typical wiring:
 * espFoC is intended to run on ESP32 board plus a motor driver;
 * The current driver supports 3-PWM output suited to: L6230, DRV83xx and others;
-* The suggested wiring for quick get started is shown below: 
+* The suggested wiring for quick get started is shown below:
 ![Wiring](/doc/images/wiring.png)
 
 
 ## Debug with Better Serial Plot:
-* Install Better Serial Plot from here: https://hackaday.io/project/181686-better-serial-plotter 
+* Install Better Serial Plot from here: https://hackaday.io/project/181686-better-serial-plotter
 * In menuconfing enable the option: `CONFIG_ESP_FOC_SCOPE`
 * Download the firmware for your target board;
 * Open the Better Serial Port and select the port and baud rate of your board;
