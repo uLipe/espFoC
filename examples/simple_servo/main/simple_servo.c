@@ -106,12 +106,15 @@ void app_main(void)
 
     esp_foc_align_axis(&axis);
     esp_foc_run(&axis);
-    esp_foc_set_target_position(&axis, (esp_foc_radians){.raw = 628});
 
     while(1) {
+        esp_foc_set_target_position(&axis, (esp_foc_radians){.raw = 3.1416});
+        esp_foc_sleep_ms(2500);
         esp_foc_get_control_data(&axis, &control_data);
         ESP_LOGI(TAG, "Current mechanical position: %f [rad]", control_data.position.raw);
-        esp_foc_sleep_ms(200);
+        esp_foc_set_target_position(&axis, (esp_foc_radians){.raw = 0.0f});
+        esp_foc_sleep_ms(2500);
+        esp_foc_get_control_data(&axis, &control_data);
+        ESP_LOGI(TAG, "Current mechanical position: %f [rad]", control_data.position.raw);
     }
-
 }

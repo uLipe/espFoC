@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,7 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
- 
+
 #include <math.h>
 #include "espFoC/rotor_sensor_as5600.h"
 #include "driver/gpio.h"
@@ -33,7 +33,7 @@
 #define AS5600_SLAVE_ADDR 0x36
 #define AS5600_ANGLE_REGISTER_H 0x0E
 #define AS5600_PULSES_PER_REVOLUTION 4096.0f
-#define AS5600_READING_MASK 0xFFF 
+#define AS5600_READING_MASK 0xFFF
 
 static const char *tag = "ROTOR_SENSOR_AS5600";
 
@@ -50,7 +50,7 @@ static bool i2c_bus_configured = false;
 DRAM_ATTR static esp_foc_as5600_t rotor_sensors[CONFIG_NOOF_AXIS];
 static const float encoder_wrap_value = AS5600_PULSES_PER_REVOLUTION * 0.95f;
 
-IRAM_ATTR static uint16_t read_angle_sensor(int i2c_port) 
+IRAM_ATTR static uint16_t read_angle_sensor(int i2c_port)
 {
     uint8_t write_buffer = AS5600_ANGLE_REGISTER_H;
     uint8_t read_buffer[2] = {0,0};
@@ -65,7 +65,7 @@ IRAM_ATTR static uint16_t read_angle_sensor(int i2c_port)
                                         read_buffer,
                                         2,
                                         portMAX_DELAY);
- 
+
     } while (err != ESP_OK);
 
     raw = read_buffer[0];
@@ -114,7 +114,7 @@ IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
     float delta = (float)raw - obj->previous;
 
     if(fabs(delta) >= encoder_wrap_value) {
-        obj->accumulated = (delta < 0.0f) ? 
+        obj->accumulated = (delta < 0.0f) ?
             obj->accumulated + AS5600_PULSES_PER_REVOLUTION :
                 obj->accumulated - AS5600_PULSES_PER_REVOLUTION;
     }

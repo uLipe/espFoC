@@ -70,6 +70,7 @@ typedef struct {
 
     float dc_link_voltage;
     float biased_dc_link_voltage;
+    float dc_link_to_normalized;
     float motor_pole_pairs;
     float natural_direction;
 

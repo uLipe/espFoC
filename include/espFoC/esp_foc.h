@@ -25,6 +25,7 @@
 #pragma once
 
 #include <math.h>
+#include <sdkconfig.h>
 #include "espFoC/ema_low_pass_filter.h"
 #include "espFoC/foc_math.h"
 #include "espFoC/space_vector_modulator.h"

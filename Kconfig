@@ -39,6 +39,14 @@ menu "espFoC Settings"
         int "Size of scope buffer in frames"
         default 1536
 
+    config ESP_FOC_USE_SINE_PWM
+        bool "Use Sinewave modulation for PWM, if not it will use the SVPWM"
+        default y
+
+    config ESP_FOC_COMP_THI
+        bool "Enable third harmonic injection compensation on SVPWM"
+        depends on !ESP_FOC_USE_SINE_PWM
+        default n
 endmenu
 
 

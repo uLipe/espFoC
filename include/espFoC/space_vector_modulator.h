@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,7 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
- 
+
 #pragma once
 
 #include <math.h>
@@ -60,19 +60,23 @@ static inline uint8_t esp_foc_svm_get_sector(float a, float b, float c)
 
 static inline void esp_foc_svm_set(float v_alpha, float v_beta, float *dca, float *dcb, float *dcc)
 {
-	float a, b, c, mod;
+	float a, b, c;
 	float x, y, z;
 
 	/* normalize and limit alpha-beta vector */
-	mod = sqrtf(v_alpha * v_alpha + v_beta * v_beta);
-	if (mod > sqrt3_by_two) {
-		v_alpha = v_alpha / mod * sqrt3_by_two;
-		v_beta = v_beta / mod * sqrt3_by_two;
-	}
+	// mod = esp_foc_sqrtf(v_alpha * v_alpha + v_beta * v_beta);
+	// if (mod > sqrt3_by_two) {
+	// 	v_alpha = v_alpha / mod * sqrt3_by_two;
+	// 	v_beta = v_beta / mod * sqrt3_by_two;
+	// }
+
+    // a = v_beta;
+    // b = (SQRT_3 * v_alpha - v_beta) * 0.5f;
+    // c = (-SQRT_3 * v_alpha - v_beta) * 0.5f;
 
 	a = v_alpha;
-	b = 0.5f * (-v_alpha - SQRT_3 * v_beta);
-	c = 0.5f * (-v_alpha + SQRT_3 * v_beta); 
+	b = 0.5f * ((SQRT_3 * v_beta) - v_alpha);
+	c =  -a - b;
 
 	switch (esp_foc_svm_get_sector(a, b, c)) {
 	case 1U:

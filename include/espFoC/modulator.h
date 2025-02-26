@@ -29,13 +29,30 @@ static inline void esp_foc_modulate_dq_voltage (float theta,
                                             float v_q,
                                             float *v_u,
                                             float *v_v,
-                                            float *v_w)
+                                            float *v_w,
+                                            float bias,
+                                            float normalization_scale)
 {
     float dq_frame[2] = {v_d, v_q};
     float ab_frame[2];
 
+#ifdef CONFIG_ESP_FOC_USE_SINE_PWM
+    float a,b,c;
+
     esp_foc_inverse_park_transform(theta, dq_frame, &ab_frame[0], &ab_frame[1]);
-    esp_foc_inverse_clarke_transform(ab_frame, v_u, v_v, v_w);
+    esp_foc_inverse_clarke_transform(ab_frame, &a, &b, &c);
+    *v_u = (a + bias) * normalization_scale;
+    *v_v = (b + bias) * normalization_scale;
+    *v_w = (c + bias) * normalization_scale;
+#else
+    esp_foc_inverse_park_transform(theta, dq_frame, &ab_frame[0], &ab_frame[1]);
+    esp_foc_third_harmonic_injection(&ab_frame[0], &ab_frame[1]);
+    esp_foc_limit_voltage(&ab_frame[0], &ab_frame[1], 2.0f * bias);
+    esp_foc_apply_bias(&ab_frame[0], &ab_frame[1]);
+    ab_frame[0] *= normalization_scale;
+    ab_frame[1] *= normalization_scale;
+    esp_foc_svm_set(ab_frame[0], ab_frame[1], v_u, v_v, v_w);
+#endif
 }
 
 static inline void esp_foc_get_dq_currents(float theta,

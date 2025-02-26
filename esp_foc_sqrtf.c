@@ -22,19 +22,58 @@
  * SOFTWARE.
  */
 
+#include <stdint.h>
 #include <math.h>
+#include "esp_attr.h"
 
-#ifdef CONFIG_ESP_FOC_CUSTOM_MATH
-const float ESP_FOC_FAST_PI = 3.14159265358f;
-const float ESP_FOC_FAST_2PI = ESP_FOC_FAST_PI * 2.0f;
-const float ESP_FOC_SIN_COS_APPROX_B = 4.0f / ESP_FOC_FAST_PI;
-const float ESP_FOC_SIN_COS_APPROX_C = -4.0f / (ESP_FOC_FAST_PI * ESP_FOC_FAST_PI);
-const float ESP_FOC_SIN_COS_APPROX_P = 0.225f;
-const float ESP_FOC_SIN_COS_APPROX_D = ESP_FOC_FAST_PI/2.0f;
-#endif
+#define SQRT_TABLE_BITS 12
+#define SQRT_TABLE_SIZE (1 << SQRT_TABLE_BITS)
 
-const float ESP_FOC_CLARKE_K1 = 2.0/3.0f;
-const float ESP_FOC_CLARKE_K2 = 1.0/3.0f;
-const float ESP_FOC_CLARKE_PARK_SQRT3 = 1.73205080757f;
-const float ESP_FOC_CLARKE_K3 = 2.0f / ESP_FOC_CLARKE_PARK_SQRT3;
-const float ESP_FOC_SQRT3_TWO = ESP_FOC_CLARKE_PARK_SQRT3 / 2.0f;
+static float sqrt_table[SQRT_TABLE_SIZE];
+
+void esp_foc_fast_init_sqrt_table(void)
+{
+    for (int i = 0; i < SQRT_TABLE_SIZE; i++) {
+        float x = 1.0f + 3.0f * ((float)i / (SQRT_TABLE_SIZE - 1));
+        sqrt_table[i] = sqrtf(x);
+    }
+}
+
+IRAM_ATTR float esp_foc_fast_sqrt(float x)
+{
+    if (x <= 0.0f) {
+        return 0.0f;
+    }
+
+    union {
+        float f;
+        uint32_t i;
+    } u = { x };
+
+    int e = (u.i >> 23) & 0xff;
+    int exponent = e - 127;
+    float m = 1.0f + (u.i & 0x7fffff) / 8388608.0f;
+    int odd = exponent & 1;
+
+    if (odd) {
+        m *= 2.0f;
+    }
+
+    float t = (m - 1.0f) / 3.0f;
+    float pos = t * (SQRT_TABLE_SIZE - 1);
+    int index = (int) pos;
+
+    if (index >= SQRT_TABLE_SIZE - 1) {
+        index = SQRT_TABLE_SIZE - 2;
+    }
+
+    float frac = pos - index;
+    float sqrt_m = sqrt_table[index] + frac * (sqrt_table[index + 1] - sqrt_table[index]);
+
+    if (odd) {
+        sqrt_m *= 0.707106781186547524f;
+    }
+
+    int new_exp = exponent >> 1;
+    return ldexpf(sqrt_m, new_exp);
+}

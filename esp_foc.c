@@ -115,18 +115,6 @@ static inline void esp_foc_torque_control_loop(esp_foc_axis_t *axis)
                                         esp_foc_low_pass_filter_update(
                                             &axis->current_filters[1], axis->i_d.raw)) +
                                             axis->target_u_d.raw;
-
-    if(axis->u_q.raw > (axis->dc_link_voltage * 0.4)) {
-        axis->u_q.raw = (axis->dc_link_voltage * 0.4);
-    } else if (axis->u_q.raw < -(axis->dc_link_voltage * 0.4)){
-        axis->u_q.raw = -(axis->dc_link_voltage * 0.4);
-    }
-
-    if(axis->u_d.raw > (axis->dc_link_voltage * 0.4)) {
-        axis->u_d.raw = (axis->dc_link_voltage * 0.4);
-    } else if (axis->u_d.raw < -(axis->dc_link_voltage * 0.4)){
-        axis->u_d.raw = -(axis->dc_link_voltage * 0.4);
-    }
 }
 
 IRAM_ATTR static void esp_foc_control_loop(void *arg)
@@ -142,7 +130,9 @@ IRAM_ATTR static void esp_foc_control_loop(void *arg)
                     axis->u_q.raw,
                     &axis->u_u.raw,
                     &axis->u_v.raw,
-                    &axis->u_w.raw);
+                    &axis->u_w.raw,
+                    axis->biased_dc_link_voltage,
+                    axis->dc_link_to_normalized);
 
     axis->inverter_driver->set_voltages(axis->inverter_driver,
                                         axis->u_u.raw,
@@ -211,14 +201,30 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
+#ifdef CONFIG_ESP_FOC_CUSTOM_MATH
+    extern void esp_foc_fast_init_sqrt_table(void);
+    esp_foc_fast_init_sqrt_table();
+#endif
+
     axis->inverter_driver = inverter;
     axis->rotor_sensor_driver = rotor;
     axis->isensor_driver = isensor;
 
     axis->dc_link_voltage =
         axis->inverter_driver->get_dc_link_voltage(axis->inverter_driver);
+
+#ifdef CONFIG_ESP_FOC_USE_SINE_PWM
+    axis->biased_dc_link_voltage = axis->dc_link_voltage / 4.0f;
+    axis->dc_link_to_normalized = 1.0f / axis->dc_link_voltage;
+#else
+    axis->biased_dc_link_voltage = (axis->dc_link_voltage * ESP_FOC_SQRT3_TWO) / 2.0f;
+    axis->dc_link_to_normalized = 1.0f / (axis->dc_link_voltage * ESP_FOC_SQRT3_TWO);
+#endif
     axis->inverter_driver->set_voltages(axis->inverter_driver, 0.0, 0.0, 0.0);
+
     ESP_LOGI(tag,"inverter dc-link voltage: %f[V]", axis->dc_link_voltage);
+    ESP_LOGI(tag, "FoC max voltage: %f",  axis->biased_dc_link_voltage);
+    ESP_LOGI(tag, "FoC normalizer scale: %f",  axis->dc_link_to_normalized);
 
     axis->dt = 0.0;
     axis->last_timestamp = 0.0;
@@ -341,10 +347,10 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
                                         0.0f);
 
     axis->inverter_driver->enable(axis->inverter_driver);
-    esp_foc_sleep_ms(2000);
+    esp_foc_sleep_ms(100);
 
     axis->inverter_driver->set_voltages(axis->inverter_driver,
-                                        0.1 * (axis->dc_link_voltage/2.0f),
+                                        0.1,
                                         0.0f,
                                         0.0f);
 
@@ -379,16 +385,16 @@ IRAM_ATTR esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis,
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
 
-    if(uq.raw > (axis->dc_link_voltage * 0.4)) {
-        uq.raw = (axis->dc_link_voltage * 0.4);
-    } else if (uq.raw < -(axis->dc_link_voltage * 0.4)){
-        uq.raw = -(axis->dc_link_voltage * 0.4);
+    if(uq.raw > (axis->biased_dc_link_voltage)) {
+        uq.raw = (axis->biased_dc_link_voltage);
+    } else if (uq.raw < -(axis->biased_dc_link_voltage)){
+        uq.raw = -(axis->biased_dc_link_voltage);
     }
 
-    if(ud.raw > (axis->dc_link_voltage * 0.4)) {
-        ud.raw = (axis->dc_link_voltage * 0.4);
-    } else if (ud.raw < -(axis->dc_link_voltage * 0.4)){
-        ud.raw = -(axis->dc_link_voltage * 0.4);
+    if(ud.raw > (axis->biased_dc_link_voltage)) {
+        ud.raw = (axis->biased_dc_link_voltage);
+    } else if (ud.raw < -(axis->biased_dc_link_voltage)){
+        ud.raw = -(axis->biased_dc_link_voltage);
     }
 
     esp_foc_critical_enter();
@@ -464,6 +470,8 @@ esp_foc_err_t esp_foc_test_motor(esp_foc_inverter_t *inverter,
                                 esp_foc_rotor_sensor_t *rotor,
                                 esp_foc_motor_control_settings_t settings)
 {
+    float norm, bias;
+
     if(inverter == NULL) {
         ESP_LOGE(tag, "invalid inverter driver!");
         return ESP_FOC_ERR_INVALID_ARG;
@@ -488,6 +496,14 @@ esp_foc_err_t esp_foc_test_motor(esp_foc_inverter_t *inverter,
                             0.0f);
     esp_foc_sleep_ms(250);
 
+#ifdef CONFIG_ESP_FOC_USE_SINE_PWM
+    bias = inverter->get_dc_link_voltage(inverter) / 2.0f;
+    norm = 1.0f / inverter->get_dc_link_voltage(inverter);
+#else
+    bias = (inverter->get_dc_link_voltage(inverter) * ESP_FOC_SQRT3_TWO) / 2.0f;
+    norm = 1.0f / (inverter->get_dc_link_voltage(inverter) * ESP_FOC_SQRT3_TWO);
+#endif
+
     /* Turn motor in one direction */
     for(float i = 0.0f; i < 2 * M_PI * settings.motor_pole_pairs; i += 0.05) {
         esp_foc_u_voltage u;
@@ -503,7 +519,9 @@ esp_foc_err_t esp_foc_test_motor(esp_foc_inverter_t *inverter,
                 0.2f,
                 &u.raw,
                 &v.raw,
-                &w.raw);
+                &w.raw,
+                bias,
+                norm);
 
         inverter->set_voltages(inverter,
                                 u.raw,
@@ -528,7 +546,9 @@ esp_foc_err_t esp_foc_test_motor(esp_foc_inverter_t *inverter,
                 0.2f,
                 &u.raw,
                 &v.raw,
-                &w.raw);
+                &w.raw,
+                bias,
+                norm);
 
         inverter->set_voltages(inverter,
                                 u.raw,
