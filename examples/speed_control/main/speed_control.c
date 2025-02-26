@@ -37,13 +37,13 @@ static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
     .downsampling_position_rate = 0, // No position control,
     .downsampling_speed_rate = 40, //Speed control runs 1/40 rate of torque control
-    .motor_pole_pairs = 7, //Assuming HT2250 motor
+    .motor_pole_pairs = 4, //Assuming HT2250 motor
     .velocity_control_settings.kp = 0.1f,
     .velocity_control_settings.ki = 0.008f,
     .velocity_control_settings.kd = 0.0f,
     .velocity_control_settings.integrator_limit = 20000.0f,
     .velocity_control_settings.max_output_value = 4.80f, //conservative setpoint to the current controller
-    .torque_control_settings[0].max_output_value = 1.0f, //Uses the max driver voltage allowed as limit
+    .torque_control_settings[0].max_output_value = 6.0f, //Uses the max driver voltage allowed as limit
     .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
 };
 
@@ -58,7 +58,7 @@ static void initialize_foc_drivers(void)
         CONFIG_FOC_PWM_V_PIN,
         CONFIG_FOC_PWM_W_PIN,
         CONFIG_FOC_PWM_EN_PIN,
-        12.0f,
+        24.0f,
         0
     );
 
@@ -100,7 +100,7 @@ void app_main(void)
 
     esp_foc_align_axis(&axis);
     esp_foc_run(&axis);
-    esp_foc_set_target_speed(&axis, (esp_foc_radians_per_second){.raw = -62.8});
+    esp_foc_set_target_speed(&axis, (esp_foc_radians_per_second){.raw = -50.0});
 
     while (1) {
         esp_foc_get_control_data(&axis, &control_data);

@@ -21,7 +21,7 @@ menu "espFoC Settings"
     config FOC_TASK_PRIORITY
         int "Priority task of foc controller"
         range 16 25
-        default 16
+        default 24
 
     config FOC_TASK_STACK_SIZE
         int "Task stack size of foc controller"
