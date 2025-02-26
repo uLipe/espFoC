@@ -16,6 +16,7 @@ espressif framework.
 * Sample rotor position driver based on as5600 encoder (very popular!);
 * FoC engine runs sychronized at inverter PWM rate;
 * Scope function for debugging using Better Serial Plot
+* **NOTICE**: Requises Espressif ESP-IDF v5.0 or above
 
 ## Limitations:
 * Support for esp32 and esp32s3 only;
