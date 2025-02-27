@@ -33,6 +33,14 @@ espressif framework.
 * The suggested wiring for quick get started is shown below:
 ![Wiring](/doc/images/wiring.png)
 
+## Board Reference:
+The examples are configurable by nature to user select the best board,
+however the testbench used for its development is based on:
+
+* MakerBase FoC ESP32: https://github.com/makerbase-motor/MKS-ESP32FOC
+* Nanotec DB42S03 PMSM Motor: https://www.renesas.cn/zh/document/sch/nanotec-motor-db24s03-specification
+* MakerBase AS5600 encoder: https://pt.aliexpress.com/item/1005002515162635.html?gatewayAdapt=glo2bra
+
 
 ## Debug with Better Serial Plot:
 * Install Better Serial Plot from here: https://hackaday.io/project/181686-better-serial-plotter

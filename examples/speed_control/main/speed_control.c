@@ -37,7 +37,7 @@ static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
     .downsampling_position_rate = 0, // No position control,
     .downsampling_speed_rate = 40, //Speed control runs 1/40 rate of torque control
-    .motor_pole_pairs = 4, //Assuming HT2250 motor
+    .motor_pole_pairs = 4,
     .velocity_control_settings.kp = 0.1f,
     .velocity_control_settings.ki = 0.008f,
     .velocity_control_settings.kd = 0.0f,
@@ -100,11 +100,11 @@ void app_main(void)
 
     esp_foc_align_axis(&axis);
     esp_foc_run(&axis);
-    esp_foc_set_target_speed(&axis, (esp_foc_radians_per_second){.raw = -50.0});
+    esp_foc_set_target_speed(&axis, (esp_foc_radians_per_second){.raw = 10.0});
 
     while (1) {
         esp_foc_get_control_data(&axis, &control_data);
-        ESP_LOGI(TAG, "Current speed: %f [rad/S]", control_data.speed.raw);
+        ESP_LOGI(TAG, "Estimated speed: %f [rad/s], dt: %f s", control_data.speed.raw, control_data.dt.raw);
         esp_foc_sleep_ms(200);
     }
 }
