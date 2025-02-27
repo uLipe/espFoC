@@ -37,7 +37,7 @@ static esp_foc_inverter_t *inverter;
 static esp_foc_rotor_sensor_t *sensor;
 static esp_foc_rotor_sensor_t *sensor_enc;
 static esp_foc_motor_control_settings_t settings = {
-    .motor_pole_pairs = 4, //Assuming HT2250 motor
+    .motor_pole_pairs = 4,
 };
 
 static void initialize_foc_drivers(void)
