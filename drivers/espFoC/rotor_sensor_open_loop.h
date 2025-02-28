@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -22,8 +22,11 @@
  * SOFTWARE.
  */
 
-#pragma once 
+#pragma once
 
 #include "espFoC/esp_foc.h"
 
-esp_foc_rotor_sensor_t *rotor_sensor_open_loop_new(float motor_kv, float *uq_wire, esp_foc_seconds sample_rate);
+esp_foc_rotor_sensor_t *rotor_sensor_open_loop_new(float motor_resistance,
+                                                float motor_inductance,
+                                                float *uq_wire,
+                                                float *dt_wire);

@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,7 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
- 
+
 #include <math.h>
 #include "espFoC/rotor_sensor_dummy.h"
 #include "esp_err.h"
@@ -31,7 +31,7 @@
 #define AS5600_SLAVE_ADDR 0x36
 #define AS5600_ANGLE_REGISTER_H 0x0E
 #define AS5600_PULSES_PER_REVOLUTION 4096.0f
-#define AS5600_READING_MASK 0xFFF 
+#define AS5600_READING_MASK 0xFFF
 
 typedef struct {
     float accumulated;
@@ -69,7 +69,7 @@ IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
     esp_foc_dummy_t *obj =
         __containerof(self,esp_foc_dummy_t, interface);
 
- 
+
     esp_foc_critical_enter();
 
     obj->raw += 40.96f;
@@ -83,7 +83,7 @@ IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
     float delta = (float)obj->raw - obj->previous;
 
     if(fabs(delta) >= 3600.0f) {
-        obj->accumulated = (delta < 0.0f) ? 
+        obj->accumulated = (delta < 0.0f) ?
             obj->accumulated + 4096.0f :
                 obj->accumulated - 4096.0f;
     }
