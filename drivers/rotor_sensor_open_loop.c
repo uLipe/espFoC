@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,43 +21,50 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
- 
+
 #include <math.h>
 #include "espFoC/rotor_sensor_dummy.h"
 #include "esp_err.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 
-#define AS5600_PULSES_PER_REVOLUTION (2.0f * M_PI)
+#define SIMUL_PULSES_PER_REVOLUTION 4096.0f
+#define SIMUL_FLUX_LINKAGE 0.015f // Lambda_m (Weber)
+#define SIMUL_INERTIA 0.00024f // J (kg⋅m²)
+#define SIMUL_FRICTION 0.0001f // B (Viscous friction)
+#define DRIFT_COMP_CYCLE 200000
 
-const char *tag = "ROTOR_SENSOR_AS5600";
+const char *tag = "ROTOR_SENSOR_SIMUL";
 
 typedef struct {
-    esp_foc_seconds sample_rate;
-    float radians_to_increment;
+    int comp_cycle;
     float *uq_wire;
+    float *dt_wire;
+    float motor_resistance;
+    float motor_inductance;
     float accumulated;
     float raw;
+    float angle;
     float previous;
+    float omega;
+    float estim_iq;
     esp_foc_rotor_sensor_t interface;
-}esp_foc_dummy_t;
+}esp_foc_rotor_sensor_simul_t;
 
-DRAM_ATTR static esp_foc_dummy_t rotor_sensors[CONFIG_NOOF_AXIS];
+DRAM_ATTR static esp_foc_rotor_sensor_simul_t rotor_sensors[CONFIG_NOOF_AXIS];
 
 IRAM_ATTR float read_accumulated_counts (esp_foc_rotor_sensor_t *self)
 {
-    esp_foc_dummy_t *obj =
-        __containerof(self,esp_foc_dummy_t, interface);
-
-    return obj->accumulated + obj->previous;
+    return 0.0f;
 }
 
 IRAM_ATTR  static void set_to_zero(esp_foc_rotor_sensor_t *self)
 {
-    esp_foc_dummy_t *obj =
-        __containerof(self,esp_foc_dummy_t, interface);
+    esp_foc_rotor_sensor_simul_t *obj =
+        __containerof(self,esp_foc_rotor_sensor_simul_t, interface);
 
     obj->raw = 0;
+    obj->angle = 0.0f;
 }
 
 IRAM_ATTR static float get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
@@ -68,36 +75,43 @@ IRAM_ATTR static float get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
 
 IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
 {
-    esp_foc_dummy_t *obj =
-        __containerof(self,esp_foc_dummy_t, interface);
+    esp_foc_rotor_sensor_simul_t *obj =
+        __containerof(self,esp_foc_rotor_sensor_simul_t, interface);
 
- 
-    esp_foc_critical_enter();
+    float angle_now = (obj->angle) * (SIMUL_PULSES_PER_REVOLUTION / (2.0f * M_PI));
 
-    obj->raw += 40.96f;
+    //Compurte next angle upon calling this function;
+    obj->estim_iq += (*obj->uq_wire - obj->motor_resistance * obj->estim_iq - SIMUL_FLUX_LINKAGE * obj->omega) /
+                        obj->motor_inductance * (*obj->dt_wire);
 
-    if(obj->raw > 4096.0f) {
-        obj->raw -= 4096.0f;
-    } else if (obj->raw < 0.0f) {
-        obj->raw += 4096.0f;
+    // Estimate rotor acceleration and update speed
+    float torque = SIMUL_FLUX_LINKAGE * obj->estim_iq;
+    float acceleration = (torque - SIMUL_FRICTION * obj->omega) / SIMUL_INERTIA;
+    obj->omega += acceleration * (*obj->dt_wire);
+
+    // Update electrical rotor angle
+    obj->angle += obj->omega * (*obj->dt_wire);
+    if (obj->angle > (2.0f * M_PI)) {
+        obj->angle -= (2.0f * M_PI);
+    } else if (obj->angle < 0.0f) {
+        obj->angle += (2.0f * M_PI);
     }
 
-    float delta = (float)obj->raw - obj->previous;
-
-    if(fabs(delta) >= 3600.0f) {
-        obj->accumulated = (delta < 0.0f) ? 
-            obj->accumulated + 4096.0f :
-                obj->accumulated - 4096.0f;
+    obj->comp_cycle++;
+    if(obj->comp_cycle >= DRIFT_COMP_CYCLE) {
+        obj->angle = fmodf(obj->angle, (2.0f * M_PI));
+        obj->comp_cycle = 0;
     }
 
-    obj->previous = (float)obj->raw;
 
-    esp_foc_critical_leave();
-
-    return(obj->raw);
+    return(angle_now);
 }
 
-esp_foc_rotor_sensor_t *rotor_sensor_open_loop_new(float motor_kv, float *uq_wire, esp_foc_seconds sample_rate){
+esp_foc_rotor_sensor_t *rotor_sensor_open_loop_new(float motor_resistance,
+                                                float motor_inductance,
+                                                float *uq_wire,
+                                                float *dt_wire)
+{
 
     if(uq_wire == NULL) {
         return NULL;
@@ -109,6 +123,13 @@ esp_foc_rotor_sensor_t *rotor_sensor_open_loop_new(float motor_kv, float *uq_wir
     rotor_sensors[0].interface.read_accumulated_counts = read_accumulated_counts;
     rotor_sensors[0].raw = 0;
     rotor_sensors[0].accumulated = 0;
+    rotor_sensors[0].uq_wire = uq_wire;
+    rotor_sensors[0].dt_wire = dt_wire;
+    rotor_sensors[0].motor_inductance = motor_inductance;
+    rotor_sensors[0].motor_resistance = motor_resistance;
+    rotor_sensors[0].omega = 0.0f;
+    rotor_sensors[0].estim_iq = 0.0f;
+    rotor_sensors[0].comp_cycle = 0;
 
     return &rotor_sensors[0].interface;
 }

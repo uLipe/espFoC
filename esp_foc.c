@@ -354,7 +354,7 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
                                         0.0f);
 
     axis->inverter_driver->enable(axis->inverter_driver);
-    esp_foc_sleep_ms(100);
+    esp_foc_sleep_ms(1000);
 
     axis->inverter_driver->set_voltages(axis->inverter_driver,
                                         0.1,
