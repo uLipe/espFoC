@@ -343,8 +343,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 {
-    float align_uvw[3];
-
     if(axis == NULL) {
         ESP_LOGE(tag, "Invalid axis object!");
         return ESP_FOC_ERR_INVALID_ARG;
@@ -364,21 +362,13 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
                                         0.0f);
 
     axis->inverter_driver->enable(axis->inverter_driver);
-    esp_foc_sleep_ms(1000);
+    esp_foc_sleep_ms(500);
 
-    esp_foc_modulate_dq_voltage(0.0f,
-                                0.1f,
-                                0.0f,
-                                &align_uvw[0],
-                                &align_uvw[1],
-                                &align_uvw[2],
-                                axis->biased_dc_link_voltage,
-                                axis->dc_link_to_normalized);
 
     axis->inverter_driver->set_voltages(axis->inverter_driver,
-                                        align_uvw[0],
-                                        align_uvw[1],
-                                        align_uvw[2]);
+                                        0.2f,
+                                        0.0f,
+                                        0.0f);
 
     esp_foc_sleep_ms(500);
     current_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);

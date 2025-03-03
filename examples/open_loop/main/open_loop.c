@@ -126,9 +126,13 @@ void app_main(void)
     /* Set the Ud to weaken the field and make it stable at low speeds */
     esp_foc_set_target_voltage(&axis, uq, (esp_foc_d_voltage){.raw = 2.0});
 
+#ifndef CONFIG_ESP_FOC_SCOPE
+
     while(1) {
         esp_foc_sleep_ms(100);
         esp_foc_get_control_data(&axis, &control_data);
         ESP_LOGI(TAG, "Counts from simulated rotor sensor: %f", sensor->read_counts(sensor));
     }
+
+#endif
 }

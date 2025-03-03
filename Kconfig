@@ -37,7 +37,7 @@ menu "espFoC Settings"
 
     config ESP_FOC_SCOPE_BUFFER_SIZE
         int "Size of scope buffer in frames"
-        default 1536
+        default 256
 
     config ESP_FOC_USE_SINE_PWM
         bool "Use Sinewave modulation for PWM, if not it will use the SVPWM"

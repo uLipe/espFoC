@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,7 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
- 
+
 #include <string.h>
 #include <math.h>
 #include <stdbool.h>
@@ -49,13 +49,15 @@ IRAM_ATTR static void esp_foc_scope_daemon_thread(void *arg)
             next_sample->u.raw,
             next_sample->v.raw,
             next_sample->w.raw,
-            next_sample->out_q.raw,
-            next_sample->out_d.raw,
-            next_sample->rotor_position.raw,
-            next_sample->speed.raw,
-            next_sample->target_position.raw,
-            next_sample->target_speed.raw);
+            next_sample->i_u.raw,
+            next_sample->i_v.raw,
+            next_sample->i_w.raw,
+            next_sample->i_d.raw,
+            next_sample->i_q.raw,
+            next_sample->rotor_position.raw);
         rd_buff_index++;
+
+        esp_foc_sleep_ms(10);
 
         if(rd_buff_index >= CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE) {
             esp_foc_critical_enter();
@@ -64,7 +66,7 @@ IRAM_ATTR static void esp_foc_scope_daemon_thread(void *arg)
             ping_pong_switch ^= 1;
             esp_foc_critical_leave();
         }
-        
+
     }
 }
 
@@ -85,7 +87,7 @@ void esp_foc_scope_data_push(esp_foc_control_data_t *control_data)
     memcpy(&scope_buffer[!ping_pong_switch][wr_buff_index],
         control_data,
         sizeof(*control_data));
-    
+
     wr_buff_index++;
 
     esp_foc_critical_leave();

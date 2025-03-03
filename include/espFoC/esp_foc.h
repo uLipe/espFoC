@@ -91,6 +91,12 @@ typedef struct {
     esp_foc_q_current i_q;
     esp_foc_d_current i_d;
 
+    esp_foc_alpha_voltage u_alpha;
+    esp_foc_alpha_voltage u_beta;
+
+    esp_foc_alpha_current i_alpha;
+    esp_foc_alpha_current i_beta;
+
     esp_foc_radians rotor_position;
     esp_foc_radians position;
     esp_foc_radians_per_second speed;
