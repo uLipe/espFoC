@@ -48,6 +48,7 @@ typedef struct {
     float previous;
     float omega;
     float estim_iq;
+    bool first_read;
     esp_foc_rotor_sensor_t interface;
 }esp_foc_rotor_sensor_simul_t;
 
@@ -80,6 +81,16 @@ IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
 
     float angle_now = (obj->angle) * (SIMUL_PULSES_PER_REVOLUTION / (2.0f * M_PI));
 
+    if(!obj->first_read) {
+        obj->first_read = true;
+        return(angle_now);
+    }
+
+    if(fabsf(*obj->dt_wire) < 0.0001f) {
+        return(angle_now);
+    }
+
+
     //Compurte next angle upon calling this function;
     obj->estim_iq += (*obj->uq_wire - obj->motor_resistance * obj->estim_iq - SIMUL_FLUX_LINKAGE * obj->omega) /
                         obj->motor_inductance * (*obj->dt_wire);
@@ -96,13 +107,6 @@ IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
     } else if (obj->angle < 0.0f) {
         obj->angle += (2.0f * M_PI);
     }
-
-    obj->comp_cycle++;
-    if(obj->comp_cycle >= DRIFT_COMP_CYCLE) {
-        obj->angle = fmodf(obj->angle, (2.0f * M_PI));
-        obj->comp_cycle = 0;
-    }
-
 
     return(angle_now);
 }
@@ -130,6 +134,7 @@ esp_foc_rotor_sensor_t *rotor_sensor_open_loop_new(float motor_resistance,
     rotor_sensors[0].omega = 0.0f;
     rotor_sensors[0].estim_iq = 0.0f;
     rotor_sensors[0].comp_cycle = 0;
+    rotor_sensors[0].first_read = false;
 
     return &rotor_sensors[0].interface;
 }

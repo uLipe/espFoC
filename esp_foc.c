@@ -30,6 +30,7 @@
 #include "esp_log.h"
 
 #define ESP_FOC_ISENSOR_CALIBRATION_ROUNDS 100
+#define ESP_FOC_INITIAL_DT_SECONDS          1.0f
 
 static const char * tag = "ESP_FOC";
 
@@ -174,10 +175,17 @@ IRAM_ATTR static void esp_foc_sensors_loop(void *arg)
         now = esp_foc_now_seconds();
         axis->dt = now - axis->last_timestamp;
         axis->last_timestamp = now;
-        axis->rotor_elec_angle = esp_foc_ticks_to_radians_normalized(axis);
+
         if(axis->isensor_driver != NULL) {
             axis->isensor_driver->sample_isensors(axis->isensor_driver);
         }
+
+        if(axis->dt < 0.0f) {
+            ESP_LOGW(tag, "Warning, invalid timestamp, ignoring sensors update!");
+            continue;
+        }
+
+        axis->rotor_elec_angle = esp_foc_ticks_to_radians_normalized(axis);
         esp_foc_motor_speed_estimator(axis);
 
 #ifdef CONFIG_ESP_FOC_SCOPE
@@ -233,7 +241,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     ESP_LOGI(tag, "FoC max voltage: %f",  axis->biased_dc_link_voltage);
     ESP_LOGI(tag, "FoC normalizer scale: %f",  axis->dc_link_to_normalized);
 
-    axis->dt = 0.0;
+    axis->dt = ESP_FOC_INITIAL_DT_SECONDS;
     axis->last_timestamp = 0.0;
     axis->target_speed = 0.0;
     axis->target_position = 0.0f;
@@ -273,8 +281,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->estimators_sample_rate = axis->inverter_driver->get_inverter_pwm_rate(axis->inverter_driver) /
         axis->downsampling_speed_reload_value;
 
-    axis->downsampling_estimators_reload_val = 16;
-    axis->downsampling_estimators = 16;
+    axis->downsampling_estimators_reload_val = 8;
+    axis->downsampling_estimators = 8;
 
     axis->torque_controller[0].kp = 1.0f;
     axis->torque_controller[0].ki = 0.0f;
@@ -335,6 +343,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 {
+    float align_uvw[3];
+
     if(axis == NULL) {
         ESP_LOGE(tag, "Invalid axis object!");
         return ESP_FOC_ERR_INVALID_ARG;
@@ -356,10 +366,19 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     axis->inverter_driver->enable(axis->inverter_driver);
     esp_foc_sleep_ms(1000);
 
+    esp_foc_modulate_dq_voltage(0.0f,
+                                0.1f,
+                                0.0f,
+                                &align_uvw[0],
+                                &align_uvw[1],
+                                &align_uvw[2],
+                                axis->biased_dc_link_voltage,
+                                axis->dc_link_to_normalized);
+
     axis->inverter_driver->set_voltages(axis->inverter_driver,
-                                        0.1,
-                                        0.0f,
-                                        0.0f);
+                                        align_uvw[0],
+                                        align_uvw[1],
+                                        align_uvw[2]);
 
     esp_foc_sleep_ms(500);
     current_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
