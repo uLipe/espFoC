@@ -173,7 +173,6 @@ IRAM_ATTR static void esp_foc_sensors_loop(void *arg)
     for(;;) {
         esp_foc_wait_notifier();
         now = esp_foc_now_seconds();
-        axis->dt = now - axis->last_timestamp;
         axis->last_timestamp = now;
 
         if(axis->isensor_driver != NULL) {
@@ -283,6 +282,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
     axis->downsampling_estimators_reload_val = 8;
     axis->downsampling_estimators = 8;
+
+    axis->dt = (1.0f / inverter->get_inverter_pwm_rate(inverter)) * axis->downsampling_estimators_reload_val;
 
     axis->torque_controller[0].kp = 1.0f;
     axis->torque_controller[0].ki = 0.0f;

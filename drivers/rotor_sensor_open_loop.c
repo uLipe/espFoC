@@ -86,7 +86,7 @@ IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
         return(angle_now);
     }
 
-    if(fabsf(*obj->dt_wire) < 0.0001f) {
+    if(*obj->dt_wire < 0.0f) {
         return(angle_now);
     }
 
