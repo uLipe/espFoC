@@ -121,10 +121,10 @@ void app_main(void)
     esp_foc_run(&axis);
 
     /* ramp the velocity max available voltage in sine PWM (1/4 VLink) */
-    uq.raw = 4.0f;
+    uq.raw = -1.0f;
 
     /* Set the Ud to weaken the field and make it stable at low speeds */
-    esp_foc_set_target_voltage(&axis, uq, (esp_foc_d_voltage){.raw = 2.0});
+    esp_foc_set_target_voltage(&axis, uq, (esp_foc_d_voltage){.raw = 0.0});
 
 #ifndef CONFIG_ESP_FOC_SCOPE
 

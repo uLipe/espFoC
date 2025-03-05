@@ -30,7 +30,9 @@
 #include "esp_log.h"
 
 #define ESP_FOC_ISENSOR_CALIBRATION_ROUNDS 100
-#define ESP_FOC_INITIAL_DT_SECONDS          1.0f
+#define ESP_FOC_VELOCITY_PID_DOWNSAMPLING  10
+#define ESP_FOC_POSITION_PID_DOWNSAMPLING  100
+#define ESP_FOC_ESTIMATORS_DOWNSAMPLING    4
 
 static const char * tag = "ESP_FOC";
 
@@ -55,44 +57,37 @@ static inline float esp_foc_ticks_to_radians_normalized(esp_foc_axis_t *axis)
 
 static inline void esp_foc_motor_speed_estimator(esp_foc_axis_t * axis)
 {
-    float raw_speed;
-    axis->accumulated_rotor_position = axis->rotor_sensor_driver->read_accumulated_counts(axis->rotor_sensor_driver) *
-        axis->shaft_ticks_to_radians_ratio;
-
-    raw_speed =  (axis->accumulated_rotor_position - axis->rotor_position_prev) *
-                        (axis->dt * 1000000.f);
-
+    float raw_speed =  (axis->rotor_position - axis->rotor_position_prev) * axis->inv_dt;
     axis->current_speed = esp_foc_low_pass_filter_update( &axis->velocity_filter, raw_speed);
-
-    axis->rotor_position_prev = axis->accumulated_rotor_position;
+    axis->rotor_position_prev = axis->rotor_position;
 }
 
 static inline void esp_foc_position_control_loop(esp_foc_axis_t *axis)
 {
     /* position control is disabled */
-    if(!axis->downsampling_position_reload_value) return;
+    if(!axis->downsampling_position) return;
 
     axis->downsampling_position--;
 
     if(axis->downsampling_position == 0) {
-        axis->downsampling_position = axis->downsampling_position_reload_value;
+        axis->downsampling_position = ESP_FOC_POSITION_PID_DOWNSAMPLING;
 
         axis->target_speed = esp_foc_pid_update( &axis->position_controller,
                                             axis->target_position,
-                                            axis->accumulated_rotor_position);
+                                            axis->rotor_position);
     }
 }
 
 static inline void esp_foc_velocity_control_loop(esp_foc_axis_t *axis)
 {
     /* speed control is disabled */
-    if(!axis->downsampling_speed_reload_value) return;
+    if(!axis->downsampling_speed) return;
 
     axis->downsampling_speed--;
 
     if(axis->downsampling_speed == 0) {
 
-        axis->downsampling_speed = axis->downsampling_speed_reload_value;
+        axis->downsampling_speed = ESP_FOC_VELOCITY_PID_DOWNSAMPLING;
 
         axis->target_i_q.raw = esp_foc_pid_update( &axis->velocity_controller,
                                             axis->target_speed,
@@ -118,10 +113,36 @@ static inline void esp_foc_torque_control_loop(esp_foc_axis_t *axis)
                                             axis->target_u_d.raw;
 }
 
-IRAM_ATTR static void esp_foc_control_loop(void *arg)
+IRAM_ATTR static void esp_foc_sensors_loop(esp_foc_axis_t *axis)
+{
+#ifdef CONFIG_ESP_FOC_SCOPE
+    esp_foc_control_data_t control_data;
+#endif
+
+    if(axis->isensor_driver != NULL) {
+        axis->isensor_driver->sample_isensors(axis->isensor_driver);
+    }
+
+    axis->rotor_elec_angle = esp_foc_ticks_to_radians_normalized(axis);
+
+    if(axis->downsampling_estimators > 0) {
+        axis->downsampling_estimators--;
+        if(!axis->downsampling_estimators) {
+            esp_foc_motor_speed_estimator(axis);
+#ifdef CONFIG_ESP_FOC_SCOPE
+            esp_foc_get_control_data(axis, &control_data);
+            esp_foc_scope_data_push(&control_data);
+#endif
+        }
+        axis->downsampling_estimators = ESP_FOC_ESTIMATORS_DOWNSAMPLING;
+    }
+}
+
+IRAM_ATTR static void esp_foc_core_loop(void *arg)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
 
+    esp_foc_sensors_loop(axis);
     esp_foc_position_control_loop(axis);
     esp_foc_velocity_control_loop(axis);
     esp_foc_torque_control_loop(axis);
@@ -140,58 +161,6 @@ IRAM_ATTR static void esp_foc_control_loop(void *arg)
                                         axis->u_v.raw,
                                         axis->u_w.raw);
 
-    if(axis->downsampling_estimators > 0) {
-        axis->downsampling_estimators--;
-        if(axis->downsampling_estimators == 0) {
-            axis->downsampling_estimators = axis->downsampling_estimators_reload_val;
-            esp_foc_send_notification(axis->ev_handle);
-        }
-    }
-}
-
-IRAM_ATTR static void esp_foc_sensors_loop(void *arg)
-{
-    esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
-    float now;
-
-#ifdef CONFIG_ESP_FOC_SCOPE
-    esp_foc_control_data_t control_data;
-#endif
-
-    axis->ev_handle = esp_foc_get_event_handle();
-    axis->inverter_driver->set_inverter_callback(axis->inverter_driver,
-                                    esp_foc_control_loop,
-                                    axis);
-
-    ESP_LOGI(tag, "Starting foc loop task for axis: %p", axis);
-    ESP_LOGI(tag, "Control loop rate [Samples/S]: %f", axis->inverter_driver->get_inverter_pwm_rate(axis->inverter_driver));
-    ESP_LOGI(tag, "Speed control loop rate [Samples/S]: %f", axis->estimators_sample_rate);
-
-    now = esp_foc_now_seconds();
-    axis->last_timestamp = now;
-
-    for(;;) {
-        esp_foc_wait_notifier();
-        now = esp_foc_now_seconds();
-        axis->last_timestamp = now;
-
-        if(axis->isensor_driver != NULL) {
-            axis->isensor_driver->sample_isensors(axis->isensor_driver);
-        }
-
-        if(axis->dt < 0.0f) {
-            ESP_LOGW(tag, "Warning, invalid timestamp, ignoring sensors update!");
-            continue;
-        }
-
-        axis->rotor_elec_angle = esp_foc_ticks_to_radians_normalized(axis);
-        esp_foc_motor_speed_estimator(axis);
-
-#ifdef CONFIG_ESP_FOC_SCOPE
-        esp_foc_get_control_data(axis, &control_data);
-        esp_foc_scope_data_push(&control_data);
-#endif
-    }
 }
 
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
@@ -240,14 +209,14 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     ESP_LOGI(tag, "FoC max voltage: %f",  axis->biased_dc_link_voltage);
     ESP_LOGI(tag, "FoC normalizer scale: %f",  axis->dc_link_to_normalized);
 
-    axis->dt = ESP_FOC_INITIAL_DT_SECONDS;
-    axis->last_timestamp = 0.0;
+    axis->dt = (1.0f / inverter->get_inverter_pwm_rate(inverter));
+    axis->inv_dt = (1.0f / (axis->dt * ESP_FOC_ESTIMATORS_DOWNSAMPLING));
     axis->target_speed = 0.0;
     axis->target_position = 0.0f;
-    axis->accumulated_rotor_position = 0.0f;
 
-    axis->downsampling_speed_reload_value = 0;
-    axis->downsampling_position_reload_value = 0;
+    axis->downsampling_position = settings.downsampling_position_rate > 0 ? ESP_FOC_POSITION_PID_DOWNSAMPLING : 0;
+    axis->downsampling_speed = settings.downsampling_speed_rate > 0 ? ESP_FOC_VELOCITY_PID_DOWNSAMPLING : 0;
+    axis->downsampling_estimators = ESP_FOC_ESTIMATORS_DOWNSAMPLING;
 
     axis->i_d.raw = 0.0f;
     axis->i_q.raw = 0.0f;
@@ -263,33 +232,29 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->position_controller.kd = settings.position_control_settings.kd;
     axis->position_controller.integrator_limit = settings.position_control_settings.integrator_limit;
     axis->position_controller.max_output_value = settings.position_control_settings.max_output_value;
+    axis->position_controller.dt = axis->dt * ESP_FOC_POSITION_PID_DOWNSAMPLING;
+    axis->position_controller.inv_dt = (1.0f / axis->position_controller.dt);
+
     esp_foc_pid_reset(&axis->position_controller);
-    axis->downsampling_position = settings.downsampling_position_rate;
-    axis->downsampling_position_reload_value = settings.downsampling_position_rate;;
 
     axis->velocity_controller.kp = settings.velocity_control_settings.kp;
     axis->velocity_controller.ki = settings.velocity_control_settings.ki;
     axis->velocity_controller.kd = settings.velocity_control_settings.kd;
     axis->velocity_controller.integrator_limit = settings.velocity_control_settings.integrator_limit;
     axis->velocity_controller.max_output_value = settings.velocity_control_settings.max_output_value;
+    axis->velocity_controller.dt = axis->dt * ESP_FOC_VELOCITY_PID_DOWNSAMPLING;
+    axis->velocity_controller.inv_dt = (1.0f / axis->velocity_controller.dt);
+
     esp_foc_pid_reset(&axis->velocity_controller);
     esp_foc_low_pass_filter_init(&axis->velocity_filter, 0.1f);
-    axis->downsampling_speed = settings.downsampling_speed_rate;
-    axis->downsampling_speed_reload_value = settings.downsampling_speed_rate;
-
-    axis->estimators_sample_rate = axis->inverter_driver->get_inverter_pwm_rate(axis->inverter_driver) /
-        axis->downsampling_speed_reload_value;
-
-    axis->downsampling_estimators_reload_val = 8;
-    axis->downsampling_estimators = 8;
-
-    axis->dt = (1.0f / inverter->get_inverter_pwm_rate(inverter)) * axis->downsampling_estimators_reload_val;
 
     axis->torque_controller[0].kp = 1.0f;
     axis->torque_controller[0].ki = 0.0f;
     axis->torque_controller[0].kd = 0.0f;
     axis->torque_controller[0].integrator_limit = 0.0f;
     axis->torque_controller[0].max_output_value = settings.torque_control_settings[0].max_output_value;
+    axis->torque_controller[0].dt = axis->dt;
+    axis->torque_controller[0].inv_dt = (1.0f / axis->torque_controller[0].dt);
     esp_foc_pid_reset(&axis->torque_controller[0]);
     esp_foc_low_pass_filter_init(&axis->current_filters[0], 0.9);
 
@@ -298,6 +263,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->torque_controller[1].kd = 0.0f;
     axis->torque_controller[1].integrator_limit = 0.0f;
     axis->torque_controller[1].max_output_value = settings.torque_control_settings[1].max_output_value;
+    axis->torque_controller[1].dt = axis->dt;
+    axis->torque_controller[1].inv_dt = (1.0f / axis->torque_controller[1].dt);
     esp_foc_pid_reset(&axis->torque_controller[1]);
     esp_foc_low_pass_filter_init(&axis->current_filters[1], 0.9);
 
@@ -344,6 +311,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 {
+    float u, v, w;
+
     if(axis == NULL) {
         ESP_LOGE(tag, "Invalid axis object!");
         return ESP_FOC_ERR_INVALID_ARG;
@@ -365,11 +334,10 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     axis->inverter_driver->enable(axis->inverter_driver);
     esp_foc_sleep_ms(500);
 
+    esp_foc_modulate_dq_voltage(0.0f, 0.1f, 0.0f, &u, &v,&w, axis->biased_dc_link_voltage,
+                            axis->dc_link_to_normalized);
 
-    axis->inverter_driver->set_voltages(axis->inverter_driver,
-                                        0.2f,
-                                        0.0f,
-                                        0.0f);
+    axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);
 
     esp_foc_sleep_ms(500);
     current_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
@@ -473,12 +441,12 @@ esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis)
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
 
-    int ret = esp_foc_create_runner(esp_foc_sensors_loop, axis, CONFIG_FOC_TASK_PRIORITY);
+    axis->inverter_driver->set_inverter_callback(axis->inverter_driver,
+                                    esp_foc_core_loop,
+                                    axis);
 
-    if (ret < 0) {
-        ESP_LOGE(tag, "Check os interface, the runner creation has failed!");
-        return ESP_FOC_ERR_UNKNOWN;
-    }
+    ESP_LOGI(tag, "Starting foc loop task for axis: %p", axis);
+    ESP_LOGI(tag, "FoC core base rate [Samples/S]: %f", axis->inverter_driver->get_inverter_pwm_rate(axis->inverter_driver));
 
     return ESP_FOC_OK;
 }
@@ -605,9 +573,7 @@ esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_dat
     control_data->out_q = axis->u_q;
     control_data->out_d = axis->u_d;
     control_data->dt.raw = axis->dt;
-    control_data->timestamp.raw = axis->last_timestamp;
 
-    control_data->position.raw = axis->accumulated_rotor_position;
     control_data->rotor_position.raw = axis->rotor_position;
     control_data->speed.raw = axis->current_speed;
 

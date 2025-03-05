@@ -51,32 +51,27 @@ typedef struct {
     esp_foc_v_current i_v;
     esp_foc_w_current i_w;
 
+    float dt;
+    float inv_dt;
+
     float target_speed;
     float current_speed;
     float shaft_ticks_to_radians_ratio;
-    float dt;
-    float last_timestamp;
-    int downsampling_speed_reload_value;
-    int downsampling_speed;
-
     float target_position;
     float rotor_position;
-    float accumulated_rotor_position;
     float rotor_position_prev;
     float rotor_shaft_ticks;
     float rotor_elec_angle;
-    int downsampling_position_reload_value;
+
+    int downsampling_speed;
     int downsampling_position;
+    int downsampling_estimators;
 
     float dc_link_voltage;
     float biased_dc_link_voltage;
     float dc_link_to_normalized;
     float motor_pole_pairs;
     float natural_direction;
-
-    float estimators_sample_rate;
-    int downsampling_estimators;
-    int downsampling_estimators_reload_val;
 
     float current_offsets[3];
 
@@ -90,7 +85,4 @@ typedef struct {
     esp_foc_inverter_t * inverter_driver;
     esp_foc_rotor_sensor_t *rotor_sensor_driver;
     esp_foc_isensor_t *isensor_driver;
-    esp_foc_event_handle_t ev_handle;
-    esp_foc_event_handle_t control_handle;
-
 } esp_foc_axis_t;

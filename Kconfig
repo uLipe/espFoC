@@ -1,14 +1,5 @@
 menu "espFoC Settings"
 
-    config ESP_FOC_ALIGN_STEP_DELAY_MS
-        int "Delay between rotor alignment step in ms"
-        default 5
-        help
-            Keeps the bridge active with step calculated
-            voltages to ensure the Q and D vectors to
-            align, higher values increase better alignment
-            in excheange of rotor core saturation.
-
     config NOOF_AXIS
         int "Number of motor outputs"
         range 1 4
@@ -17,11 +8,6 @@ menu "espFoC Settings"
             The number of motor outputs available, this option
             is the number of motor sets, each set is composed
             by total PWM outputs and sensor inputs.
-
-    config FOC_TASK_PRIORITY
-        int "Priority task of foc controller"
-        range 16 25
-        default 24
 
     config FOC_TASK_STACK_SIZE
         int "Task stack size of foc controller"
@@ -33,7 +19,7 @@ menu "espFoC Settings"
 
     config ESP_FOC_SCOPE
         bool "Enable scope data sending"
-        default n
+        default y
 
     config ESP_FOC_SCOPE_BUFFER_SIZE
         int "Size of scope buffer in frames"
@@ -47,6 +33,10 @@ menu "espFoC Settings"
         bool "Enable third harmonic injection compensation on SVPWM"
         depends on !ESP_FOC_USE_SINE_PWM
         default n
+
+    config ESP_FOC_PERF_BUILD
+        select COMPILER_OPTIMIZATION_PERF
+        default y
 endmenu
 
 

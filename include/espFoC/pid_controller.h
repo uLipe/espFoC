@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,7 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
- 
+
 #pragma once
 
 typedef struct {
@@ -33,10 +33,12 @@ typedef struct {
     float accumulated_error;
     float previous_error;
     float max_output_value;
+    float dt;
+    float inv_dt;
 
 }esp_foc_pid_controller_t;
 
-static inline float esp_foc_saturate(float value, float limit) 
+static inline float esp_foc_saturate(float value, float limit)
 {
     float result = value;
     if (value > limit) {
@@ -59,8 +61,8 @@ static inline float  esp_foc_pid_update(esp_foc_pid_controller_t *self,
                                         float measure)
 {
     float error = reference - measure;
-    float error_diff = error - self->previous_error;
-    self->accumulated_error += error;
+    float error_diff = (error - self->previous_error) * self->inv_dt;
+    self->accumulated_error += (error * self->dt);
 
     self->previous_error = error;
 
@@ -70,8 +72,8 @@ static inline float  esp_foc_pid_update(esp_foc_pid_controller_t *self,
         self->accumulated_error = -self->integrator_limit;
     }
 
-    float mv = (self->kp * error) + 
-            (self->ki * self->accumulated_error) + 
+    float mv = (self->kp * error) +
+            (self->ki * self->accumulated_error) +
             (self->kd * error_diff);
 
     return esp_foc_saturate(mv, self->max_output_value);
