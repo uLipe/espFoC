@@ -23,10 +23,14 @@
  */
 
 #include <sys/cdefs.h>
+#include <sdkconfig.h>
 #include "espFoC/inverter_3pwm_ledc.h"
 #include "hal/ledc_hal.h"
 #include "driver/gpio.h"
 #include "esp_attr.h"
+#include "esp_log.h"
+
+#ifndef CONFIG_IDF_TARGET_ESP32P4
 
 #define LEDC_FREQUENCY_HZ       10000
 #define LEDC_RESOLUTION_STEPS   255.0
@@ -47,6 +51,8 @@ static const ledc_timer_t ledc_timers[4] = {LEDC_TIMER_0,LEDC_TIMER_1,LEDC_TIMER
 static bool ledc_driver_configured = false;
 
 DRAM_ATTR static esp_foc_ledc_inverter ledc[CONFIG_NOOF_AXIS];
+
+static const char *TAG = "INVERTER_LEDC";
 
 IRAM_ATTR static void ledc_isr(void *arg)
 {
@@ -268,6 +274,23 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
     ledc[port].hw = LEDC_LL_GET_HW();
 
     ledc[port].voltage_to_duty_ratio = LEDC_RESOLUTION_STEPS;
+    ESP_LOGI(TAG,"Inverter driver is ready for use, intance %p", &ledc[port].interface);
 
     return &ledc[port].interface;
 }
+
+#else
+#warning "LEDC driver is not supported on espFoC running on ESP32P4, please use the MCPWM driver instead"
+esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
+                                        ledc_channel_t ch_v,
+                                        ledc_channel_t ch_w,
+                                        int gpio_u,
+                                        int gpio_v,
+                                        int gpio_w,
+                                        int gpio_enable,
+                                        float dc_link_voltage,
+                                        int port)
+{
+    return NULL;
+}
+#endif

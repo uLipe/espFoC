@@ -47,7 +47,12 @@ static portMUX_TYPE spinlock =  portMUX_INITIALIZER_UNLOCKED;
 
 int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority)
 {
+
+#ifdef __XTENSA__
     int ret = xTaskCreatePinnedToCore(runner,"", CONFIG_FOC_TASK_STACK_SIZE, argument, priority, NULL, APP_CPU_NUM);
+#else
+    int ret = xTaskCreate(runner,"", CONFIG_FOC_TASK_STACK_SIZE, argument, priority, NULL);
+#endif
 
     if (ret != pdPASS) {
         return -ESP_ERR_NO_MEM;

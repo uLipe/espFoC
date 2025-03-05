@@ -4,7 +4,8 @@ set(requires driver esp_adc freertos esp_system esp_timer)
 set(srcs "esp_foc.c" "esp_foc_scope.c" "esp_foc_consts.c" "esp_foc_sine_cosine.c" "esp_foc_sqrtf.c")
 set(includes "include" "drivers")
 
-list(APPEND srcs   "drivers/inverter_3pwm_ledc.c"
+list(APPEND srcs    "drivers/inverter_3pwm_ledc.c"
+                    "drivers/inverter_3pwm_mcpwm.c"
                     "drivers/rotor_sensor_as5600.c"
                     "drivers/rotor_sensor_dummy.c"
                     "drivers/rotor_sensor_open_loop.c"
