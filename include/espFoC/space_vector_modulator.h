@@ -63,17 +63,6 @@ static inline void esp_foc_svm_set(float v_alpha, float v_beta, float *dca, floa
 	float a, b, c;
 	float x, y, z;
 
-	/* normalize and limit alpha-beta vector */
-	// mod = esp_foc_sqrtf(v_alpha * v_alpha + v_beta * v_beta);
-	// if (mod > sqrt3_by_two) {
-	// 	v_alpha = v_alpha / mod * sqrt3_by_two;
-	// 	v_beta = v_beta / mod * sqrt3_by_two;
-	// }
-
-    // a = v_beta;
-    // b = (SQRT_3 * v_alpha - v_beta) * 0.5f;
-    // c = (-SQRT_3 * v_alpha - v_beta) * 0.5f;
-
 	a = v_alpha;
 	b = 0.5f * ((SQRT_3 * v_beta) - v_alpha);
 	c =  -a - b;
@@ -142,4 +131,80 @@ static inline void esp_foc_svm_set(float v_alpha, float v_beta, float *dca, floa
 	default:
 		break;
 	}
+}
+
+static inline void esp_foc_svm_set_center_aligned(float v_alpha, float v_beta, float *dca, float *dcb, float *dcc)
+{
+    int sector = 0;
+    float t1 = 0.0f, t2 = 0.0f, tm = 0.0f;
+
+    float s1 = v_beta;
+    float s2 = (0.866f * v_alpha) + (0.5f * v_beta);
+    float s3 = (-0.866f * v_alpha) + (0.5f * v_beta);
+
+    if (s1 > 0) sector |= 1;
+    if (s2 > 0) sector |= 2;
+    if (s3 > 0) sector |= 4;
+
+    switch (sector) {
+        case 1:
+            t1 = (SQRT_3 * v_beta);
+            t2 = (SQRT_3 * (0.5f * v_beta + 0.866f * v_alpha));
+            break;
+        case 2:
+            t1 = (SQRT_3 * (-0.5f * v_beta + 0.866f * v_alpha));
+            t2 = (SQRT_3 * v_beta);
+            break;
+        case 3:
+            t1 = (SQRT_3 * (-0.5f * v_beta - 0.866f * v_alpha));
+            t2 = (SQRT_3 * (0.5f * v_beta - 0.866f * v_alpha));
+            break;
+        case 4:
+            t1 = (SQRT_3 * (-v_beta));
+            t2 = (SQRT_3 * (-0.5f * v_beta - 0.866f * v_alpha));
+            break;
+        case 5:
+            t1 = (SQRT_3 * (0.5f * v_beta - 0.866f * v_alpha));
+            t2 = (SQRT_3 * (-v_beta));
+            break;
+        case 6:
+            t1 = (SQRT_3 * (0.5f * v_beta + 0.866f * v_alpha));
+            t2 = (SQRT_3 * (-0.5f * v_beta + 0.866f * v_alpha));
+            break;
+    }
+
+    tm = (1.0f - (t1 + t2)) * 0.5f;
+
+    switch (sector) {
+        case 1:
+            *dca = (tm + t1 + t2);
+            *dcb = (tm + t2);
+            *dcc = tm;
+            break;
+        case 2:
+            *dca = (tm + t1);
+            *dcb = (tm + t1 + t2);
+            *dcc = tm;
+            break;
+        case 3:
+            *dca = tm;
+            *dcb = (tm + t1 + t2);
+            *dcc = (tm + t2);
+            break;
+        case 4:
+            *dca = tm;
+            *dcb = (tm + t1);
+            *dcc = (tm + t1 + t2);
+            break;
+        case 5:
+            *dca = (tm + t2);
+            *dcb = tm;
+            *dcc = (tm + t1 + t2);
+            break;
+        case 6:
+            *dca = (tm + t1 + t2);
+            *dcb = tm;
+            *dcc = (tm + t1);
+            break;
+    }
 }

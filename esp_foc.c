@@ -97,7 +97,7 @@ static inline void esp_foc_velocity_control_loop(esp_foc_axis_t *axis)
 }
 
 
-static inline void esp_foc_torque_control_loop(esp_foc_axis_t *axis)
+static inline void esp_foc_current_control_loop(esp_foc_axis_t *axis)
 {
 
     axis->u_q.raw = esp_foc_pid_update( &axis->torque_controller[0],
@@ -128,13 +128,13 @@ IRAM_ATTR static void esp_foc_sensors_loop(esp_foc_axis_t *axis)
     if(axis->downsampling_estimators > 0) {
         axis->downsampling_estimators--;
         if(!axis->downsampling_estimators) {
+            axis->downsampling_estimators = ESP_FOC_ESTIMATORS_DOWNSAMPLING;
             esp_foc_motor_speed_estimator(axis);
 #ifdef CONFIG_ESP_FOC_SCOPE
             esp_foc_get_control_data(axis, &control_data);
             esp_foc_scope_data_push(&control_data);
 #endif
         }
-        axis->downsampling_estimators = ESP_FOC_ESTIMATORS_DOWNSAMPLING;
     }
 }
 
@@ -145,7 +145,7 @@ IRAM_ATTR static void esp_foc_core_loop(void *arg)
     esp_foc_sensors_loop(axis);
     esp_foc_position_control_loop(axis);
     esp_foc_velocity_control_loop(axis);
-    esp_foc_torque_control_loop(axis);
+    esp_foc_current_control_loop(axis);
 
     esp_foc_modulate_dq_voltage(axis->rotor_elec_angle,
                     axis->u_d.raw,
@@ -246,7 +246,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->velocity_controller.inv_dt = (1.0f / axis->velocity_controller.dt);
 
     esp_foc_pid_reset(&axis->velocity_controller);
-    esp_foc_low_pass_filter_init(&axis->velocity_filter, 0.1f);
+    esp_foc_low_pass_filter_init(&axis->velocity_filter, 0.9f);
 
     axis->torque_controller[0].kp = 1.0f;
     axis->torque_controller[0].ki = 0.0f;
@@ -334,7 +334,7 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     axis->inverter_driver->enable(axis->inverter_driver);
     esp_foc_sleep_ms(500);
 
-    esp_foc_modulate_dq_voltage(0.0f, 0.1f, 0.0f, &u, &v,&w, axis->biased_dc_link_voltage,
+    esp_foc_modulate_dq_voltage(0.0f, 1.0f, 0.0f, &u, &v,&w, axis->biased_dc_link_voltage,
                             axis->dc_link_to_normalized);
 
     axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);

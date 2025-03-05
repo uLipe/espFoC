@@ -19,7 +19,7 @@ menu "espFoC Settings"
 
     config ESP_FOC_SCOPE
         bool "Enable scope data sending"
-        default y
+        default n
 
     config ESP_FOC_SCOPE_BUFFER_SIZE
         int "Size of scope buffer in frames"

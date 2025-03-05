@@ -48,7 +48,6 @@ static inline void esp_foc_modulate_dq_voltage (float theta,
     esp_foc_inverse_park_transform(theta, dq_frame, &ab_frame[0], &ab_frame[1]);
     esp_foc_third_harmonic_injection(&ab_frame[0], &ab_frame[1]);
     esp_foc_limit_voltage(&ab_frame[0], &ab_frame[1], 2.0f * bias);
-    esp_foc_apply_bias(&ab_frame[0], &ab_frame[1]);
     ab_frame[0] *= normalization_scale;
     ab_frame[1] *= normalization_scale;
     esp_foc_svm_set(ab_frame[0], ab_frame[1], v_u, v_v, v_w);
