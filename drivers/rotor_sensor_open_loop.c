@@ -33,6 +33,8 @@
 #define SIMUL_INERTIA 0.00024f // J (kg⋅m²)
 #define SIMUL_FRICTION 0.0001f // B (Viscous friction)
 #define DRIFT_COMP_CYCLE 200000
+#define SIMUL_MAX_IQ 5.0f
+#define SIMUL_MINIMUM_DIQ 1e-6f
 
 const char *tag = "ROTOR_SENSOR_SIMUL";
 
@@ -80,28 +82,59 @@ IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
         __containerof(self,esp_foc_rotor_sensor_simul_t, interface);
 
     float angle_now = (obj->angle) * (SIMUL_PULSES_PER_REVOLUTION / (2.0f * M_PI));
-
-    if(!obj->first_read) {
-        obj->first_read = true;
-        return(angle_now);
+    if(angle_now > SIMUL_PULSES_PER_REVOLUTION) {
+        angle_now = SIMUL_PULSES_PER_REVOLUTION;
+        obj->angle = 0.0f;
+    } else if (angle_now < 0) {
+        angle_now = 0.0f;
+        obj->angle = 0.0f;
     }
 
-    if(*obj->dt_wire < 0.0f) {
-        return(angle_now);
+    float d_iq = ((*obj->uq_wire - obj->motor_resistance * obj->estim_iq - SIMUL_FLUX_LINKAGE * obj->omega) / obj->motor_inductance);
+
+    if(isnan(d_iq)) {
+        d_iq = 0.0f;
     }
 
+    if(fabsf(d_iq) < SIMUL_MINIMUM_DIQ) {
+        d_iq = 0.0f;
+    }
+
+    if(d_iq > SIMUL_MAX_IQ) {
+        d_iq = SIMUL_MAX_IQ;
+    } else if (d_iq < -SIMUL_MAX_IQ) {
+        d_iq = -SIMUL_MAX_IQ;
+    }
 
     //Compurte next angle upon calling this function;
-    obj->estim_iq += (*obj->uq_wire - obj->motor_resistance * obj->estim_iq - SIMUL_FLUX_LINKAGE * obj->omega) /
-                        obj->motor_inductance * (*obj->dt_wire);
+    obj->estim_iq +=  d_iq * (*obj->dt_wire);
+
+    if(isnan(obj->estim_iq)) {
+        obj->estim_iq = 0.0f;
+    }
+
+    if(obj->estim_iq > SIMUL_MAX_IQ) {
+        obj->estim_iq = SIMUL_MAX_IQ;
+    } else if (obj->estim_iq < -SIMUL_MAX_IQ) {
+        obj->estim_iq = -SIMUL_MAX_IQ;
+    }
 
     // Estimate rotor acceleration and update speed
     float torque = SIMUL_FLUX_LINKAGE * obj->estim_iq;
     float acceleration = (torque - SIMUL_FRICTION * obj->omega) / SIMUL_INERTIA;
     obj->omega += acceleration * (*obj->dt_wire);
 
+    if(isnan(obj->omega)) {
+        obj->omega = 0.0f;
+    }
+
     // Update electrical rotor angle
     obj->angle += obj->omega * (*obj->dt_wire);
+
+    if(isnan(obj->angle)) {
+        obj->angle = 0.0f;
+    }
+
     if (obj->angle > (2.0f * M_PI)) {
         obj->angle -= (2.0f * M_PI);
     } else if (obj->angle < 0.0f) {
