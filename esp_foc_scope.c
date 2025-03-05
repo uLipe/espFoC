@@ -26,7 +26,10 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <sdkconfig.h>
 #include "espFoC/esp_foc.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 
@@ -44,7 +47,6 @@ IRAM_ATTR static void esp_foc_scope_daemon_thread(void *arg)
     while(1) {
         next_sample = &scope_buffer[ping_pong_switch][rd_buff_index];
         printf("%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
-            next_sample->timestamp.raw,
             next_sample->dt.raw,
             next_sample->u.raw,
             next_sample->v.raw,
@@ -54,7 +56,8 @@ IRAM_ATTR static void esp_foc_scope_daemon_thread(void *arg)
             next_sample->i_w.raw,
             next_sample->i_d.raw,
             next_sample->i_q.raw,
-            next_sample->rotor_position.raw);
+            next_sample->rotor_position.raw,
+            next_sample->speed.raw);
         rd_buff_index++;
 
         esp_foc_sleep_ms(10);
@@ -74,7 +77,7 @@ void esp_foc_scope_data_push(esp_foc_control_data_t *control_data)
 {
     if(!scope_enable) {
         scope_enable = true;
-        esp_foc_create_runner(esp_foc_scope_daemon_thread, NULL, CONFIG_FOC_TASK_PRIORITY - 4);
+        esp_foc_create_runner(esp_foc_scope_daemon_thread, NULL, configMAX_PRIORITIES - 4);
         esp_foc_sleep_ms(10);
     }
 
