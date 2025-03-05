@@ -28,7 +28,7 @@
 #include "driver/gpio.h"
 #include "esp_attr.h"
 
-#define LEDC_FREQUENCY_HZ       20000
+#define LEDC_FREQUENCY_HZ       10000
 #define LEDC_RESOLUTION_STEPS   255.0
 
 typedef struct {
