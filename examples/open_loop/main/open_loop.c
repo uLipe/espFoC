@@ -26,7 +26,7 @@
 #include "esp_err.h"
 
 #include "espFoC/rotor_sensor_open_loop.h"
-#include "espFoC/inverter_3pwm_ledc.h"
+#include "espFoC/inverter_3pwm_mcpwm.h"
 #include "espFoC/current_sensor_adc.h"
 #include "espFoC/esp_foc.h"
 
@@ -54,10 +54,7 @@ static esp_foc_motor_control_settings_t settings = {
 static void initialize_foc_drivers(void)
 {
 
-    inverter = inverter_3pwm_ledc_new(
-        LEDC_CHANNEL_0,
-        LEDC_CHANNEL_1,
-        LEDC_CHANNEL_2,
+    inverter = inverter_3pwm_mpcwm_new(
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_V_PIN,
         CONFIG_FOC_PWM_W_PIN,
@@ -103,7 +100,7 @@ static void initialize_foc_drivers(void)
 void app_main(void)
 {
     esp_foc_control_data_t control_data;
-    esp_foc_q_voltage uq = {.raw = -6.0f};
+    esp_foc_q_voltage uq = {.raw = 0.0f};
 
     ESP_LOGI(TAG, "Initializing the esp foc motor controller!");
 
@@ -121,7 +118,7 @@ void app_main(void)
     esp_foc_run(&axis);
 
     /* ramp the velocity max available voltage in sine PWM (1/4 VLink) */
-    uq.raw = -1.0f;
+    uq.raw = 5.0f;
 
     /* Set the Ud to weaken the field and make it stable at low speeds */
     esp_foc_set_target_voltage(&axis, uq, (esp_foc_d_voltage){.raw = 0.0});
@@ -132,6 +129,7 @@ void app_main(void)
         esp_foc_sleep_ms(100);
         esp_foc_get_control_data(&axis, &control_data);
         ESP_LOGI(TAG, "Counts from simulated rotor sensor: %f", sensor->read_counts(sensor));
+        ESP_LOGI(TAG, "Estimated simulated speed rad/s: %f", control_data.speed.raw);
     }
 
 #endif

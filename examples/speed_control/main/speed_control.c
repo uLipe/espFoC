@@ -26,7 +26,7 @@
 #include "esp_err.h"
 
 #include "espFoC/rotor_sensor_as5600.h"
-#include "espFoC/inverter_3pwm_ledc.h"
+#include "espFoC/inverter_3pwm_mcpwm.h"
 #include "espFoC/esp_foc.h"
 
 static const char *TAG = "esp-foc-example";
@@ -50,10 +50,7 @@ static esp_foc_motor_control_settings_t settings = {
 static void initialize_foc_drivers(void)
 {
 
-    inverter = inverter_3pwm_ledc_new(
-        LEDC_CHANNEL_0,
-        LEDC_CHANNEL_1,
-        LEDC_CHANNEL_2,
+    inverter = inverter_3pwm_mpcwm_new(
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_V_PIN,
         CONFIG_FOC_PWM_W_PIN,
