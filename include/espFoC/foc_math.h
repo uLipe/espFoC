@@ -100,14 +100,12 @@ static inline void esp_foc_clarke_transform (float v_uvw[3],
     *v_beta = ESP_FOC_CLARKE_K3  * (v_uvw[1] - v_uvw[2]);
 }
 
-static inline void esp_foc_park_transform (float theta,
+static inline void esp_foc_park_transform (float sin,
+                                        float cos,
                                         float v_ab[2],
                                         float *v_d,
                                         float *v_q)
 {
-    float sin = esp_foc_sine(theta);
-    float cos = esp_foc_cosine(theta);
-
     *v_d = v_ab[0] * cos +
         v_ab[1] * sin;
 
@@ -131,14 +129,12 @@ static inline void esp_foc_inverse_clarke_transform (float v_ab[2],
     *v_w = c;
 }
 
-static inline void esp_foc_inverse_park_transform (float theta,
+static inline void esp_foc_inverse_park_transform (float sin,
+                                                float cos,
                                                 float v_dq[2],
                                                 float *v_alpha,
                                                 float *v_beta)
 {
-    float sin = esp_foc_sine(theta);
-    float cos = esp_foc_cosine(theta);
-
     *v_alpha = v_dq[0] * cos -
         v_dq[1] * sin;
 

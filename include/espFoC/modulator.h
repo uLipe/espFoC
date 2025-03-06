@@ -24,7 +24,8 @@
 
 #pragma once
 
-static inline void esp_foc_modulate_dq_voltage (float theta,
+static inline void esp_foc_modulate_dq_voltage (float sin,
+                                            float cos,
                                             float v_d,
                                             float v_q,
                                             float *v_u,
@@ -39,13 +40,13 @@ static inline void esp_foc_modulate_dq_voltage (float theta,
 #ifdef CONFIG_ESP_FOC_USE_SINE_PWM
     float a,b,c;
 
-    esp_foc_inverse_park_transform(theta, dq_frame, &ab_frame[0], &ab_frame[1]);
+    esp_foc_inverse_park_transform(sin, cos, dq_frame, &ab_frame[0], &ab_frame[1]);
     esp_foc_inverse_clarke_transform(ab_frame, &a, &b, &c);
     *v_u = (a + bias) * normalization_scale;
     *v_v = (b + bias) * normalization_scale;
     *v_w = (c + bias) * normalization_scale;
 #else
-    esp_foc_inverse_park_transform(theta, dq_frame, &ab_frame[0], &ab_frame[1]);
+    esp_foc_inverse_park_transform(sin, cos, dq_frame, &ab_frame[0], &ab_frame[1]);
     esp_foc_third_harmonic_injection(&ab_frame[0], &ab_frame[1]);
     esp_foc_limit_voltage(&ab_frame[0], &ab_frame[1], 2.0f * bias);
     ab_frame[0] *= normalization_scale;
@@ -54,15 +55,20 @@ static inline void esp_foc_modulate_dq_voltage (float theta,
 #endif
 }
 
-static inline void esp_foc_get_dq_currents(float theta,
+static inline void esp_foc_get_dq_currents(float sin,
+                                        float cos,
                                         float i_u,
                                         float i_v,
                                         float i_w,
+                                        float *i_alpha,
+                                        float *i_beta,
                                         float *i_q,
                                         float *i_d) {
 
     float phase_current_frame[3] = {i_u, i_v, i_w};
     float ab_frame[2];
     esp_foc_clarke_transform(phase_current_frame,&ab_frame[0], &ab_frame[1]);
-    esp_foc_park_transform(theta, ab_frame, i_d, i_q);
+    esp_foc_park_transform(sin, cos, ab_frame, i_d, i_q);
+    *i_alpha = ab_frame[0];
+    *i_beta = ab_frame[1];
 }

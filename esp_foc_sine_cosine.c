@@ -1061,14 +1061,14 @@ const static float index_scale = (4096.0f / full2pi);
 
 IRAM_ATTR float esp_foc_fast_sine(float angle)
 {
-    uint16_t index = (uint16_t)(angle * index_scale);
+    uint16_t index = (uint16_t)(fabsf(angle) * index_scale);
     index &= (4096 - 1);
     return sine_table[index];
 }
 
 IRAM_ATTR float esp_foc_fast_cosine(float angle)
 {
-    uint16_t index = (uint16_t)(angle * index_scale);
+    uint16_t index = (uint16_t)(fabsf(angle) * index_scale);
     index &= (4096 - 1);
     return cosine_table[index];
 }
