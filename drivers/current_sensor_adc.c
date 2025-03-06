@@ -42,9 +42,11 @@ static const char *TAG = "ESP_FOC_ISENSOR";
 
 typedef struct {
     adc_channel_t channels[4];
+    adc_unit_t units[4];
     adc_continuous_handle_t handle;
     float adc_to_current_scale;
     float currents[4];
+    float offsets[4];
     esp_foc_isensor_t interface;
     int number_of_channels;
 }isensor_adc_t;
@@ -59,7 +61,7 @@ static adc_continuous_handle_cfg_t adc_config = {
 
 static adc_continuous_config_t dig_cfg = {
 #if CONFIG_IDF_TARGET_ESP32
-    .sample_freq_hz = 500000,
+    .sample_freq_hz = 1000000,
 #else
     .sample_freq_hz = 83333,
 #endif
@@ -76,7 +78,7 @@ static adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
 
 DRAM_ATTR static isensor_adc_t isensor_adc;
 static bool adc_initialized = false;
-static const float adc_to_volts = ((3.9f)/ 4096.0f);
+static const float adc_to_volts = ((3.1f)/ 4096.0f);
 
 static bool IRAM_ATTR isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
 {
@@ -88,7 +90,7 @@ static bool IRAM_ATTR isensor_adc_done_callback(adc_continuous_handle_t handle, 
     adc_digi_output_data_t *p = (adc_digi_output_data_t *)edata->conv_frame_buffer;
 
     for(int i = 0; i < isensor->number_of_channels; i++) {
-        isensor->currents[i] = ((float)ADC_GET_DATA(p)) * isensor->adc_to_current_scale;
+        isensor->currents[i] = ((float)ADC_GET_DATA(p)) * adc_to_volts;
         p++;
     }
 
@@ -108,7 +110,7 @@ static void continuous_adc_init(isensor_adc_t *isensor)
     for (int i = 0; i < isensor->number_of_channels; i++) {
         adc_pattern[i].atten = ADC_ATTEN_DB_12;
         adc_pattern[i].channel = isensor->channels[i] & 0x7;
-        adc_pattern[i].unit = 0;
+        adc_pattern[i].unit = isensor_adc.units[0];
         adc_pattern[i].bit_width = SOC_ADC_DIGI_MAX_BITWIDTH;
 
         ESP_LOGI(TAG, "adc_pattern[%d].atten is :%"PRIx8, i, adc_pattern[i].atten);
@@ -130,12 +132,12 @@ IRAM_ATTR static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *
 
     esp_foc_critical_enter();
 
-    values->iu_axis_0 = obj->currents[0];
-    values->iv_axis_0 = obj->currents[1];
-    values->iw_axis_0 = -(obj->currents[0] + obj->currents[1]);
-    values->iu_axis_1 = obj->currents[2];
-    values->iv_axis_1 = obj->currents[3];
-    values->iw_axis_1 = -(obj->currents[2] + obj->currents[3]);
+    values->iu_axis_0 = (obj->currents[0] - obj->offsets[0]) * isensor_adc.adc_to_current_scale;
+    values->iv_axis_0 = (obj->currents[1] - obj->offsets[1]) * isensor_adc.adc_to_current_scale;
+    values->iw_axis_0 = -(values->iu_axis_0 +  values->iv_axis_0);
+    values->iu_axis_1 = (obj->currents[2] - obj->offsets[2]) * isensor_adc.adc_to_current_scale;
+    values->iv_axis_1 = (obj->currents[3] - obj->offsets[3]) * isensor_adc.adc_to_current_scale;
+    values->iw_axis_1 = -(values->iu_axis_1 +  values->iv_axis_1);
 
     esp_foc_critical_leave();
 }
@@ -147,6 +149,47 @@ IRAM_ATTR static void sample_isensors(esp_foc_isensor_t *self)
     adc_hal_digi_enable(true);
 }
 
+IRAM_ATTR static void calibrate_isensors (esp_foc_isensor_t *self, int calibration_rounds)
+{
+    isensor_values_t val;
+    isensor_adc_t *obj =
+        __containerof(self, isensor_adc_t, interface);
+
+    esp_foc_sleep_ms(100);
+
+    obj->offsets[0] = 0.0f;
+    obj->offsets[1] = 0.0f;
+    obj->offsets[2] = 0.0f;
+    obj->offsets[3] = 0.0f;
+
+    for(int i = 0; i < calibration_rounds; i++) {
+        self->sample_isensors(self);
+        esp_foc_sleep_ms(10);
+
+        obj->offsets[0] += obj->currents[0];
+        obj->offsets[1] += obj->currents[1];
+        obj->offsets[2] += obj->currents[2];
+        obj->offsets[3] += obj->currents[3];
+    }
+
+    obj->offsets[0] /= calibration_rounds;
+    obj->offsets[1] /= calibration_rounds;
+    obj->offsets[2] /= calibration_rounds;
+    obj->offsets[3] /= calibration_rounds;
+
+    ESP_LOGI(TAG, "ADC calibrated, phase current offsets are: %f, %f, %f, %f",
+            obj->offsets[0], obj->offsets[1], obj->offsets[2], obj->offsets[3]);
+
+    /* Dummy read to check reading when no current is flowing*/
+    self->sample_isensors(self);
+    esp_foc_sleep_ms(10);
+    self->fetch_isensors(self, &val);
+
+    ESP_LOGI(TAG, "ADC calibrated, phase current offsets are: %f, %f, %f, %f, %f, %f",
+            val.iu_axis_0, val.iv_axis_0, val.iw_axis_0, val.iu_axis_1, val.iv_axis_1, val.iw_axis_1);
+}
+
+
 esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
 {
 
@@ -154,16 +197,24 @@ esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
         return &isensor_adc.interface;
     }
 
-    isensor_adc.adc_to_current_scale = (1.0f / config->amp_gain / config->shunt_resistance) *
-                                        adc_to_volts;
+    isensor_adc.adc_to_current_scale = (1.0f / config->amp_gain / config->shunt_resistance);
 
     isensor_adc.interface.fetch_isensors = fetch_isensors;
     isensor_adc.interface.sample_isensors = sample_isensors;
+    isensor_adc.interface.calibrate_isensors = calibrate_isensors;
     isensor_adc.number_of_channels = config->number_of_channels;
     isensor_adc.channels[0] = config->axis_channels[0];
     isensor_adc.channels[1] = config->axis_channels[1];
     isensor_adc.channels[2] = config->axis_channels[2];
     isensor_adc.channels[3] = config->axis_channels[3];
+    isensor_adc.units[0] = config->units[0];
+    isensor_adc.units[1] = config->units[1];
+    isensor_adc.units[2] = config->units[2];
+    isensor_adc.units[3] = config->units[3];
+    isensor_adc.offsets[0] = 0.0f;
+    isensor_adc.offsets[1] = 0.0f;
+    isensor_adc.offsets[2] = 0.0f;
+    isensor_adc.offsets[3] = 0.0f;
 
     continuous_adc_init(&isensor_adc);
     adc_initialized = true;

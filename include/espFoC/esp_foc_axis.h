@@ -47,9 +47,9 @@ typedef struct {
     esp_foc_alpha_current i_alpha;
     esp_foc_beta_current i_beta;
 
-    esp_foc_u_current i_u;
-    esp_foc_v_current i_v;
-    esp_foc_w_current i_w;
+    float i_u;
+    float i_v;
+    float i_w;
 
     float dt;
     float inv_dt;

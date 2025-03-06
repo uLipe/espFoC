@@ -30,10 +30,10 @@
 
 typedef struct {
     adc_channel_t axis_channels[4];
+    adc_unit_t units[4];
     float amp_gain;
     float shunt_resistance;
     int number_of_channels;
 }esp_foc_isensor_adc_config_t;
-
 
 esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config);

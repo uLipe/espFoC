@@ -39,4 +39,5 @@ typedef struct esp_foc_isensor_s esp_foc_isensor_t;
 struct esp_foc_isensor_s {
     void (*fetch_isensors)(esp_foc_isensor_t *self, isensor_values_t *values);
     void (*sample_isensors)(esp_foc_isensor_t *self);
+    void (*calibrate_isensors)(esp_foc_isensor_t *self, int calibration_rounds);
 };

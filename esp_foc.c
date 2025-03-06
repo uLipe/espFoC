@@ -120,7 +120,13 @@ IRAM_ATTR static void esp_foc_sensors_loop(esp_foc_axis_t *axis)
 #endif
 
     if(axis->isensor_driver != NULL) {
+        isensor_values_t val;
+        axis->isensor_driver->fetch_isensors(axis->isensor_driver, &val);
         axis->isensor_driver->sample_isensors(axis->isensor_driver);
+
+        axis->i_u = val.iu_axis_0;
+        axis->i_v = val.iv_axis_0;
+        axis->i_w = val.iw_axis_0;
     }
 
     axis->rotor_elec_angle = esp_foc_ticks_to_radians_normalized(axis);
@@ -281,30 +287,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                 1.0f : -1.0f;
 
     if(axis->isensor_driver != NULL) {
-
-        axis->current_offsets[0] = 0.0f;
-        axis->current_offsets[1] = 0.0f;
-        axis->current_offsets[2] = 0.0f;
-
-        for(int i = 0; i < ESP_FOC_ISENSOR_CALIBRATION_ROUNDS; i++) {
-            isensor_values_t val;
-            axis->isensor_driver->sample_isensors(axis->isensor_driver);
-            esp_foc_sleep_ms(10);
-            axis->isensor_driver->fetch_isensors(axis->isensor_driver, &val);
-
-            axis->current_offsets[0] += val.iu_axis_0;
-            axis->current_offsets[1] += val.iv_axis_0;
-            axis->current_offsets[2] += val.iv_axis_0;
-        }
-
-        axis->current_offsets[0] /= ESP_FOC_ISENSOR_CALIBRATION_ROUNDS;
-        axis->current_offsets[1] /= ESP_FOC_ISENSOR_CALIBRATION_ROUNDS;
-        axis->current_offsets[2] /= ESP_FOC_ISENSOR_CALIBRATION_ROUNDS;
-
-        ESP_LOGI(tag, "ADC calibrated, phase current offsets are: %f, %f, %f",
-                axis->current_offsets[0],
-                axis->current_offsets[1],
-                axis->current_offsets[2] );
+        axis->isensor_driver->calibrate_isensors(axis->isensor_driver,
+                                                ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
     }
     return ESP_FOC_OK;
 }
@@ -580,9 +564,9 @@ esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_dat
     control_data->target_position.raw = axis->target_position;
     control_data->target_speed.raw = axis->target_speed;
 
-    control_data->i_u = axis->i_u;
-    control_data->i_v = axis->i_v;
-    control_data->i_w = axis->i_w;
+    control_data->i_u.raw = axis->i_u;
+    control_data->i_v.raw = axis->i_v;
+    control_data->i_w.raw = axis->i_w;
 
     control_data->i_q = axis->i_q;
     control_data->i_d = axis->i_d;
