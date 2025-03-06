@@ -205,10 +205,17 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
+#ifdef CONFIG_ESP_FOC_SENSORLESS
+    if(isensor == NULL) {
+        ESP_LOGE(tag, "Current sensor is mandatory on sensorless");
+        return ESP_FOC_ERR_INVALID_ARG;
+    }
+#else
     if(rotor == NULL) {
         ESP_LOGE(tag, "invalid rotor sensor driver!");
         return ESP_FOC_ERR_INVALID_ARG;
     }
+#endif
 
 #ifdef CONFIG_ESP_FOC_CUSTOM_MATH
     extern void esp_foc_fast_init_sqrt_table(void);
@@ -240,8 +247,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->target_speed = 0.0;
     axis->target_position = 0.0f;
 
-    axis->downsampling_position = settings.downsampling_position_rate > 0 ? ESP_FOC_POSITION_PID_DOWNSAMPLING : 0;
-    axis->downsampling_speed = settings.downsampling_speed_rate > 0 ? ESP_FOC_VELOCITY_PID_DOWNSAMPLING : 0;
+    axis->downsampling_position = settings.enable_position_control ? ESP_FOC_POSITION_PID_DOWNSAMPLING : 0;
+    axis->downsampling_speed = settings.enable_velocity_control ? ESP_FOC_VELOCITY_PID_DOWNSAMPLING : 0;
     axis->downsampling_estimators = ESP_FOC_ESTIMATORS_DOWNSAMPLING;
 
     axis->i_d.raw = 0.0f;

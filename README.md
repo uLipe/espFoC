@@ -57,8 +57,8 @@ static esp_foc_rotor_sensor_t *sensor;
 
 static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
-    .downsampling_position_rate = 0, // No position control,
-    .downsampling_speed_rate = 0, //No speed control
+    .enable_position_control = false,
+    .enable_velocity_control = false,
     .motor_pole_pairs = 4,
     .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
 };

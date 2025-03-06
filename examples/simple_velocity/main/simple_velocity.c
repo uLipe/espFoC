@@ -39,8 +39,6 @@ static esp_foc_isensor_t  *shunts;
 static esp_foc_rotor_sensor_t *sensor;
 static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
-    .downsampling_position_rate = 0, // No position control,
-    .downsampling_speed_rate = 0, //No speed control
     .motor_pole_pairs = 4,
     .velocity_control_settings.kp = 1.0f,
     .velocity_control_settings.ki = 0.0f,

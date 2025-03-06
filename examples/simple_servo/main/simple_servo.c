@@ -35,8 +35,8 @@ static esp_foc_inverter_t *inverter;
 static esp_foc_rotor_sensor_t *sensor;
 static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
-    .downsampling_position_rate = 160, // position control runs 1/4 rate speed control,
-    .downsampling_speed_rate = 40, //speed control runs 1/40 torque loop
+    .enable_position_control = true,
+    .enable_velocity_control = true,
     .motor_pole_pairs = 4,
     .position_control_settings.kp = 1.8f,
     .position_control_settings.ki = 0.0f,

@@ -39,8 +39,6 @@ static esp_foc_isensor_t  *shunts;
 static esp_foc_rotor_sensor_t *sensor;
 static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
-    .downsampling_position_rate = 0, // No position control,
-    .downsampling_speed_rate = 0, //No speed control
     .motor_pole_pairs = 4,
     .velocity_control_settings.kp = 1.0f,
     .velocity_control_settings.ki = 0.0f,
@@ -84,6 +82,7 @@ static void initialize_foc_drivers(void)
 
     esp_foc_isensor_adc_config_t shunt_cfg = {
         .axis_channels = {ADC_CHANNEL_7, ADC_CHANNEL_6},
+        .units = {ADC_UNIT_1, ADC_UNIT_1},
         .amp_gain = 50.0f,
         .shunt_resistance = 0.01f,
         .number_of_channels = 2,
@@ -118,7 +117,7 @@ void app_main(void)
     esp_foc_run(&axis);
 
     /* ramp the velocity max available voltage in sine PWM (1/4 VLink) */
-    uq.raw = 5.0f;
+    uq.raw = 4.0f;
 
     /* Set the Ud to weaken the field and make it stable at low speeds */
     esp_foc_set_target_voltage(&axis, uq, (esp_foc_d_voltage){.raw = 0.0});
@@ -128,8 +127,10 @@ void app_main(void)
     while(1) {
         esp_foc_sleep_ms(100);
         esp_foc_get_control_data(&axis, &control_data);
+
         ESP_LOGI(TAG, "Counts from simulated rotor sensor: %f", sensor->read_counts(sensor));
         ESP_LOGI(TAG, "Estimated simulated speed rad/s: %f", control_data.speed.raw);
+        ESP_LOGI(TAG, "phase currents: %f, %f, %f", control_data.i_u.raw, control_data.i_v.raw, control_data.i_w.raw );
     }
 
 #endif

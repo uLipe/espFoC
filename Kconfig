@@ -37,6 +37,11 @@ menu "espFoC Settings"
     config ESP_FOC_PERF_BUILD
         select COMPILER_OPTIMIZATION_PERF
         default y
+
+    config ESP_FOC_SENSORLESS
+        bool "Enable observer based, current measured, sensorlesss speed control"
+        default n
+
 endmenu
 
 

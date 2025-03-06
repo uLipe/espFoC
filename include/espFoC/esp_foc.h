@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <math.h>
 #include <sdkconfig.h>
 #include "espFoC/ema_low_pass_filter.h"
@@ -36,6 +37,7 @@
 #include "espFoC/rotor_sensor_interface.h"
 #include "espFoC/os_interface.h"
 #include "espFoC/esp_foc_units.h"
+#include "espFoC/esp_foc_observers.h"
 
 typedef enum {
     ESP_FOC_OK = 0,
@@ -66,11 +68,14 @@ typedef struct {
     esp_foc_control_settings_t torque_control_settings[2];
     esp_foc_control_settings_t velocity_control_settings;
     esp_foc_control_settings_t position_control_settings;
-    int downsampling_speed_rate;
-    int downsampling_position_rate;
-    int motor_pole_pairs;
-    int estimators_rate;
     esp_foc_motor_direction_t natural_direction;
+    bool enable_position_control;
+    bool enable_velocity_control;
+    bool enable_torque_control;
+    int motor_pole_pairs;
+    float motor_resistance;
+    float motor_inductance;
+    float motor_inertia;
 } esp_foc_motor_control_settings_t;
 
 typedef struct {
