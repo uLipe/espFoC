@@ -85,4 +85,11 @@ typedef struct {
     esp_foc_inverter_t * inverter_driver;
     esp_foc_rotor_sensor_t *rotor_sensor_driver;
     esp_foc_isensor_t *isensor_driver;
+
+#ifdef CONFIG_ESP_FOC_SENSORLESS
+    esp_foc_observer_t *observer;
+    esp_foc_observer_t *open_loop_observer;
+    esp_foc_obserter_t *current_observer;
+#endif
+
 } esp_foc_axis_t;

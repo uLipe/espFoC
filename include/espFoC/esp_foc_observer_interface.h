@@ -23,3 +23,20 @@
  */
 
 #pragma once
+
+typedef struct esp_foc_observer_s esp_foc_observer_t;
+
+typedef struct {
+    float u_dq[2];
+    float u_alpha_beta[2];
+    float i_dq[2];
+    float i_alpha_beta[2];
+    float dt;
+    float inv_dt;
+}esp_foc_observer_inputs_t;
+
+struct esp_foc_observer_s{
+    int (*update)(esp_foc_observer_t *self, esp_foc_observer_inputs_t * in);
+    float (*get_angle)(esp_foc_observer_t *self);
+    float (*get_speed)(esp_foc_observer_t *self);
+};

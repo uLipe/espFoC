@@ -165,6 +165,7 @@ esp_foc_rotor_sensor_t *rotor_sensor_open_loop_new(float motor_resistance,
     rotor_sensors[0].motor_inductance = motor_inductance;
     rotor_sensors[0].motor_resistance = motor_resistance;
     rotor_sensors[0].omega = 0.0f;
+    rotor_sensors[0].angle = 0.0f;
     rotor_sensors[0].estim_iq = 0.0f;
     rotor_sensors[0].comp_cycle = 0;
     rotor_sensors[0].first_read = false;

@@ -22,6 +22,14 @@
  * SOFTWARE.
  */
 
-#include <math.h>
-#include <esp_attr.h>
-#include <sdkconfig.h>
+#pragma once
+
+#include <espFoC/esp_foc.h>
+
+typedef struct {
+    float phase_resistance;
+    float phase_inductance;
+    float dt;
+} esp_foc_simu_observer_settings_t;
+
+esp_foc_observer_t *simu_observer_new(int unit, esp_foc_simu_observer_settings_t settings);

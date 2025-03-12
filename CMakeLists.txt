@@ -6,7 +6,8 @@ set(srcs    "esp_foc_core.c"
             "esp_foc_consts.c"
             "esp_foc_sine_cosine.c"
             "esp_foc_sqrtf.c"
-            "esp_foc_observers.c")
+            "esp_foc_pll_observer.c"
+            "esp_foc_simu_observer.c")
 
 set(includes "include" "drivers")
 

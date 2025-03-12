@@ -37,7 +37,7 @@
 #include "espFoC/rotor_sensor_interface.h"
 #include "espFoC/os_interface.h"
 #include "espFoC/esp_foc_units.h"
-#include "espFoC/esp_foc_observers.h"
+#include "espFoC/esp_foc_observer_interface.h"
 
 typedef enum {
     ESP_FOC_OK = 0,

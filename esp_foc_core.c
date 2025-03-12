@@ -106,13 +106,13 @@ static inline void esp_foc_current_control_loop(esp_foc_axis_t *axis)
     axis->u_q.raw = /* esp_foc_pid_update( &axis->torque_controller[0],
                                         axis->target_i_q.raw,
                                         esp_foc_low_pass_filter_update(
-                                            &axis->current_filters[0], axis->i_q.raw)) */ +
+                                            &axis->current_filters[0], axis->i_q.raw))  + */
                                             axis->target_u_q.raw;
 
     axis->u_d.raw = /* esp_foc_pid_update( &axis->torque_controller[1],
                                         axis->target_i_d.raw,
                                         esp_foc_low_pass_filter_update(
-                                            &axis->current_filters[1], axis->i_d.raw)) */ +
+                                            &axis->current_filters[1], axis->i_d.raw))  + */
                                             axis->target_u_d.raw;
 }
 
