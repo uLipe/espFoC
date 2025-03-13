@@ -14,7 +14,6 @@ set(includes "include" "drivers")
 list(APPEND srcs    "drivers/inverter_3pwm_ledc.c"
                     "drivers/inverter_3pwm_mcpwm.c"
                     "drivers/rotor_sensor_as5600.c"
-                    "drivers/rotor_sensor_open_loop.c"
                     "drivers/rotor_sensor_pcnt.c"
                     "drivers/current_sensor_adc.c"
                     "drivers/os_interface.c")

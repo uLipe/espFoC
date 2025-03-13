@@ -25,29 +25,38 @@
 #include <string.h>
 #include <math.h>
 #include <stdbool.h>
-#include "espFoC/esp_foc.h"
-#include "espFoC/rotor_sensor_open_loop.h"
 #include "esp_attr.h"
 #include "esp_log.h"
+#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
+#include "driver/gpio.h"
+#endif
+#include "espFoC/esp_foc.h"
+#include "espFoC/esp_foc_simu_observer.h"
+#include "espFoC/esp_foc_pll_observer.h"
 
 #define ESP_FOC_ISENSOR_CALIBRATION_ROUNDS 100
 #define ESP_FOC_VELOCITY_PID_DOWNSAMPLING  10
 #define ESP_FOC_POSITION_PID_DOWNSAMPLING  100
 #define ESP_FOC_ESTIMATORS_DOWNSAMPLING    4
+#define ESP_FOC_DEBUG_PIN                  22
 
 static const char * tag = "ESP_FOC";
 
 static inline float esp_foc_ticks_to_radians_normalized(esp_foc_axis_t *axis)
 {
-    axis->rotor_shaft_ticks =
-        axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+    if(axis->rotor_sensor_driver) {
+        axis->rotor_shaft_ticks =
+            axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
 
-    esp_foc_critical_enter();
+        esp_foc_critical_enter();
 
-    axis->rotor_position =
-        axis->rotor_shaft_ticks * axis->shaft_ticks_to_radians_ratio * axis->natural_direction;
+        axis->rotor_position =
+            axis->rotor_shaft_ticks * axis->shaft_ticks_to_radians_ratio * axis->natural_direction;
 
-    esp_foc_critical_leave();
+        esp_foc_critical_leave();
+    } else {
+        axis->rotor_position = axis->observer->get_angle(axis->observer);
+    }
 
     return esp_foc_normalize_angle(
         esp_foc_mechanical_to_elec_angle(
@@ -58,9 +67,13 @@ static inline float esp_foc_ticks_to_radians_normalized(esp_foc_axis_t *axis)
 
 static inline void esp_foc_motor_speed_estimator(esp_foc_axis_t * axis)
 {
-    float raw_speed =  (axis->rotor_position - axis->rotor_position_prev) * axis->inv_dt;
-    axis->current_speed = esp_foc_low_pass_filter_update( &axis->velocity_filter, raw_speed);
-    axis->rotor_position_prev = axis->rotor_position;
+    if(axis->rotor_sensor_driver) {
+        float raw_speed =  (axis->rotor_position - axis->rotor_position_prev) * axis->inv_dt;
+        axis->current_speed = esp_foc_low_pass_filter_update( &axis->velocity_filter, raw_speed);
+        axis->rotor_position_prev = axis->rotor_position;
+    } else {
+        axis->current_speed = axis->observer->get_speed(axis->observer);
+    }
 }
 
 static inline void esp_foc_position_control_loop(esp_foc_axis_t *axis)
@@ -154,6 +167,10 @@ IRAM_ATTR static void esp_foc_core_loop(void *arg)
     float e_sin;
     float e_cos;
 
+#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
+    gpio_set_level(ESP_FOC_DEBUG_PIN, true);
+#endif
+
     esp_foc_sensors_loop(axis);
     e_sin = esp_foc_sine(axis->rotor_elec_angle);
     e_cos = esp_foc_cosine(axis->rotor_elec_angle);
@@ -188,6 +205,21 @@ IRAM_ATTR static void esp_foc_core_loop(void *arg)
                                         axis->u_v.raw,
                                         axis->u_w.raw);
 
+    esp_foc_observer_inputs_t in = {
+        .u_dq[0] = axis->u_d.raw,
+        .u_dq[1]  =  axis->u_q.raw,
+        .u_alpha_beta[0] = axis->u_alpha.raw,
+        .u_alpha_beta[1] = axis->u_beta.raw,
+        .i_alpha_beta[0] = axis->i_alpha.raw,
+        .i_alpha_beta[1] = axis->i_beta.raw,
+    };
+
+    axis->observer->update(axis->observer, &in);
+
+#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
+    gpio_set_level(ESP_FOC_DEBUG_PIN, false);
+#endif
+
 }
 
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
@@ -218,6 +250,16 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     esp_foc_fast_init_sqrt_table();
 #endif
 
+#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
+        gpio_config_t drv_en_config = {
+            .mode = GPIO_MODE_OUTPUT,
+            .pin_bit_mask = 1ULL << ESP_FOC_DEBUG_PIN,
+        };
+        gpio_config(&drv_en_config);
+        gpio_set_level(ESP_FOC_DEBUG_PIN, false);
+#endif
+
+    axis->rotor_aligned = ESP_FOC_ERR_AXIS_INVALID_STATE;
     axis->inverter_driver = inverter;
     axis->isensor_driver = isensor;
 
@@ -245,16 +287,21 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     if(rotor != NULL) {
         axis->rotor_sensor_driver = rotor;
     } else {
-        /* open loop mode even on sensorless */
-        axis->rotor_sensor_driver = rotor_sensor_open_loop_new(settings.motor_resistance,
-                                                settings.motor_inductance,
-                                                &axis->u_q.raw,
-                                                &axis->dt);
 
-        if(axis->rotor_sensor_driver == NULL) {
-            ESP_LOGE(tag, "No rotor sensor available for this axis");
+        axis->open_loop_observer = simu_observer_new(settings.motor_unit,
+            (esp_foc_simu_observer_settings_t) {
+                .phase_resistance = settings.motor_resistance,
+                .phase_inductance = settings.motor_inductance,
+                .dt = axis->dt
+            }
+        );
+
+        if(axis->open_loop_observer == NULL) {
+            ESP_LOGE(tag, "FAiled to setup the observer");
             return ESP_FOC_ERR_INVALID_ARG;
         }
+
+        axis->observer = axis->open_loop_observer;
     }
 
     axis->downsampling_position = settings.enable_position_control ? ESP_FOC_POSITION_PID_DOWNSAMPLING : 0;
@@ -277,7 +324,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->position_controller.max_output_value = settings.position_control_settings.max_output_value;
     axis->position_controller.dt = axis->dt * ESP_FOC_POSITION_PID_DOWNSAMPLING;
     axis->position_controller.inv_dt = (1.0f / axis->position_controller.dt);
-
     esp_foc_pid_reset(&axis->position_controller);
 
     axis->velocity_controller.kp = settings.velocity_control_settings.kp;
@@ -287,7 +333,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->velocity_controller.max_output_value = settings.velocity_control_settings.max_output_value;
     axis->velocity_controller.dt = axis->dt * ESP_FOC_VELOCITY_PID_DOWNSAMPLING;
     axis->velocity_controller.inv_dt = (1.0f / axis->velocity_controller.dt);
-
     esp_foc_pid_reset(&axis->velocity_controller);
     esp_foc_low_pass_filter_init(&axis->velocity_filter, 0.9f);
 
@@ -314,9 +359,11 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->motor_pole_pairs = (float)settings.motor_pole_pairs;
     ESP_LOGI(tag, "Motor poler pairs: %f",  axis->motor_pole_pairs);
 
-    axis->shaft_ticks_to_radians_ratio = ((2.0 * M_PI)) /
-        axis->rotor_sensor_driver->get_counts_per_revolution(axis->rotor_sensor_driver);
-    ESP_LOGI(tag, "Shaft to ticks ratio: %f", axis->shaft_ticks_to_radians_ratio);
+    if(axis->rotor_sensor_driver) {
+        axis->shaft_ticks_to_radians_ratio = ((2.0 * M_PI)) /
+            axis->rotor_sensor_driver->get_counts_per_revolution(axis->rotor_sensor_driver);
+        ESP_LOGI(tag, "Shaft to ticks ratio: %f", axis->shaft_ticks_to_radians_ratio);
+    }
 
     esp_foc_sleep_ms(250);
     axis->rotor_aligned = ESP_FOC_ERR_NOT_ALIGNED;
@@ -327,6 +374,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         axis->isensor_driver->calibrate_isensors(axis->isensor_driver,
                                                 ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
     }
+
     return ESP_FOC_OK;
 }
 
@@ -342,7 +390,6 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
         ESP_LOGE(tag, "This rotor was aligned already!");
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
-    float current_ticks;
     axis->rotor_aligned = ESP_FOC_ERR_ALIGNMENT_IN_PROGRESS;
 
     ESP_LOGI(tag, "Starting to align the rotor");
@@ -364,10 +411,17 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);
 
     esp_foc_sleep_ms(500);
-    current_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
-    ESP_LOGI(tag, "rotor ticks offset: %f [ticks] for Coil U", current_ticks);
 
-    axis->rotor_sensor_driver->set_to_zero(axis->rotor_sensor_driver);
+    if(axis->rotor_sensor_driver) {
+        float current_ticks;
+        current_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+        ESP_LOGI(tag, "rotor ticks offset: %f [ticks] for Coil U", current_ticks);
+
+        axis->rotor_sensor_driver->set_to_zero(axis->rotor_sensor_driver);
+    } else {
+        axis->open_loop_observer->reset(axis->open_loop_observer);
+    }
+
     axis->rotor_aligned = ESP_FOC_OK;
     ESP_LOGI(tag, "Done, rotor aligned!");
 

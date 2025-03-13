@@ -42,6 +42,10 @@ menu "espFoC Settings"
         bool "Enable observer based, current measured, sensorlesss speed control"
         default n
 
+    config ESP_FOC_DEBUG_CORE_TIMING
+        bool "output on a pin the time taken to compute espfoc core ops"
+        default n
+
 endmenu
 
 

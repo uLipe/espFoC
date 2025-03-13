@@ -76,6 +76,7 @@ typedef struct {
     float motor_resistance;
     float motor_inductance;
     float motor_inertia;
+    int motor_unit;
 } esp_foc_motor_control_settings_t;
 
 typedef struct {
@@ -126,6 +127,3 @@ esp_foc_err_t esp_foc_set_target_speed(esp_foc_axis_t *axis, esp_foc_radians_per
 esp_foc_err_t esp_foc_set_target_position(esp_foc_axis_t *axis, esp_foc_radians position);
 
 esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_data_t *control_data);
-esp_foc_err_t esp_foc_test_motor(esp_foc_inverter_t *inverter,
-                                esp_foc_rotor_sensor_t *rotor,
-                                esp_foc_motor_control_settings_t settings);

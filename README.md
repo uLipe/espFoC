@@ -45,27 +45,30 @@ wrong, it can pilot the motor at fast speeds if you have the motor parameters:
 #include "esp_log.h"
 #include "esp_err.h"
 
-#include "espFoC/rotor_sensor_open_loop.h"
 #include "espFoC/inverter_3pwm_mcpwm.h"
+#include "espFoC/current_sensor_adc.h"
 #include "espFoC/esp_foc.h"
 
 static const char *TAG = "esp-foc-example";
 
 static esp_foc_inverter_t *inverter;
-static esp_foc_inverter_t *inverter;
-static esp_foc_rotor_sensor_t *sensor;
-
+static esp_foc_isensor_t  *shunts;
 static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
-    .enable_position_control = false,
-    .enable_velocity_control = false,
     .motor_pole_pairs = 4,
+    .velocity_control_settings.kp = 1.0f,
+    .velocity_control_settings.ki = 0.0f,
+    .velocity_control_settings.kd = 0.0f,
+    .motor_inductance = 0.012f,
+    .motor_resistance = 1.5f,
+    .velocity_control_settings.integrator_limit = 100.0f,
+    .velocity_control_settings.max_output_value = 4.0f, //conservative setpoint to the current controller
+    .torque_control_settings[0].max_output_value = 6.0f, //Uses the max driver voltage allowed as limit
     .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
 };
 
 static void initialize_foc_drivers(void)
 {
-
     inverter = inverter_3pwm_mpcwm_new(
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_V_PIN,
@@ -80,45 +83,34 @@ static void initialize_foc_drivers(void)
         ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
         abort();
     }
-
-    sensor = rotor_sensor_open_loop_new(
-        1.5f,   // Motor resistance Ohms.
-        0.012f, // Motor indutance Henry
-        &axis.target_u_q.raw, //Wire the Vq signal from the motor controller
-        &axis.dt              //Wire the foc core sample time
-    );
-
-    if(sensor == NULL) {
-        ESP_LOGE(TAG, "failed to create the inverter driver, aborting!");
-        ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
-        abort();
-    }
 }
 
 void app_main(void)
 {
+    esp_foc_control_data_t control_data;
     esp_foc_q_voltage uq = {.raw = 0.0f};
+
+    ESP_LOGI(TAG, "Initializing the esp foc motor controller!");
+
     initialize_foc_drivers();
 
     esp_foc_initialize_axis(
         &axis,
         inverter,
-        sensor,
+        NULL,
         NULL,
         settings
     );
 
-    /* Align the rotor before doing anything */
+    /* Align rotor, once per startup */
     esp_foc_align_axis(&axis);
 
-    /* espFoC Core Engine runs indepent after started */
+    /* esp_foc core engine runs independent after starting it */
     esp_foc_run(&axis);
 
-    uq.raw = 5.0f;
-
-    /* Set the Voltage Q making Voltage D zero and see the motor to spin! */
+    /* Set desired voltage */
+    uq.raw = 12.0f;
     esp_foc_set_target_voltage(&axis, uq, (esp_foc_d_voltage){.raw = 0.0});
-
 }
 ```
 

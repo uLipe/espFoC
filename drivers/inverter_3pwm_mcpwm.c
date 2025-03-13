@@ -47,7 +47,7 @@ typedef struct {
 
 #define MCPWM_PERIOD_TOP      1000
 #define MCPWM_PERIOD_TOP_HALF 500
-#define MCPWM_RATE_HZ         10000
+#define MCPWM_RATE_HZ         20000
 
 DRAM_ATTR static esp_foc_mcpwm_inverter_t mcpwms[CONFIG_NOOF_AXIS];
 
