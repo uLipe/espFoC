@@ -25,7 +25,6 @@
 #include "esp_log.h"
 #include "esp_err.h"
 
-#include "espFoC/rotor_sensor_open_loop.h"
 #include "espFoC/inverter_3pwm_mcpwm.h"
 #include "espFoC/current_sensor_adc.h"
 #include "espFoC/esp_foc.h"
@@ -33,16 +32,15 @@
 static const char *TAG = "esp-foc-example";
 
 static esp_foc_inverter_t *inverter;
-static esp_foc_inverter_t *inverter;
 static esp_foc_isensor_t  *shunts;
-
-static esp_foc_rotor_sensor_t *sensor;
 static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
     .motor_pole_pairs = 4,
     .velocity_control_settings.kp = 1.0f,
     .velocity_control_settings.ki = 0.0f,
     .velocity_control_settings.kd = 0.0f,
+    .motor_inductance = 0.012f,
+    .motor_resistance = 1.5f,
     .velocity_control_settings.integrator_limit = 100.0f,
     .velocity_control_settings.max_output_value = 4.0f, //conservative setpoint to the current controller
     .torque_control_settings[0].max_output_value = 6.0f, //Uses the max driver voltage allowed as limit
@@ -67,19 +65,6 @@ static void initialize_foc_drivers(void)
         abort();
     }
 
-    sensor = rotor_sensor_open_loop_new(
-        1.5f,
-        0.012f,
-        &axis.target_u_q.raw,
-        &axis.dt
-    );
-
-    if(sensor == NULL) {
-        ESP_LOGE(TAG, "failed to create the inverter driver, aborting!");
-        ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
-        abort();
-    }
-
     esp_foc_isensor_adc_config_t shunt_cfg = {
         .axis_channels = {ADC_CHANNEL_7, ADC_CHANNEL_6},
         .units = {ADC_UNIT_1, ADC_UNIT_1},
@@ -89,7 +74,7 @@ static void initialize_foc_drivers(void)
     };
 
     shunts = isensor_adc_new(&shunt_cfg);
-    if(sensor == NULL) {
+    if(shunts == NULL) {
         ESP_LOGE(TAG, "failed to create the shunt sensor driver, aborting!");
         ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
         abort();
@@ -108,7 +93,7 @@ void app_main(void)
     esp_foc_initialize_axis(
         &axis,
         inverter,
-        sensor,
+        NULL, /* Rotor sensor must be NULL on open_loop an simulated sensor will be allocated*/
         shunts,
         settings
     );
@@ -117,7 +102,7 @@ void app_main(void)
     esp_foc_run(&axis);
 
     /* ramp the velocity max available voltage in sine PWM (1/4 VLink) */
-    uq.raw = 4.0f;
+    uq.raw = -10.0f;
 
     /* Set the Ud to weaken the field and make it stable at low speeds */
     esp_foc_set_target_voltage(&axis, uq, (esp_foc_d_voltage){.raw = 0.0});
@@ -128,8 +113,8 @@ void app_main(void)
         esp_foc_sleep_ms(100);
         esp_foc_get_control_data(&axis, &control_data);
 
-        ESP_LOGI(TAG, "Counts from simulated rotor sensor: %f", sensor->read_counts(sensor));
         ESP_LOGI(TAG, "Estimated simulated speed rad/s: %f", control_data.speed.raw);
+        ESP_LOGI(TAG, "IQ, ID: %f, %f", control_data.i_q.raw, control_data.i_d.raw);
         ESP_LOGI(TAG, "phase currents: %f, %f, %f", control_data.i_u.raw, control_data.i_v.raw, control_data.i_w.raw );
     }
 

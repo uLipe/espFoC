@@ -89,13 +89,18 @@ IRAM_ATTR static int pll_observer_update(esp_foc_observer_t *self, esp_foc_obser
 IRAM_ATTR static float pll_observer_get_angle(esp_foc_observer_t *self)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
-    return est->omega_est;
+    return est->theta_est;
 }
 
 IRAM_ATTR static float pll_observer_get_speed(esp_foc_observer_t *self)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
-    return est->theta_est;
+    return est->omega_est;
+}
+
+IRAM_ATTR static void pll_observer_reset(esp_foc_observer_t *self)
+{
+    (void)self;
 }
 
 esp_foc_observer_t *pll_observer_new(int unit, esp_foc_pll_observer_settings_t settings)
@@ -112,19 +117,23 @@ esp_foc_observer_t *pll_observer_new(int unit, esp_foc_pll_observer_settings_t s
 
     if(settings.phase_resistance <= 0.0f) {
         ESP_LOGE(TAG, "Invalid phase resistance !");
-    }   return NULL;
+        return NULL;
+    }
 
     if(settings.phase_inductance <= 0.0f) {
         ESP_LOGE(TAG, "Invalid phase Inductance !");
-    }   return NULL;
+        return NULL;
+    }
 
     if(settings.pll_kp <= 0.0f) {
         ESP_LOGE(TAG, "Invalid proportional gain !");
-    }   return NULL;
+        return NULL;
+    }
 
     if(settings.pll_ki < 0.0f) {
         ESP_LOGE(TAG, "Invalid integral gain !");
-    }   return NULL;
+        return NULL;
+    }
 
     angle_estimator_pll_t *est = &pll_observers[unit];
     est->theta_est = 0.0f;
@@ -148,5 +157,7 @@ esp_foc_observer_t *pll_observer_new(int unit, esp_foc_pll_observer_settings_t s
     est->interface.update = pll_observer_update;
     est->interface.get_angle = pll_observer_get_angle;
     est->interface.get_speed = pll_observer_get_speed;
+    est->interface.reset = pll_observer_reset;
+
     return &est->interface;
 }

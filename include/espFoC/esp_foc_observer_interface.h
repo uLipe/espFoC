@@ -39,4 +39,5 @@ struct esp_foc_observer_s{
     int (*update)(esp_foc_observer_t *self, esp_foc_observer_inputs_t * in);
     float (*get_angle)(esp_foc_observer_t *self);
     float (*get_speed)(esp_foc_observer_t *self);
+    void (*reset)(esp_foc_observer_t *self);
 };

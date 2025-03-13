@@ -108,13 +108,21 @@ IRAM_ATTR static int simu_observer_update(esp_foc_observer_t *self, esp_foc_obse
 IRAM_ATTR static float simu_observer_get_angle(esp_foc_observer_t *self)
 {
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
-    return obj->omega;
+    return obj->angle;
 }
 
 IRAM_ATTR static float simu_observer_get_speed(esp_foc_observer_t *self)
 {
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
-    return obj->angle;
+    return obj->omega;
+}
+
+IRAM_ATTR static void simu_observer_reset(esp_foc_observer_t *self)
+{
+    esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
+    obj->angle = 0.0f;
+    obj->estim_iq = 0.0f;
+    obj->omega = 0.0f;
 }
 
 esp_foc_observer_t *simu_observer_new(int unit, esp_foc_simu_observer_settings_t settings)
@@ -131,24 +139,27 @@ esp_foc_observer_t *simu_observer_new(int unit, esp_foc_simu_observer_settings_t
 
     if(settings.phase_resistance <= 0.0f) {
         ESP_LOGE(TAG, "Invalid phase resistance !");
-    }   return NULL;
+        return NULL;
+    }
 
     if(settings.phase_inductance <= 0.0f) {
         ESP_LOGE(TAG, "Invalid phase Inductance !");
-    }   return NULL;
+        return NULL;
+    }
 
-    esp_foc_simul_observer_t *est = &simu_observers[unit];
-    est->r = settings.phase_resistance;
-    est->l = settings.phase_inductance;
-    est->dt = settings.dt;
-    est->omega = 0.0f;
-    est->angle = 0.0f;
-    est->estim_iq = 0.0f;
+    simu_observers[unit].interface.update = simu_observer_update;
+    simu_observers[unit].interface.get_angle = simu_observer_get_angle;
+    simu_observers[unit].interface.get_speed = simu_observer_get_speed;
+    simu_observers[unit].interface.get_speed = simu_observer_get_speed;
+    simu_observers[unit].interface.reset = simu_observer_reset;
+    simu_observers[unit].r = settings.phase_resistance;
+    simu_observers[unit].l = settings.phase_inductance;
+    simu_observers[unit].dt = settings.dt;
+    simu_observers[unit].omega = 0.0f;
+    simu_observers[unit].angle = 0.0f;
+    simu_observers[unit].estim_iq = 0.0f;
 
-    ESP_LOGI(TAG, "Observer sample time %f s", est->dt);
+    ESP_LOGI(TAG, "Base rate of the observer: %f", 1.0f / settings.dt);
 
-    est->interface.update = simu_observer_update;
-    est->interface.get_angle = simu_observer_get_angle;
-    est->interface.get_speed = simu_observer_get_speed;
-    return &est->interface;
+    return &simu_observers[unit].interface;
 }

@@ -26,6 +26,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include "espFoC/esp_foc.h"
+#include "espFoC/rotor_sensor_open_loop.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 
@@ -210,11 +211,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         ESP_LOGE(tag, "Current sensor is mandatory on sensorless");
         return ESP_FOC_ERR_INVALID_ARG;
     }
-#else
-    if(rotor == NULL) {
-        ESP_LOGE(tag, "invalid rotor sensor driver!");
-        return ESP_FOC_ERR_INVALID_ARG;
-    }
 #endif
 
 #ifdef CONFIG_ESP_FOC_CUSTOM_MATH
@@ -223,7 +219,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 #endif
 
     axis->inverter_driver = inverter;
-    axis->rotor_sensor_driver = rotor;
     axis->isensor_driver = isensor;
 
     axis->dc_link_voltage =
@@ -246,6 +241,21 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->inv_dt = (1.0f / (axis->dt * ESP_FOC_ESTIMATORS_DOWNSAMPLING));
     axis->target_speed = 0.0;
     axis->target_position = 0.0f;
+
+    if(rotor != NULL) {
+        axis->rotor_sensor_driver = rotor;
+    } else {
+        /* open loop mode even on sensorless */
+        axis->rotor_sensor_driver = rotor_sensor_open_loop_new(settings.motor_resistance,
+                                                settings.motor_inductance,
+                                                &axis->u_q.raw,
+                                                &axis->dt);
+
+        if(axis->rotor_sensor_driver == NULL) {
+            ESP_LOGE(tag, "No rotor sensor available for this axis");
+            return ESP_FOC_ERR_INVALID_ARG;
+        }
+    }
 
     axis->downsampling_position = settings.enable_position_control ? ESP_FOC_POSITION_PID_DOWNSAMPLING : 0;
     axis->downsampling_speed = settings.enable_velocity_control ? ESP_FOC_VELOCITY_PID_DOWNSAMPLING : 0;
