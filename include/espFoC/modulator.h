@@ -28,6 +28,8 @@ static inline void esp_foc_modulate_dq_voltage (float sin,
                                             float cos,
                                             float v_d,
                                             float v_q,
+                                            float *v_alpha,
+                                            float *v_beta,
                                             float *v_u,
                                             float *v_v,
                                             float *v_w,
@@ -41,12 +43,16 @@ static inline void esp_foc_modulate_dq_voltage (float sin,
     float a,b,c;
 
     esp_foc_inverse_park_transform(sin, cos, dq_frame, &ab_frame[0], &ab_frame[1]);
+    *v_alpha = ab_frame[0];
+    *v_beta = ab_frame[1];
     esp_foc_inverse_clarke_transform(ab_frame, &a, &b, &c);
     *v_u = (a + bias) * normalization_scale;
     *v_v = (b + bias) * normalization_scale;
     *v_w = (c + bias) * normalization_scale;
 #else
     esp_foc_inverse_park_transform(sin, cos, dq_frame, &ab_frame[0], &ab_frame[1]);
+    *v_alpha = ab_frame[0];
+    *v_beta = ab_frame[1];
     esp_foc_third_harmonic_injection(&ab_frame[0], &ab_frame[1]);
     esp_foc_limit_voltage(&ab_frame[0], &ab_frame[1], 2.0f * bias);
     ab_frame[0] *= normalization_scale;

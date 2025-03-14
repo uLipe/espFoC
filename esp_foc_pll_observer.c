@@ -30,10 +30,11 @@
 #include "esp_log.h"
 #include "espFoC/esp_foc_pll_observer.h"
 
-#define PLL_OBSERVER_CONVERGE_WAIT_TIME  0.5f
+#define PLL_OBSERVER_CONVERGE_WAIT_TIME  2.0f
 
 typedef struct {
     float theta_est;
+    float theta_mes;
     float omega_est;
     float theta_error;
     float e_alpha;
@@ -64,13 +65,13 @@ IRAM_ATTR static int pll_observer_update(esp_foc_observer_t *self, esp_foc_obser
     /* Estimate the angle using the motor parameters */
     est->e_alpha = in->u_alpha_beta[0] - est->r * in->i_alpha_beta[0] - est->l * di_alpha_dt;
     est->e_beta = in->u_alpha_beta[1] - est->r * in->i_alpha_beta[1]- est->l * di_beta_dt;
-    float theta_measured = atan2f(est->e_beta, est->e_alpha);
-
+    est->theta_mes = atan2f(est->e_beta, est->e_alpha);
+    if (est->theta_mes < 0.0f) est->theta_mes += 2.0f * M_PI;
 
     /* Perform PLL step to filter out the noise and extracts the rotor speed as well*/
-    est->theta_error = theta_measured - est->theta_est;
-    est->integral += est->ki * est->theta_error * est->dt;
-    est->omega_est = est->kp * est->theta_error + est->integral;
+    est->theta_error = est->theta_mes - est->theta_est;
+    est->integral += est->theta_error * est->dt;
+    est->omega_est = (est->kp * est->theta_error) + (est->ki * est->integral);
     est->theta_est += est->omega_est * est->dt;
 
     if (est->theta_est > 2.0f * M_PI) est->theta_est -= 2.0f * M_PI;
@@ -89,7 +90,7 @@ IRAM_ATTR static int pll_observer_update(esp_foc_observer_t *self, esp_foc_obser
 IRAM_ATTR static float pll_observer_get_angle(esp_foc_observer_t *self)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
-    return est->theta_est;
+    return est->theta_mes;
 }
 
 IRAM_ATTR static float pll_observer_get_speed(esp_foc_observer_t *self)
@@ -98,9 +99,13 @@ IRAM_ATTR static float pll_observer_get_speed(esp_foc_observer_t *self)
     return est->omega_est;
 }
 
-IRAM_ATTR static void pll_observer_reset(esp_foc_observer_t *self)
+IRAM_ATTR static void pll_observer_reset(esp_foc_observer_t *self, float offset)
 {
-    (void)self;
+    angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
+    est->theta_est = offset;
+    est->i_alpha_prev = 0.0f;
+    est->i_beta_prev = 0.0f;
+    est->integral = 0.0f;
 }
 
 esp_foc_observer_t *pll_observer_new(int unit, esp_foc_pll_observer_settings_t settings)
@@ -148,7 +153,7 @@ esp_foc_observer_t *pll_observer_new(int unit, esp_foc_pll_observer_settings_t s
     est->ki = settings.pll_ki;
     est->r = settings.phase_resistance;
     est->l = settings.phase_inductance;
-    est->dt = settings.dt;
+    est->dt = settings.dt * 2.0f;
     est->inv_dt = (1.0f / est->dt);
     est->converging_count = (int)( PLL_OBSERVER_CONVERGE_WAIT_TIME / settings.dt);
 

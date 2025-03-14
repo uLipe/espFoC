@@ -41,6 +41,7 @@
 static const char *TAG = "ESP_FOC_ISENSOR";
 
 typedef struct {
+    esp_foc_lp_filter_t current_filters[4];
     adc_channel_t channels[4];
     adc_unit_t units[4];
     adc_continuous_handle_t handle;
@@ -49,10 +50,11 @@ typedef struct {
     float offsets[4];
     esp_foc_isensor_t interface;
     int number_of_channels;
+    bool on_convsersion;
 }isensor_adc_t;
 
 static adc_continuous_handle_cfg_t adc_config = {
-    .max_store_buf_size = 256 * SOC_ADC_DIGI_RESULT_BYTES,
+    .max_store_buf_size = 8 * SOC_ADC_DIGI_RESULT_BYTES,
     .conv_frame_size = 2 * SOC_ADC_DIGI_RESULT_BYTES,
     .flags = {
         .flush_pool = 0,
@@ -61,7 +63,7 @@ static adc_continuous_handle_cfg_t adc_config = {
 
 static adc_continuous_config_t dig_cfg = {
 #if CONFIG_IDF_TARGET_ESP32
-    .sample_freq_hz = 1000000,
+    .sample_freq_hz = 60000,
 #else
     .sample_freq_hz = 83333,
 #endif
@@ -78,14 +80,16 @@ static adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
 
 DRAM_ATTR static isensor_adc_t isensor_adc;
 static bool adc_initialized = false;
-static const float adc_to_volts = ((3.1f)/ 4096.0f);
+static const float adc_to_volts = ((3.9f)/ 4096.0f);
 
 static bool IRAM_ATTR isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
 {
-    adc_hal_digi_connect(false);
     adc_hal_digi_enable(false);
+    adc_hal_digi_connect(false);
 
     esp_foc_fpu_isr_enter();
+    esp_foc_critical_enter();
+
     isensor_adc_t *isensor = (isensor_adc_t *)user_data;
     adc_digi_output_data_t *p = (adc_digi_output_data_t *)edata->conv_frame_buffer;
 
@@ -94,6 +98,7 @@ static bool IRAM_ATTR isensor_adc_done_callback(adc_continuous_handle_t handle, 
         p++;
     }
 
+    esp_foc_critical_leave();
     esp_foc_fpu_isr_leave();
     return false;
 }
@@ -123,6 +128,7 @@ static void continuous_adc_init(isensor_adc_t *isensor)
     adc_continuous_config(isensor->handle, &dig_cfg);
     adc_continuous_register_event_callbacks(isensor->handle, &cbs, isensor);
     adc_continuous_start(isensor->handle);
+    esp_foc_sleep_ms(10);
 }
 
 IRAM_ATTR static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
@@ -132,11 +138,11 @@ IRAM_ATTR static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *
 
     esp_foc_critical_enter();
 
-    values->iu_axis_0 = (obj->currents[0] - obj->offsets[0]) * isensor_adc.adc_to_current_scale;
-    values->iv_axis_0 = (obj->currents[1] - obj->offsets[1]) * isensor_adc.adc_to_current_scale;
+    values->iu_axis_0 = esp_foc_low_pass_filter_update(&obj->current_filters[0], (obj->currents[0] - obj->offsets[0]) * isensor_adc.adc_to_current_scale);
+    values->iv_axis_0 = esp_foc_low_pass_filter_update(&obj->current_filters[1], (obj->currents[1] - obj->offsets[1]) * isensor_adc.adc_to_current_scale);
     values->iw_axis_0 = -(values->iu_axis_0 +  values->iv_axis_0);
-    values->iu_axis_1 = (obj->currents[2] - obj->offsets[2]) * isensor_adc.adc_to_current_scale;
-    values->iv_axis_1 = (obj->currents[3] - obj->offsets[3]) * isensor_adc.adc_to_current_scale;
+    values->iu_axis_1 = esp_foc_low_pass_filter_update(&obj->current_filters[2], (obj->currents[2] - obj->offsets[2]) * isensor_adc.adc_to_current_scale);
+    values->iv_axis_1 = esp_foc_low_pass_filter_update(&obj->current_filters[3], (obj->currents[3] - obj->offsets[3]) * isensor_adc.adc_to_current_scale);
     values->iw_axis_1 = -(values->iu_axis_1 +  values->iv_axis_1);
 
     esp_foc_critical_leave();
@@ -144,7 +150,6 @@ IRAM_ATTR static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *
 
 IRAM_ATTR static void sample_isensors(esp_foc_isensor_t *self)
 {
-    (void)self;
     adc_hal_digi_connect(true);
     adc_hal_digi_enable(true);
 }
@@ -197,7 +202,7 @@ esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
         return &isensor_adc.interface;
     }
 
-    isensor_adc.adc_to_current_scale = (1.0f / config->amp_gain / config->shunt_resistance);
+    isensor_adc.adc_to_current_scale = (1.0f / (config->amp_gain * config->shunt_resistance));
 
     isensor_adc.interface.fetch_isensors = fetch_isensors;
     isensor_adc.interface.sample_isensors = sample_isensors;
@@ -215,6 +220,12 @@ esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
     isensor_adc.offsets[1] = 0.0f;
     isensor_adc.offsets[2] = 0.0f;
     isensor_adc.offsets[3] = 0.0f;
+    isensor_adc.on_convsersion = false;
+
+    esp_foc_low_pass_filter_init(&isensor_adc.current_filters[0], 1.0);
+    esp_foc_low_pass_filter_init(&isensor_adc.current_filters[1], 1.0);
+    esp_foc_low_pass_filter_init(&isensor_adc.current_filters[2], 1.0);
+    esp_foc_low_pass_filter_init(&isensor_adc.current_filters[3], 1.0);
 
     continuous_adc_init(&isensor_adc);
     adc_initialized = true;

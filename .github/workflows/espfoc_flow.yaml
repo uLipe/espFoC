@@ -2,7 +2,7 @@ name: Build
 on: push
 jobs:
   build:
-    name: Test compiling 
+    name: Test compiling
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
@@ -47,14 +47,10 @@ jobs:
         ref: master
 
     - name: Build Samples
-      run: | 
+      run: |
         ./idf/install.sh
-        . ./idf/export.sh 
+        . ./idf/export.sh
         pushd examples/simple_velocity
-        idf.py set-target esp32
-        idf.py build
-        popd
-        pushd examples/simple_motor_tester
         idf.py set-target esp32
         idf.py build
         popd
@@ -67,10 +63,6 @@ jobs:
         idf.py build
         popd
         pushd examples/simple_velocity
-        idf.py set-target esp32s3
-        idf.py build
-        popd
-        pushd examples/simple_motor_tester
         idf.py set-target esp32s3
         idf.py build
         popd

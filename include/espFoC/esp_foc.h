@@ -98,10 +98,10 @@ typedef struct {
     esp_foc_d_current i_d;
 
     esp_foc_alpha_voltage u_alpha;
-    esp_foc_alpha_voltage u_beta;
+    esp_foc_beta_voltage u_beta;
 
     esp_foc_alpha_current i_alpha;
-    esp_foc_alpha_current i_beta;
+    esp_foc_beta_current i_beta;
 
     esp_foc_radians rotor_position;
     esp_foc_radians position;
@@ -109,6 +109,7 @@ typedef struct {
 
     esp_foc_radians target_position;
     esp_foc_radians_per_second target_speed;
+    esp_foc_radians_per_second observer_angle;
 
 } esp_foc_control_data_t;
 
@@ -123,6 +124,7 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis);
 
 esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis, esp_foc_q_voltage uq, esp_foc_d_voltage ud);
+esp_foc_err_t esp_foc_set_target_current(esp_foc_axis_t *axis, esp_foc_q_current iq, esp_foc_d_current id);
 esp_foc_err_t esp_foc_set_target_speed(esp_foc_axis_t *axis, esp_foc_radians_per_second speed);
 esp_foc_err_t esp_foc_set_target_position(esp_foc_axis_t *axis, esp_foc_radians position);
 

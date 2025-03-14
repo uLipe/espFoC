@@ -117,8 +117,9 @@ IRAM_ATTR static float simu_observer_get_speed(esp_foc_observer_t *self)
     return obj->omega;
 }
 
-IRAM_ATTR static void simu_observer_reset(esp_foc_observer_t *self)
+IRAM_ATTR static void simu_observer_reset(esp_foc_observer_t *self, float offset)
 {
+    (void)offset;
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
     obj->angle = 0.0f;
     obj->estim_iq = 0.0f;

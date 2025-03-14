@@ -48,14 +48,14 @@ IRAM_ATTR static void esp_foc_scope_daemon_thread(void *arg)
         next_sample = &scope_buffer[ping_pong_switch][rd_buff_index];
         printf("%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
             next_sample->dt.raw,
-            next_sample->u.raw,
-            next_sample->v.raw,
+            next_sample->u_alpha.raw,
+            next_sample->u_beta.raw,
             next_sample->w.raw,
-            next_sample->i_u.raw,
-            next_sample->i_v.raw,
+            next_sample->i_alpha.raw,
+            next_sample->i_beta.raw,
             next_sample->i_w.raw,
-            next_sample->i_d.raw,
             next_sample->i_q.raw,
+            next_sample->observer_angle.raw,
             next_sample->rotor_position.raw,
             next_sample->speed.raw);
         rd_buff_index++;

@@ -58,11 +58,21 @@ static inline float esp_foc_ticks_to_radians_normalized(esp_foc_axis_t *axis)
         axis->rotor_position = axis->observer->get_angle(axis->observer);
     }
 
-    return esp_foc_normalize_angle(
-        esp_foc_mechanical_to_elec_angle(
-            axis->rotor_position, axis->motor_pole_pairs
-        )
-    );
+    if(axis->observer == axis->current_observer) {
+        return esp_foc_normalize_angle(
+            esp_foc_mechanical_to_elec_angle(
+                axis->rotor_position, 1.0f
+            )
+        );
+
+    } else {
+        return esp_foc_normalize_angle(
+            esp_foc_mechanical_to_elec_angle(
+                axis->rotor_position, axis->motor_pole_pairs
+            )
+        );
+    }
+
 }
 
 static inline void esp_foc_motor_speed_estimator(esp_foc_axis_t * axis)
@@ -114,27 +124,52 @@ static inline void esp_foc_velocity_control_loop(esp_foc_axis_t *axis)
 static inline void esp_foc_current_control_loop(esp_foc_axis_t *axis)
 {
 
-    /* PID controllers disabled yet since current sensing is still experimental
-     * Once the get robust sufficiently it will be uncommented
-     */
-    axis->u_q.raw = /* esp_foc_pid_update( &axis->torque_controller[0],
+    axis->u_q.raw =  esp_foc_pid_update( &axis->torque_controller[0],
                                         axis->target_i_q.raw,
                                         esp_foc_low_pass_filter_update(
-                                            &axis->current_filters[0], axis->i_q.raw))  + */
+                                            &axis->current_filters[0], axis->i_q.raw)) +
                                             axis->target_u_q.raw;
 
-    axis->u_d.raw = /* esp_foc_pid_update( &axis->torque_controller[1],
+    axis->u_d.raw = esp_foc_pid_update( &axis->torque_controller[1],
                                         axis->target_i_d.raw,
                                         esp_foc_low_pass_filter_update(
-                                            &axis->current_filters[1], axis->i_d.raw))  + */
+                                            &axis->current_filters[1], axis->i_d.raw))  +
                                             axis->target_u_d.raw;
 }
 
 IRAM_ATTR static void esp_foc_sensors_loop(esp_foc_axis_t *axis)
 {
+    esp_foc_observer_inputs_t in = {
+            .u_dq[0] = axis->u_d.raw,
+            .u_dq[1]  =  axis->u_q.raw,
+            .u_alpha_beta[0] = axis->u_alpha.raw,
+            .u_alpha_beta[1] = axis->u_beta.raw,
+            .i_alpha_beta[0] = axis->i_alpha.raw,
+            .i_alpha_beta[1] = axis->i_beta.raw,
+    };
+
 #ifdef CONFIG_ESP_FOC_SCOPE
     esp_foc_control_data_t control_data;
 #endif
+
+    if(axis->downsampling_estimators > 0) {
+        axis->downsampling_estimators--;
+        if(!axis->downsampling_estimators) {
+            axis->downsampling_estimators = ESP_FOC_ESTIMATORS_DOWNSAMPLING;
+            esp_foc_motor_speed_estimator(axis);
+
+            axis->open_loop_observer->update(axis->open_loop_observer, &in);
+
+            if(axis->isensor_driver != NULL) {
+                int not_conv = axis->current_observer->update(axis->current_observer, &in);
+                if(!not_conv) {
+                    float obs = axis->current_observer->get_angle(axis->current_observer);
+                    axis->current_observer->reset(axis->current_observer, obs + (axis->rotor_position - obs));
+                    /* axis->observer = axis->current_observer; */
+                }
+            }
+        }
+    }
 
     if(axis->isensor_driver != NULL) {
         isensor_values_t val;
@@ -148,17 +183,10 @@ IRAM_ATTR static void esp_foc_sensors_loop(esp_foc_axis_t *axis)
 
     axis->rotor_elec_angle = esp_foc_ticks_to_radians_normalized(axis);
 
-    if(axis->downsampling_estimators > 0) {
-        axis->downsampling_estimators--;
-        if(!axis->downsampling_estimators) {
-            axis->downsampling_estimators = ESP_FOC_ESTIMATORS_DOWNSAMPLING;
-            esp_foc_motor_speed_estimator(axis);
 #ifdef CONFIG_ESP_FOC_SCOPE
             esp_foc_get_control_data(axis, &control_data);
             esp_foc_scope_data_push(&control_data);
 #endif
-        }
-    }
 }
 
 IRAM_ATTR static void esp_foc_core_loop(void *arg)
@@ -194,6 +222,8 @@ IRAM_ATTR static void esp_foc_core_loop(void *arg)
                     e_cos,
                     axis->u_d.raw,
                     axis->u_q.raw,
+                    &axis->u_alpha.raw,
+                    &axis->u_beta.raw,
                     &axis->u_u.raw,
                     &axis->u_v.raw,
                     &axis->u_w.raw,
@@ -205,16 +235,6 @@ IRAM_ATTR static void esp_foc_core_loop(void *arg)
                                         axis->u_v.raw,
                                         axis->u_w.raw);
 
-    esp_foc_observer_inputs_t in = {
-        .u_dq[0] = axis->u_d.raw,
-        .u_dq[1]  =  axis->u_q.raw,
-        .u_alpha_beta[0] = axis->u_alpha.raw,
-        .u_alpha_beta[1] = axis->u_beta.raw,
-        .i_alpha_beta[0] = axis->i_alpha.raw,
-        .i_alpha_beta[1] = axis->i_beta.raw,
-    };
-
-    axis->observer->update(axis->observer, &in);
 
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
     gpio_set_level(ESP_FOC_DEBUG_PIN, false);
@@ -259,6 +279,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         gpio_set_level(ESP_FOC_DEBUG_PIN, false);
 #endif
 
+    float current_control_analog_bandwith;
+
     axis->rotor_aligned = ESP_FOC_ERR_AXIS_INVALID_STATE;
     axis->inverter_driver = inverter;
     axis->isensor_driver = isensor;
@@ -292,7 +314,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
             (esp_foc_simu_observer_settings_t) {
                 .phase_resistance = settings.motor_resistance,
                 .phase_inductance = settings.motor_inductance,
-                .dt = axis->dt
+                .dt = axis->dt * ESP_FOC_ESTIMATORS_DOWNSAMPLING
             }
         );
 
@@ -336,25 +358,27 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     esp_foc_pid_reset(&axis->velocity_controller);
     esp_foc_low_pass_filter_init(&axis->velocity_filter, 0.9f);
 
-    axis->torque_controller[0].kp = 1.0f;
-    axis->torque_controller[0].ki = 0.0f;
+    current_control_analog_bandwith = (2.0f * M_PI * (inverter->get_inverter_pwm_rate(inverter) / 1000.0f));
+
+    axis->torque_controller[0].kp = settings.motor_inductance * current_control_analog_bandwith;
+    axis->torque_controller[0].ki = settings.motor_resistance * current_control_analog_bandwith;
     axis->torque_controller[0].kd = 0.0f;
-    axis->torque_controller[0].integrator_limit = 0.0f;
-    axis->torque_controller[0].max_output_value = settings.torque_control_settings[0].max_output_value;
+    axis->torque_controller[0].integrator_limit = 1e+6f;
+    axis->torque_controller[0].max_output_value = axis->biased_dc_link_voltage/*settings.torque_control_settings[0].max_output_value*/;
     axis->torque_controller[0].dt = axis->dt;
     axis->torque_controller[0].inv_dt = (1.0f / axis->torque_controller[0].dt);
     esp_foc_pid_reset(&axis->torque_controller[0]);
-    esp_foc_low_pass_filter_init(&axis->current_filters[0], 0.9);
+    esp_foc_low_pass_filter_init(&axis->current_filters[0], 1.0);
 
-    axis->torque_controller[1].kp = 1.0f;
-    axis->torque_controller[1].ki = 0.0f;
+    axis->torque_controller[1].kp = settings.motor_inductance * current_control_analog_bandwith;
+    axis->torque_controller[1].ki = settings.motor_resistance * current_control_analog_bandwith;
     axis->torque_controller[1].kd = 0.0f;
-    axis->torque_controller[1].integrator_limit = 0.0f;
-    axis->torque_controller[1].max_output_value = settings.torque_control_settings[1].max_output_value;
+    axis->torque_controller[1].integrator_limit = 1e+6f;
+    axis->torque_controller[1].max_output_value = axis->biased_dc_link_voltage /* settings.torque_control_settings[1].max_output_value */;
     axis->torque_controller[1].dt = axis->dt;
     axis->torque_controller[1].inv_dt = (1.0f / axis->torque_controller[1].dt);
     esp_foc_pid_reset(&axis->torque_controller[1]);
-    esp_foc_low_pass_filter_init(&axis->current_filters[1], 0.9);
+    esp_foc_low_pass_filter_init(&axis->current_filters[1], 1.0);
 
     axis->motor_pole_pairs = (float)settings.motor_pole_pairs;
     ESP_LOGI(tag, "Motor poler pairs: %f",  axis->motor_pole_pairs);
@@ -373,6 +397,16 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     if(axis->isensor_driver != NULL) {
         axis->isensor_driver->calibrate_isensors(axis->isensor_driver,
                                                 ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
+
+        axis->current_observer = pll_observer_new(settings.motor_unit,
+                                (esp_foc_pll_observer_settings_t) {
+                                .pll_kp = 1.414f * 2.0f * M_PI * 100.0f,
+                                .pll_ki = (2.0f * M_PI * 100.0f ) *
+                                          (2.0f * M_PI * 100.0f),
+                                .phase_resistance = settings.motor_resistance,
+                                .phase_inductance = settings.motor_inductance,
+                                .dt = axis->dt * ESP_FOC_ESTIMATORS_DOWNSAMPLING
+        });
     }
 
     return ESP_FOC_OK;
@@ -380,7 +414,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 {
-    float u, v, w, e_sin, e_cos;
+    float a,b,u, v, w, e_sin, e_cos;
 
     if(axis == NULL) {
         ESP_LOGE(tag, "Invalid axis object!");
@@ -405,7 +439,7 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     axis->inverter_driver->enable(axis->inverter_driver);
     esp_foc_sleep_ms(500);
 
-    esp_foc_modulate_dq_voltage(e_sin, e_cos, 1.0f, 0.0f, &u, &v,&w, axis->biased_dc_link_voltage,
+    esp_foc_modulate_dq_voltage(e_sin, e_cos, 1.0f, 0.0f,&a, &b, &u, &v,&w, axis->biased_dc_link_voltage,
                             axis->dc_link_to_normalized);
 
     axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);
@@ -419,7 +453,17 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 
         axis->rotor_sensor_driver->set_to_zero(axis->rotor_sensor_driver);
     } else {
-        axis->open_loop_observer->reset(axis->open_loop_observer);
+        esp_foc_observer_inputs_t in = {
+                .u_alpha_beta[0] = a,
+                .u_alpha_beta[1] = b,
+                .i_alpha_beta[0] = 0.0f,
+                .i_alpha_beta[1] = 0.0f,
+        };
+
+        axis->open_loop_observer->reset(axis->open_loop_observer, 0.0f);
+        if(axis->isensor_driver != NULL) {
+            axis->current_observer->update(axis->current_observer, &in);
+        }
     }
 
     axis->rotor_aligned = ESP_FOC_OK;
@@ -469,6 +513,29 @@ IRAM_ATTR esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis,
 
     return ESP_FOC_OK;
 }
+
+IRAM_ATTR esp_foc_err_t esp_foc_set_target_current(esp_foc_axis_t *axis, esp_foc_q_current iq, esp_foc_d_current id)
+{
+    if(axis == NULL) {
+        ESP_LOGE(tag, "invalid axis object!");
+        return ESP_FOC_ERR_INVALID_ARG;
+    }
+    if(axis->rotor_aligned != ESP_FOC_OK) {
+        ESP_LOGE(tag, "align rotor first!");
+        return ESP_FOC_ERR_AXIS_INVALID_STATE;
+    }
+
+    esp_foc_critical_enter();
+
+    axis->target_i_q = iq;
+    axis->target_i_d = id;
+
+    esp_foc_critical_leave();
+
+    return ESP_FOC_OK;
+}
+
+
 
 IRAM_ATTR esp_foc_err_t esp_foc_set_target_speed(esp_foc_axis_t *axis,
                                                 esp_foc_radians_per_second speed)
@@ -529,115 +596,6 @@ esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis)
     return ESP_FOC_OK;
 }
 
-esp_foc_err_t esp_foc_test_motor(esp_foc_inverter_t *inverter,
-                                esp_foc_rotor_sensor_t *rotor,
-                                esp_foc_motor_control_settings_t settings)
-{
-    float norm, bias;
-
-    if(inverter == NULL) {
-        ESP_LOGE(tag, "invalid inverter driver!");
-        return ESP_FOC_ERR_INVALID_ARG;
-    }
-
-    if(rotor == NULL) {
-        ESP_LOGE(tag, "invalid rotor sensor driver!");
-        return ESP_FOC_ERR_INVALID_ARG;
-    }
-
-    ESP_LOGI(tag, "Starting motor test, check the spinning direction !");
-
-    inverter->set_voltages(inverter,
-                            0.2f,
-                            0.0f,
-                            0.0f);
-    esp_foc_sleep_ms(250);
-
-    inverter->set_voltages(inverter,
-                            0.0f,
-                            0.2f,
-                            0.0f);
-    esp_foc_sleep_ms(250);
-
-#ifdef CONFIG_ESP_FOC_USE_SINE_PWM
-    bias = inverter->get_dc_link_voltage(inverter) / 2.0f;
-    norm = 1.0f / inverter->get_dc_link_voltage(inverter);
-#else
-    bias = (inverter->get_dc_link_voltage(inverter) * ESP_FOC_SQRT3_TWO) / 2.0f;
-    norm = 1.0f / (inverter->get_dc_link_voltage(inverter) * ESP_FOC_SQRT3_TWO);
-#endif
-
-    /* Turn motor in one direction */
-    for(float i = 0.0f; i < 2 * M_PI * settings.motor_pole_pairs; i += 0.05) {
-        esp_foc_u_voltage u;
-        esp_foc_v_voltage v;
-        esp_foc_w_voltage w;
-        float e_sin = esp_foc_sine(i);
-        float e_cos = esp_foc_cosine(i);
-
-        float electrical_angle = settings.motor_pole_pairs * rotor->read_counts(rotor) *
-                                (((2.0 * M_PI)) / rotor->get_counts_per_revolution(rotor));
-
-        ESP_LOGI(tag, "SVM calculated angle: %f [rad] Caculated electrical angle: %f [rad]", i, electrical_angle);
-
-        esp_foc_modulate_dq_voltage(e_sin,
-                e_cos,
-                0.0f,
-                0.2f,
-                &u.raw,
-                &v.raw,
-                &w.raw,
-                bias,
-                norm);
-
-        inverter->set_voltages(inverter,
-                                u.raw,
-                                v.raw,
-                                w.raw);
-
-        esp_foc_sleep_ms(10);
-    }
-
-    /* Now in another: */
-    for(float i =  2 * M_PI * settings.motor_pole_pairs; i > 0.0f; i -= 0.05) {
-        esp_foc_u_voltage u;
-        esp_foc_v_voltage v;
-        esp_foc_w_voltage w;
-        float e_sin = esp_foc_sine(i);
-        float e_cos = esp_foc_cosine(i);
-
-        float electrical_angle = settings.motor_pole_pairs * rotor->read_counts(rotor) *
-                                (((2.0 * M_PI)) / rotor->get_counts_per_revolution(rotor));
-
-        ESP_LOGI(tag, "SVM calculated angle: %f [rad] Caculated electrical angle: %f [rad]", i, electrical_angle);
-
-        esp_foc_modulate_dq_voltage(e_sin,
-                e_cos,
-                0.0f,
-                0.2f,
-                &u.raw,
-                &v.raw,
-                &w.raw,
-                bias,
-                norm);
-
-        inverter->set_voltages(inverter,
-                                u.raw,
-                                v.raw,
-                                w.raw);
-
-        esp_foc_sleep_ms(10);
-    }
-
-    inverter->set_voltages(inverter,
-                            0.0f,
-                            0.0f,
-                            0.0f);
-
-    ESP_LOGI(tag, "Test finished keep or switch motor phases depending on resultant motion");
-    return ESP_FOC_OK;
-}
-
 esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_data_t *control_data)
 {
     if(axis == NULL) {
@@ -652,6 +610,12 @@ esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_dat
 
     esp_foc_critical_enter();
 
+    control_data->u_alpha = axis->u_alpha;
+    control_data->u_beta = axis->u_beta;
+
+    control_data->i_alpha = axis->i_alpha;
+    control_data->i_beta = axis->i_beta;
+
     control_data->u = axis->u_u;
     control_data->v = axis->u_v;
     control_data->w = axis->u_w;
@@ -665,6 +629,7 @@ esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_dat
 
     control_data->target_position.raw = axis->target_position;
     control_data->target_speed.raw = axis->target_speed;
+    control_data->observer_angle.raw = axis->current_observer->get_angle(axis->current_observer);
 
     control_data->i_u.raw = axis->i_u;
     control_data->i_v.raw = axis->i_v;

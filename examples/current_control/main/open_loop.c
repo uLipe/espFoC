@@ -83,8 +83,6 @@ static void initialize_foc_drivers(void)
 
 void app_main(void)
 {
-    esp_foc_control_data_t control_data;
-    esp_foc_q_voltage uq = {.raw = 0.0f};
     esp_foc_q_current iq = {.raw = 0.0f};
 
     ESP_LOGI(TAG, "Initializing the esp foc motor controller!");
@@ -102,23 +100,17 @@ void app_main(void)
     esp_foc_align_axis(&axis);
     esp_foc_run(&axis);
 
-    /* ramp the velocity max available voltage in sine PWM (1/4 VLink) */
-    uq.raw = 3.0f;
-    iq.raw = 1.0f;
+    /* Set the current */
+    iq.raw = 3.0f;
+    esp_foc_set_target_current(&axis, iq, (esp_foc_d_current){.raw = 1.0});
 
-    /* Set the Ud to weaken the field and make it stable at low speeds */
-    esp_foc_set_target_voltage(&axis, uq, (esp_foc_d_voltage){.raw = 0.0});
-    //esp_foc_set_target_current(&axis, iq, (esp_foc_d_current){.raw = 0.0});
 #ifndef CONFIG_ESP_FOC_SCOPE
-
     while(1) {
+        esp_foc_control_data_t control_data;
         esp_foc_sleep_ms(100);
         esp_foc_get_control_data(&axis, &control_data);
-
         ESP_LOGI(TAG, "Estimated simulated speed rad/s: %f", control_data.speed.raw);
-        ESP_LOGI(TAG, "IQ, ID: %f, %f", control_data.i_q.raw, control_data.i_d.raw);
         ESP_LOGI(TAG, "phase currents: %f, %f, %f", control_data.i_u.raw, control_data.i_v.raw, control_data.i_w.raw );
     }
-
 #endif
 }
