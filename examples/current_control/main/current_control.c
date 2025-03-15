@@ -35,6 +35,7 @@ static esp_foc_inverter_t *inverter;
 static esp_foc_isensor_t  *shunts;
 static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
+    .enable_torque_control = true,
     .motor_pole_pairs = 4,
     .velocity_control_settings.kp = 1.0f,
     .velocity_control_settings.ki = 0.0f,

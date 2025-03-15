@@ -77,6 +77,7 @@ static inline float esp_foc_mechanical_to_elec_angle(float mech_angle,
 
 static inline float esp_foc_normalize_angle(float angle)
 {
+#if 0
     const float full2pi = M_PI * 2.0f;
     float result =  fmod(angle, full2pi);
 
@@ -84,6 +85,9 @@ static inline float esp_foc_normalize_angle(float angle)
         result -= full2pi;
     }
     return result;
+#else
+    return angle;
+#endif
 }
 
 static inline void esp_foc_clarke_transform (float v_uvw[3],

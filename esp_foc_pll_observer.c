@@ -73,20 +73,26 @@ IRAM_ATTR static int pll_observer_update(esp_foc_observer_t *self, esp_foc_obser
     est->omega_mech += acceleration * est->dt;
     est->theta_mech += est->omega_mech * est->dt * est->pp;
 
+    if (est->theta_mech > 2.0f * M_PI) est->theta_mech -= 2.0f * M_PI;
+    if (est->theta_mech < 0.0f) est->theta_mech += 2.0f * M_PI;
+
     /* Estimate the angle using the motor parameters */
     est->e_alpha = in->u_alpha_beta[0] - est->r * in->i_alpha_beta[0] - est->l * di_alpha_dt;
     est->e_beta = in->u_alpha_beta[1] - est->r * in->i_alpha_beta[1]- est->l * di_beta_dt;
     est->theta_mes = atan2f(est->e_beta, est->e_alpha);
-    esp_foc_normalize_angle(est->theta_mes);
+
+    if (est->theta_mes > 2.0f * M_PI) est->theta_mes -= 2.0f * M_PI;
+    if (est->theta_mes < 0.0f) est->theta_mes += 2.0f * M_PI;
 
     /* Perform PLL step to filter out the noise and extracts the rotor speed as well*/
-    est->theta_error = esp_foc_normalize_angle(est->theta_mech) - est->theta_mes;
+    est->theta_error = est->theta_mech - est->theta_mes;
     est->integral += est->theta_error * est->dt;
     est->omega_est = (est->kp * est->theta_error) + (est->ki * est->integral);
     est->theta_est += est->omega_est * est->dt;
 
     if (est->theta_est > 2.0f * M_PI) est->theta_est -= 2.0f * M_PI;
     if (est->theta_est < 0.0f) est->theta_est += 2.0f * M_PI;
+
 
     est->i_alpha_prev = in->i_alpha_beta[0];
     est->i_beta_prev = in->i_alpha_beta[1];
@@ -114,15 +120,6 @@ IRAM_ATTR static void pll_observer_reset(esp_foc_observer_t *self, float offset)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
     est->theta_est = offset;
-    est->omega_est = 0.0f;
-    est->omega_mech = 0.0f;
-    est->theta_mech = 0.0f;
-    est->theta_error = 0.0f;
-    est->e_alpha = 0.0f;
-    est->e_beta = 0.0f;
-    est->i_alpha_prev = 0.0f;
-    est->i_beta_prev = 0.0f;
-    est->integral = 0.0f;
 }
 
 esp_foc_observer_t *pll_observer_new(int unit, esp_foc_pll_observer_settings_t settings)

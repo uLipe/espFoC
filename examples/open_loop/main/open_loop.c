@@ -103,7 +103,7 @@ void app_main(void)
     esp_foc_run(&axis);
 
     /* ramp the velocity max available voltage in sine PWM (1/4 VLink) */
-    uq.raw = 3.0f;
+    uq.raw = 8.0f;
     iq.raw = 1.0f;
 
     /* Set the Ud to weaken the field and make it stable at low speeds */

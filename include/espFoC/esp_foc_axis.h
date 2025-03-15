@@ -66,6 +66,7 @@ typedef struct {
     int downsampling_speed;
     int downsampling_position;
     int downsampling_estimators;
+    int enable_torque_control;
 
     float dc_link_voltage;
     float biased_dc_link_voltage;
