@@ -400,11 +400,12 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
         axis->current_observer = pll_observer_new(settings.motor_unit,
                                 (esp_foc_pll_observer_settings_t) {
-                                .pll_kp = 1.414f * 2.0f * M_PI * 100.0f,
-                                .pll_ki = (2.0f * M_PI * 100.0f ) *
-                                          (2.0f * M_PI * 100.0f),
+                                .pll_kp = 2.0f * 0.707f/*Zeta_Tunable*/ * 2.0f * M_PI * 50.0f,
+                                .pll_ki = (2.0f * M_PI * 50.0f ) *
+                                          (2.0f * M_PI * 50.0f),
                                 .phase_resistance = settings.motor_resistance,
                                 .phase_inductance = settings.motor_inductance,
+                                .pole_pairs = axis->motor_pole_pairs,
                                 .dt = axis->dt * ESP_FOC_ESTIMATORS_DOWNSAMPLING
         });
     }

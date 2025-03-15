@@ -1,2 +1,2 @@
-idf_component_register(SRCS "open_loop.c"
+idf_component_register(SRCS "current_control.c"
                     INCLUDE_DIRS ".")

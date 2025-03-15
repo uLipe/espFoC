@@ -31,6 +31,7 @@ typedef struct {
     float pll_ki;
     float phase_resistance;
     float phase_inductance;
+    float pole_pairs;
     float dt;
 } esp_foc_pll_observer_settings_t;
 
