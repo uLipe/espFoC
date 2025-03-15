@@ -30,6 +30,7 @@
 #include "espFoC/esp_foc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/uart.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 
@@ -38,15 +39,27 @@ static esp_foc_control_data_t scope_buffer[2][CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE];
 static bool ping_pong_switch = false;
 static uint32_t rd_buff_index = 0;
 static uint32_t wr_buff_index = 0;
+static char out_buf[2 * sizeof(esp_foc_control_data_t)];
 
 IRAM_ATTR static void esp_foc_scope_daemon_thread(void *arg)
 {
     esp_foc_control_data_t *next_sample;
     memset(&scope_buffer, 0, sizeof(scope_buffer));
 
+    uart_config_t uart_config = {
+        .baud_rate = 921600,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    uart_param_config(UART_NUM_0, &uart_config);
+
     while(1) {
         next_sample = &scope_buffer[ping_pong_switch][rd_buff_index];
-        printf("%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+        sprintf(out_buf, "%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
             next_sample->dt.raw,
             next_sample->u_alpha.raw,
             next_sample->u_beta.raw,
@@ -60,7 +73,7 @@ IRAM_ATTR static void esp_foc_scope_daemon_thread(void *arg)
             next_sample->speed.raw);
         rd_buff_index++;
 
-        esp_foc_sleep_ms(10);
+        uart_write_bytes(UART_NUM_0, (const char *) out_buf, strlen(out_buf));
 
         if(rd_buff_index >= CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE) {
             esp_foc_critical_enter();
@@ -73,14 +86,17 @@ IRAM_ATTR static void esp_foc_scope_daemon_thread(void *arg)
     }
 }
 
-void esp_foc_scope_data_push(esp_foc_control_data_t *control_data)
+void esp_foc_scope_initalize(void)
 {
     if(!scope_enable) {
         scope_enable = true;
-        esp_foc_create_runner(esp_foc_scope_daemon_thread, NULL, configMAX_PRIORITIES - 4);
+        esp_foc_create_runner(esp_foc_scope_daemon_thread, NULL, 0);
         esp_foc_sleep_ms(10);
     }
+}
 
+void esp_foc_scope_data_push(esp_foc_control_data_t *control_data)
+{
     if(!control_data || wr_buff_index >= CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE) {
         return;
     }

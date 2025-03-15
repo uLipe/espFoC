@@ -477,6 +477,9 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 
     esp_foc_sleep_ms(500);
 
+    /* Start the scope if it has not been: */
+    esp_foc_scope_initalize();
+
     return ESP_FOC_OK;
 }
 
