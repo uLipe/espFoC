@@ -85,7 +85,7 @@ IRAM_ATTR static int pll_observer_update(esp_foc_observer_t *self, esp_foc_obser
     if (est->theta_mes < 0.0f) est->theta_mes += 2.0f * M_PI;
 
     /* Perform PLL step to filter out the noise and extracts the rotor speed as well*/
-    est->theta_error = est->theta_mech - est->theta_mes;
+    est->theta_error = (est->theta_est * 1.0f *(est->theta_mech - est->theta_mes)) - est->theta_est;
     est->integral += est->theta_error * est->dt;
     est->omega_est = (est->kp * est->theta_error) + (est->ki * est->integral);
     est->theta_est += est->omega_est * est->dt;
