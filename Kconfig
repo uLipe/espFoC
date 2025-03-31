@@ -23,20 +23,29 @@ menu "espFoC Settings"
 
     config ESP_FOC_SCOPE_BUFFER_SIZE
         int "Size of scope buffer in frames"
-        default 256
+        default 256 if !SPIRAM
+        default 280 if SPIRAM
+
+
+    config ESP_FOC_SCOPE_TXD_PIN
+        int "TXD Pin of the uart used for espFoC Scope"
+        default 22
+
+    config ESP_FOC_SCOPE_RXD_PIN
+        int "RXD Pin of the uart used for espFoC Scope"
+        default 21
+
+    choice
+        prompt "Select espFoC modulation type"
+        default ESP_FOC_USE_SPACE_VECTOR_PWM
 
     config ESP_FOC_USE_SINE_PWM
-        bool "Use Sinewave modulation for PWM, if not it will use the SVPWM"
-        default y
+        bool "Use Sinewave modulation for PWM"
 
-    config ESP_FOC_COMP_THI
-        bool "Enable third harmonic injection compensation on SVPWM"
-        depends on !ESP_FOC_USE_SINE_PWM
-        default n
+    config ESP_FOC_USE_SPACE_VECTOR_PWM
+        bool "Use Sinewave modulation for PWM"
 
-    config ESP_FOC_PERF_BUILD
-        select COMPILER_OPTIMIZATION_PERF
-        default y
+    endchoice
 
     config ESP_FOC_SENSORLESS
         bool "Enable observer based, current measured, sensorlesss speed control"

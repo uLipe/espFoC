@@ -44,6 +44,7 @@ typedef struct {
     float omega;
     float estim_iq;
     float dt;
+    float pp;
     esp_foc_observer_t interface;
 }esp_foc_simul_observer_t;
 
@@ -55,52 +56,13 @@ IRAM_ATTR static int simu_observer_update(esp_foc_observer_t *self, esp_foc_obse
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
 
     float d_iq = ((in->u_dq[1] - obj->r * obj->estim_iq - SIMUL_FLUX_LINKAGE * obj->omega) / obj->l);
-
-    if(isnan(d_iq)) {
-        d_iq = 0.0f;
-    }
-
-    if(fabsf(d_iq) < SIMUL_MINIMUM_DIQ) {
-        d_iq = 0.0f;
-    }
-
-    if(d_iq > SIMUL_MAX_IQ) {
-        d_iq = SIMUL_MAX_IQ;
-    } else if (d_iq < -SIMUL_MAX_IQ) {
-        d_iq = -SIMUL_MAX_IQ;
-    }
-
     obj->estim_iq +=  d_iq * obj->dt;
+    float torque = 1.5f * SIMUL_FLUX_LINKAGE * obj->estim_iq;
+    float acceleration = (torque - (SIMUL_FRICTION * obj->omega)) / SIMUL_INERTIA;
 
-    if(isnan(obj->estim_iq)) {
-        obj->estim_iq = 0.0f;
-    }
-
-    if(obj->estim_iq > SIMUL_MAX_IQ) {
-        obj->estim_iq = SIMUL_MAX_IQ;
-    } else if (obj->estim_iq < -SIMUL_MAX_IQ) {
-        obj->estim_iq = -SIMUL_MAX_IQ;
-    }
-
-    float torque = SIMUL_FLUX_LINKAGE * obj->estim_iq;
-    float acceleration = (torque - SIMUL_FRICTION * obj->omega) / SIMUL_INERTIA;
     obj->omega += acceleration * obj->dt;
-
-    if(isnan(obj->omega)) {
-        obj->omega = 0.0f;
-    }
-
     obj->angle += obj->omega * obj->dt;
-
-    if(isnan(obj->angle)) {
-        obj->angle = 0.0f;
-    }
-
-    if (obj->angle > (2.0f * M_PI)) {
-        obj->angle -= (2.0f * M_PI);
-    } else if (obj->angle < 0.0f) {
-        obj->angle += (2.0f * M_PI);
-    }
+    esp_foc_normalize_angle(obj->angle * obj->pp);
 
     return 0;
 }
@@ -156,6 +118,7 @@ esp_foc_observer_t *simu_observer_new(int unit, esp_foc_simu_observer_settings_t
     simu_observers[unit].r = settings.phase_resistance;
     simu_observers[unit].l = settings.phase_inductance;
     simu_observers[unit].dt = settings.dt;
+    simu_observers[unit].pp = settings.pole_pairs;
     simu_observers[unit].omega = 0.0f;
     simu_observers[unit].angle = 0.0f;
     simu_observers[unit].estim_iq = 0.0f;

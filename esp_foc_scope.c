@@ -30,24 +30,38 @@
 #include "espFoC/esp_foc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/uart.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 
 static bool scope_enable = false;
-static esp_foc_control_data_t scope_buffer[2][512];
+static esp_foc_control_data_t scope_buffer[2][CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE];
 static bool ping_pong_switch = false;
 static uint32_t rd_buff_index = 0;
 static uint32_t wr_buff_index = 0;
-const char *tag = "esp-foc-frame";
-
+static char out_buf[2 * sizeof(esp_foc_control_data_t)];
 
 IRAM_ATTR static void esp_foc_scope_daemon_thread(void *arg)
 {
     esp_foc_control_data_t *next_sample;
     memset(&scope_buffer, 0, sizeof(scope_buffer));
+
+    uart_config_t uart_config = {
+        .baud_rate = 115200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    uart_driver_install(UART_NUM_2, 2 * sizeof(esp_foc_control_data_t), 0, 0, NULL, 0);
+    uart_param_config(UART_NUM_2, &uart_config);
+    uart_set_pin(UART_NUM_2, CONFIG_ESP_FOC_SCOPE_TXD_PIN, CONFIG_ESP_FOC_SCOPE_RXD_PIN, -1, -1);
+
     while(1) {
         next_sample = &scope_buffer[ping_pong_switch][rd_buff_index];
-        ESP_LOGI(tag, "%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+        sprintf(out_buf, "%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
             next_sample->dt.raw,
             next_sample->u_alpha.raw,
             next_sample->u_beta.raw,
@@ -61,7 +75,7 @@ IRAM_ATTR static void esp_foc_scope_daemon_thread(void *arg)
             next_sample->speed.raw);
         rd_buff_index++;
 
-        esp_foc_sleep_ms(10);
+        uart_write_bytes(UART_NUM_2, (const char *) out_buf, strlen(out_buf));
 
         if(rd_buff_index >= CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE) {
             esp_foc_critical_enter();
@@ -78,7 +92,7 @@ void esp_foc_scope_initalize(void)
 {
     if(!scope_enable) {
         scope_enable = true;
-        esp_foc_create_runner(esp_foc_scope_daemon_thread, NULL, configMAX_PRIORITIES-4);
+        esp_foc_create_runner(esp_foc_scope_daemon_thread, NULL, configMAX_PRIORITIES - 4);
         esp_foc_sleep_ms(10);
     }
 }

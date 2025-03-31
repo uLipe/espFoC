@@ -32,6 +32,9 @@ typedef struct {
     float phase_resistance;
     float phase_inductance;
     float pole_pairs;
+    float flux_linkage;
+    float inertia;
+    float friction;
     float dt;
 } esp_foc_pll_observer_settings_t;
 

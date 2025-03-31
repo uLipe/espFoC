@@ -76,6 +76,9 @@ typedef struct {
     float motor_resistance;
     float motor_inductance;
     float motor_inertia;
+    float flux_linkage;
+    float inertia;
+    float friction;
     int motor_unit;
 } esp_foc_motor_control_settings_t;
 

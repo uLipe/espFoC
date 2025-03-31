@@ -45,16 +45,17 @@ typedef struct {
 
 }esp_foc_mcpwm_inverter_t;
 
-#define MCPWM_PERIOD_TOP      1000
-#define MCPWM_PERIOD_TOP_HALF 500
-#define MCPWM_RATE_HZ         20000
+#define MCPWM_RATE_HZ         10000
+#define MCPWM_RESOLUTION_HZ   10000000
+#define MCPWM_PERIOD_TOP      MCPWM_RESOLUTION_HZ / MCPWM_RATE_HZ
+#define MCPWM_PERIOD_TOP_HALF MCPWM_PERIOD_TOP / 2
 
 DRAM_ATTR static esp_foc_mcpwm_inverter_t mcpwms[CONFIG_NOOF_AXIS];
 
 static mcpwm_timer_config_t timer_config = {
     .group_id = 0,
     .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
-    .resolution_hz = 10000000,
+    .resolution_hz = MCPWM_RESOLUTION_HZ,
     .count_mode = MCPWM_TIMER_COUNT_MODE_UP_DOWN,
     .period_ticks = MCPWM_PERIOD_TOP,
 };

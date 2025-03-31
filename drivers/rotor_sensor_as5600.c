@@ -164,7 +164,7 @@ esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
             .scl_io_num = pin_scl,
             .sda_pullup_en = GPIO_PULLUP_ENABLE,
             .scl_pullup_en = GPIO_PULLUP_ENABLE,
-            .master.clk_speed = 400000,
+            .master.clk_speed = 1000000,
         };
 
         i2c_param_config(I2C_NUM_0, &conf);

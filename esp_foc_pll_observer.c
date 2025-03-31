@@ -30,7 +30,7 @@
 #include "esp_log.h"
 #include "espFoC/esp_foc_pll_observer.h"
 
-#define PLL_OBSERVER_CONVERGE_WAIT_TIME  2.0f
+#define PLL_OBSERVER_CONVERGE_WAIT_TIME  5.0f
 #define SIMUL_FLUX_LINKAGE 0.015f // Lambda_m (Weber)
 #define SIMUL_INERTIA 0.00024f // J (kg⋅m²)
 #define SIMUL_FRICTION 0.0001f // B (Viscous friction
@@ -51,6 +51,9 @@ typedef struct {
     float ki;
     float r;
     float l;
+    float flux_linkage;
+    float inv_inertia;
+    float friction;
     float pp;
     float dt;
     float inv_dt;
@@ -67,31 +70,28 @@ IRAM_ATTR static int pll_observer_update(esp_foc_observer_t *self, esp_foc_obser
 
     float di_alpha_dt = (in->i_alpha_beta[0] - est->i_alpha_prev) * est->inv_dt;
     float di_beta_dt = (in->i_alpha_beta[1] - est->i_beta_prev)  * est->inv_dt;
-    float torque = SIMUL_FLUX_LINKAGE * in->i_dq[1];
-    float acceleration = (torque - SIMUL_FRICTION * est->omega_mech) / SIMUL_INERTIA;
+    float torque = est->flux_linkage * in->i_dq[1];
+    float acceleration = (torque - est->friction * est->omega_mech) * est->inv_inertia;
 
     est->omega_mech += acceleration * est->dt;
     est->theta_mech += est->omega_mech * est->dt * est->pp;
 
-    if (est->theta_mech > 2.0f * M_PI) est->theta_mech -= 2.0f * M_PI;
-    if (est->theta_mech < 0.0f) est->theta_mech += 2.0f * M_PI;
+    esp_foc_normalize_angle(est->theta_mech);
 
     /* Estimate the angle using the motor parameters */
     est->e_alpha = in->u_alpha_beta[0] - est->r * in->i_alpha_beta[0] - est->l * di_alpha_dt;
     est->e_beta = in->u_alpha_beta[1] - est->r * in->i_alpha_beta[1]- est->l * di_beta_dt;
     est->theta_mes = atan2f(est->e_beta, est->e_alpha);
 
-    if (est->theta_mes > 2.0f * M_PI) est->theta_mes -= 2.0f * M_PI;
-    if (est->theta_mes < 0.0f) est->theta_mes += 2.0f * M_PI;
+    esp_foc_normalize_angle(est->theta_mes);
 
     /* Perform PLL step to filter out the noise and extracts the rotor speed as well*/
-    est->theta_error = (est->theta_est * 1.0f *(est->theta_mech - est->theta_mes)) - est->theta_est;
+    est->theta_error = est->theta_mech - est->theta_est;
     est->integral += est->theta_error * est->dt;
     est->omega_est = (est->kp * est->theta_error) + (est->ki * est->integral);
     est->theta_est += est->omega_est * est->dt;
 
-    if (est->theta_est > 2.0f * M_PI) est->theta_est -= 2.0f * M_PI;
-    if (est->theta_est < 0.0f) est->theta_est += 2.0f * M_PI;
+    esp_foc_normalize_angle(est->theta_est);
 
 
     est->i_alpha_prev = in->i_alpha_beta[0];
@@ -173,6 +173,9 @@ esp_foc_observer_t *pll_observer_new(int unit, esp_foc_pll_observer_settings_t s
     est->dt = settings.dt * 2.0f;
     est->inv_dt = (1.0f / est->dt);
     est->converging_count = (int)( PLL_OBSERVER_CONVERGE_WAIT_TIME / settings.dt);
+    est->flux_linkage = SIMUL_FLUX_LINKAGE;
+    est->friction = SIMUL_FRICTION;
+    est->inv_inertia = 1.0f / SIMUL_INERTIA;
 
     ESP_LOGI(TAG, "Observer sample time %f s", est->dt);
 
