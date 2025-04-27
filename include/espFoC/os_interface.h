@@ -24,6 +24,9 @@
 
 #pragma once
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 typedef void (*foc_loop_runner) (void *arg);
 typedef void*  esp_foc_event_handle_t;
 

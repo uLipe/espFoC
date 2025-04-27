@@ -79,34 +79,6 @@ IRAM_ATTR static uint16_t read_angle_sensor(int i2c_port)
     return raw;
 }
 
-IRAM_ATTR static void read_angle_sensor_loop(void *arg)
-{
-    esp_foc_as5600_t *obj = (esp_foc_as5600_t *)arg;
-
-    ESP_LOGI(tag, "Starting AS5600 sensor reader loop, instance: %p", obj);
-
-    while(1) {
-
-        uint16_t raw = read_angle_sensor(obj->i2c_port) & AS5600_READING_MASK;
-        float delta = (float)raw - obj->previous;
-
-        if(fabs(delta) >= encoder_wrap_value) {
-
-            esp_foc_critical_enter();
-            obj->accumulated = (delta < 0.0f) ?
-                obj->accumulated + AS5600_PULSES_PER_REVOLUTION :
-                    obj->accumulated - AS5600_PULSES_PER_REVOLUTION;
-            esp_foc_critical_leave();
-
-        }
-
-        esp_foc_critical_enter();
-        obj->previous = (float)raw;
-        esp_foc_critical_leave();
-    }
-}
-
-
 IRAM_ATTR static float read_accumulated_counts (esp_foc_rotor_sensor_t *self)
 {
     esp_foc_as5600_t *obj =
@@ -135,7 +107,22 @@ IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
     esp_foc_as5600_t *obj =
         __containerof(self,esp_foc_as5600_t, interface);
 
-    uint16_t raw = (uint16_t)obj->previous;
+    uint16_t raw = read_angle_sensor(obj->i2c_port) & AS5600_READING_MASK;
+    float delta = (float)raw - obj->previous;
+
+    if(fabs(delta) >= encoder_wrap_value) {
+
+        esp_foc_critical_enter();
+        obj->accumulated = (delta < 0.0f) ?
+            obj->accumulated + AS5600_PULSES_PER_REVOLUTION :
+                obj->accumulated - AS5600_PULSES_PER_REVOLUTION;
+        esp_foc_critical_leave();
+
+    }
+
+    esp_foc_critical_enter();
+    obj->previous = (float)raw;
+    esp_foc_critical_leave();
 
     return((float)((raw - obj->zero_offset) & AS5600_READING_MASK));
 }
@@ -173,8 +160,6 @@ esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
 
         i2c_bus_configured = true;
     }
-
-    esp_foc_create_runner(read_angle_sensor_loop, &rotor_sensors[port], configMAX_PRIORITIES-1);
 
     return &rotor_sensors[port].interface;
 }

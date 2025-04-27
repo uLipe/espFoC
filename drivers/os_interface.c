@@ -108,27 +108,27 @@ void IRAM_ATTR esp_foc_fpu_isr_leave(void)
 #endif
 
 }
-void esp_foc_critical_enter(void)
+IRAM_ATTR void esp_foc_critical_enter(void)
 {
     portENTER_CRITICAL(&spinlock);
 }
 
-void esp_foc_critical_leave(void)
+IRAM_ATTR void esp_foc_critical_leave(void)
 {
     portEXIT_CRITICAL(&spinlock);
 }
 
-esp_foc_event_handle_t esp_foc_get_event_handle(void)
+IRAM_ATTR esp_foc_event_handle_t esp_foc_get_event_handle(void)
 {
     return ((esp_foc_event_handle_t) xTaskGetCurrentTaskHandle());
 }
 
-void esp_foc_wait_notifier(void)
+IRAM_ATTR void esp_foc_wait_notifier(void)
 {
     ulTaskNotifyTake(pdFALSE ,portMAX_DELAY);
 }
 
-void esp_foc_send_notification(esp_foc_event_handle_t handle)
+IRAM_ATTR void esp_foc_send_notification(esp_foc_event_handle_t handle)
 {
     BaseType_t wake;
     vTaskNotifyGiveFromISR((TaskHandle_t)handle, &wake);

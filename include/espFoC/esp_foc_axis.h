@@ -34,9 +34,6 @@ typedef struct {
     esp_foc_q_voltage u_q;
     esp_foc_d_voltage u_d;
 
-    esp_foc_q_voltage target_u_q;
-    esp_foc_d_voltage target_u_d;
-
     esp_foc_alpha_voltage u_alpha;
     esp_foc_beta_voltage u_beta;
 
@@ -46,6 +43,8 @@ typedef struct {
 
     esp_foc_alpha_current i_alpha;
     esp_foc_beta_current i_beta;
+
+    bool is_sensorless_mode;
 
     float i_u;
     float i_v;
@@ -58,6 +57,7 @@ typedef struct {
     float current_speed;
     float shaft_ticks_to_radians_ratio;
     float target_position;
+    float extrapolated_rotor_position;
     float rotor_position;
     float rotor_position_prev;
     float rotor_shaft_ticks;
@@ -65,7 +65,7 @@ typedef struct {
 
     int downsampling_speed;
     int downsampling_position;
-    int downsampling_estimators;
+    int downsampling_low_speed;
     int enable_torque_control;
 
     float dc_link_voltage;
@@ -91,4 +91,5 @@ typedef struct {
     esp_foc_observer_t *observer;
     esp_foc_observer_t *current_observer;
 
+    esp_foc_event_handle_t  low_speed_ev;
 } esp_foc_axis_t;
