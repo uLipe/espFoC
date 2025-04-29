@@ -124,7 +124,11 @@ IRAM_ATTR static void esp_foc_high_speed_loop(void *arg)
             &axis->i_d.raw);
 
         esp_foc_current_control_loop(axis);
-        axis->isensor_driver->sample_isensors(axis->isensor_driver);    
+        axis->isensor_driver->sample_isensors(axis->isensor_driver);
+    } else {
+        /* Voltage mode control only wiithout override the plain setting*/
+        axis->u_q.raw += axis->target_i_q.raw;
+        axis->u_q.raw += axis->target_i_d.raw;
     }
 
     esp_foc_modulate_dq_voltage(e_sin,
@@ -139,7 +143,7 @@ IRAM_ATTR static void esp_foc_high_speed_loop(void *arg)
                     axis->biased_dc_link_voltage,
                     axis->dc_link_to_normalized);
 
-                
+
     axis->inverter_driver->set_voltages(axis->inverter_driver,
                                         axis->u_u.raw,
                                         axis->u_v.raw,
@@ -204,7 +208,7 @@ IRAM_ATTR static void esp_foc_low_speed_loop(void *arg)
 
     axis->low_speed_ev = esp_foc_get_event_handle();
     axis->downsampling_low_speed = ESP_FOC_LOW_SPEED_DOWNSAMPLING;
-    
+
     if(!axis->is_sensorless_mode) {
         axis->rotor_shaft_ticks =
             axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
@@ -226,7 +230,7 @@ IRAM_ATTR static void esp_foc_low_speed_loop(void *arg)
         if(!axis->is_sensorless_mode) {
             axis->rotor_shaft_ticks =
                 axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
-    
+
             axis->rotor_position =
                 axis->rotor_shaft_ticks * axis->shaft_ticks_to_radians_ratio * axis->natural_direction;
             axis->extrapolated_rotor_position = axis->rotor_position;
@@ -239,7 +243,7 @@ IRAM_ATTR static void esp_foc_low_speed_loop(void *arg)
         } else {
             axis->current_speed = axis->observer->get_speed(axis->observer);
         }
-    
+
         esp_foc_position_control_loop(axis);
         esp_foc_velocity_control_loop(axis);
 
@@ -271,7 +275,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     if(isensor == NULL && axis->enable_torque_control) {
         ESP_LOGE(tag, "Current sensor is mandatory when torque control");
         return ESP_FOC_ERR_INVALID_ARG;
-    }    
+    }
 
 #ifdef CONFIG_ESP_FOC_CUSTOM_MATH
     extern void esp_foc_fast_init_sqrt_table(void);
