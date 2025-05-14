@@ -39,10 +39,10 @@ static esp_foc_motor_control_settings_t settings = {
     .enable_velocity_control = true,
     .motor_pole_pairs = 4,
     .velocity_control_settings.kp = 0.1f,
-    .velocity_control_settings.ki = 0.008f,
+    .velocity_control_settings.ki = 2.75f,
     .velocity_control_settings.kd = 0.0f,
-    .velocity_control_settings.integrator_limit = 20000.0f,
-    .velocity_control_settings.max_output_value = 4.80f, //conservative setpoint to the current controller
+    .velocity_control_settings.integrator_limit = 5000.0f,
+    .velocity_control_settings.max_output_value = 10.8f, //conservative setpoint to the current controller
     .torque_control_settings[0].max_output_value = 6.0f, //Uses the max driver voltage allowed as limit
     .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
 };

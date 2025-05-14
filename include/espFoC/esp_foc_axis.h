@@ -28,6 +28,9 @@ typedef struct {
     esp_foc_q_current target_i_q;
     esp_foc_d_current target_i_d;
 
+    esp_foc_q_voltage target_u_q;
+    esp_foc_d_voltage target_u_d;
+
     esp_foc_q_current i_q;
     esp_foc_d_current i_d;
 
