@@ -2,7 +2,7 @@ dependencies:
   idf: '>=5.0'
 description: ESP32 FoC Motor controller
 repository: git://github.com/uLipe/espFoC.git
-version: 1.3.0
+version: 1.4.1
 targets:
   - esp32
   - esp32s3
