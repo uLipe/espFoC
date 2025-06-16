@@ -27,15 +27,15 @@
 #include <stdbool.h>
 #include <math.h>
 #include <sdkconfig.h>
-#include "espFoC/ema_low_pass_filter.h"
-#include "espFoC/foc_math.h"
-#include "espFoC/space_vector_modulator.h"
-#include "espFoC/modulator.h"
-#include "espFoC/pid_controller.h"
-#include "espFoC/inverter_interface.h"
-#include "espFoC/current_sensor_interface.h"
-#include "espFoC/rotor_sensor_interface.h"
-#include "espFoC/os_interface.h"
+#include "espFoC/utils/ema_low_pass_filter.h"
+#include "espFoC/utils/foc_math.h"
+#include "espFoC/utils/space_vector_modulator.h"
+#include "espFoC/utils/modulator.h"
+#include "espFoC/utils/pid_controller.h"
+#include "espFoC/drivers/inverter_interface.h"
+#include "espFoC/drivers/current_sensor_interface.h"
+#include "espFoC/drivers/rotor_sensor_interface.h"
+#include "espFoC/drivers/os_interface.h"
 #include "espFoC/esp_foc_units.h"
 #include "espFoC/esp_foc_observer_interface.h"
 
