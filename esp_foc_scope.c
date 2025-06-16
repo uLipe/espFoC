@@ -92,7 +92,7 @@ void esp_foc_scope_initalize(void)
 {
     if(!scope_enable) {
         scope_enable = true;
-        esp_foc_create_runner(esp_foc_scope_daemon_thread, NULL, configMAX_PRIORITIES - 4);
+        esp_foc_create_runner(esp_foc_scope_daemon_thread, NULL, 4);
         esp_foc_sleep_ms(10);
     }
 }

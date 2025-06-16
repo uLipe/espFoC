@@ -2,6 +2,9 @@ idf_build_get_property(target IDF_TARGET)
 
 set(requires driver esp_adc freertos esp_system esp_timer)
 set(srcs    "esp_foc_core.c"
+            "esp_foc_control_current_mode_sensored.c"
+            "esp_foc_control_voltage_mode_sensored.c"
+            "esp_foc_control_current_mode_sensorless.c"
             "esp_foc_scope.c"
             "esp_foc_consts.c"
             "esp_foc_sine_cosine.c"

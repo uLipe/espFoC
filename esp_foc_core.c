@@ -35,230 +35,10 @@
 #include "espFoC/esp_foc_pll_observer.h"
 
 #define ESP_FOC_ISENSOR_CALIBRATION_ROUNDS 100
-#define ESP_FOC_VELOCITY_PID_DOWNSAMPLING  1
-#define ESP_FOC_POSITION_PID_DOWNSAMPLING  10
-#define ESP_FOC_ESTIMATORS_DOWNSAMPLING    4
-#define ESP_FOC_DEBUG_PIN                  22
-#define ESP_FOC_LOW_SPEED_DOWNSAMPLING     10
 #define PLL_BANDWIDTH_HZ 200.0f
 #define PLL_ZETA 0.707f
 
-static const char * tag = "ESP_FOC";
-
-IRAM_ATTR static inline void esp_foc_current_control_loop(esp_foc_axis_t *axis)
-{
-
-    axis->u_q.raw =  esp_foc_pid_update( &axis->torque_controller[0],
-                                        axis->target_i_q.raw,
-                                        esp_foc_low_pass_filter_update(
-                                            &axis->current_filters[0], axis->i_q.raw));
-
-    axis->u_d.raw = esp_foc_pid_update( &axis->torque_controller[1],
-                                        axis->target_i_d.raw,
-                                        esp_foc_low_pass_filter_update(
-                                            &axis->current_filters[1], axis->i_d.raw));
-}
-
-IRAM_ATTR static void esp_foc_high_speed_loop(void *arg)
-{
-#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
-    gpio_set_level(ESP_FOC_DEBUG_PIN, true);
-#endif
-
-    esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
-    float e_sin;
-    float e_cos;
-    isensor_values_t val;
-
-    if(axis->enable_torque_control) {
-        axis->isensor_driver->fetch_isensors(axis->isensor_driver, &val);
-        axis->i_u = val.iu_axis_0;
-        axis->i_v = val.iv_axis_0;
-        axis->i_w = val.iw_axis_0;
-    }
-
-    if(axis->is_sensorless_mode) {
-        esp_foc_observer_inputs_t in = {
-            .i_dq[0] = axis->i_d.raw,
-            .i_dq[1]  =  axis->i_q.raw,
-            .u_dq[0] = axis->u_d.raw,
-            .u_dq[1]  =  axis->u_q.raw,
-            .u_alpha_beta[0] = axis->u_alpha.raw,
-            .u_alpha_beta[1] = axis->u_beta.raw,
-            .i_alpha_beta[0] = axis->i_alpha.raw,
-            .i_alpha_beta[1] = axis->i_beta.raw,
-        };
-
-        /* observer only when rotor sensor is not provided */
-        axis->open_loop_observer->update(axis->open_loop_observer, &in);
-        if(axis->isensor_driver != NULL) {
-            int not_conv = axis->current_observer->update(axis->current_observer, &in);
-            if(!not_conv) {
-                //TODO perform swap to current observer.
-            }
-        }
-    }
-
-    if(!axis->is_sensorless_mode) {
-        float ext_delta = (axis->dt * (ESP_FOC_LOW_SPEED_DOWNSAMPLING - axis->downsampling_low_speed));
-        axis->extrapolated_rotor_position = axis->rotor_position + axis->current_speed * ext_delta;
-        axis->rotor_elec_angle = esp_foc_mechanical_to_elec_angle(axis->extrapolated_rotor_position, axis->motor_pole_pairs);
-    } else {
-        axis->rotor_position = axis->observer->get_angle(axis->observer);
-        axis->rotor_elec_angle = esp_foc_mechanical_to_elec_angle(axis->rotor_position, 1.0f);
-    }
-
-    axis->rotor_elec_angle = esp_foc_normalize_angle(axis->rotor_elec_angle);
-
-    e_sin = esp_foc_sine(axis->rotor_elec_angle);
-    e_cos = esp_foc_cosine(axis->rotor_elec_angle);
-
-    if(axis->enable_torque_control) {
-        esp_foc_get_dq_currents(e_sin,
-            e_cos,
-            axis->i_u,
-            axis->i_v,
-            axis->i_w,
-            &axis->i_alpha.raw,
-            &axis->i_beta.raw,
-            &axis->i_q.raw,
-            &axis->i_d.raw);
-
-        esp_foc_current_control_loop(axis);
-        axis->isensor_driver->sample_isensors(axis->isensor_driver);
-    } else {
-        /* Voltage mode control only wiithout override the plain setting*/
-        axis->u_q.raw = axis->target_u_q.raw + axis->target_i_q.raw;
-        axis->u_d.raw = axis->target_u_d.raw + axis->target_i_d.raw;
-    }
-
-    esp_foc_modulate_dq_voltage(e_sin,
-                    e_cos,
-                    axis->u_d.raw,
-                    axis->u_q.raw,
-                    &axis->u_alpha.raw,
-                    &axis->u_beta.raw,
-                    &axis->u_u.raw,
-                    &axis->u_v.raw,
-                    &axis->u_w.raw,
-                    axis->biased_dc_link_voltage,
-                    axis->dc_link_to_normalized);
-
-
-    axis->inverter_driver->set_voltages(axis->inverter_driver,
-                                        axis->u_u.raw,
-                                        axis->u_v.raw,
-                                        axis->u_w.raw);
-
-    if(axis->downsampling_low_speed) {
-        axis->downsampling_low_speed--;
-        if(!axis->downsampling_low_speed) {
-            axis->downsampling_low_speed = ESP_FOC_LOW_SPEED_DOWNSAMPLING;
-            esp_foc_send_notification(axis->low_speed_ev);
-        }
-    }
-
-#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
-    gpio_set_level(ESP_FOC_DEBUG_PIN, false);
-#endif
-}
-
-IRAM_ATTR static inline void esp_foc_position_control_loop(esp_foc_axis_t *axis)
-{
-    /* position control is disabled */
-    if(!axis->downsampling_position) return;
-
-    axis->downsampling_position--;
-
-    if(axis->downsampling_position == 0) {
-        axis->downsampling_position = ESP_FOC_POSITION_PID_DOWNSAMPLING;
-
-        axis->target_speed = esp_foc_pid_update( &axis->position_controller,
-                                            axis->target_position,
-                                            axis->rotor_position);
-    }
-}
-
-IRAM_ATTR static inline void esp_foc_velocity_control_loop(esp_foc_axis_t *axis)
-{
-    /* speed control is disabled */
-    if(!axis->downsampling_speed) return;
-
-    axis->downsampling_speed--;
-
-    if(axis->downsampling_speed == 0) {
-
-        axis->downsampling_speed = ESP_FOC_VELOCITY_PID_DOWNSAMPLING;
-
-        axis->target_i_q.raw =  esp_foc_pid_update( &axis->velocity_controller,
-                                            axis->target_speed,
-                                            axis->current_speed) ;
-        axis->target_i_d.raw = (axis->target_i_q.raw < 0.0f) ? (axis->target_i_q.raw * 0.25) : -(axis->target_i_q.raw * 0.25);
-    }
-}
-
-IRAM_ATTR static void esp_foc_low_speed_loop(void *arg)
-{
-    esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
-    float low_speed_inv_dt = (axis->inv_dt / 10.0f);
-    float raw_speed;
-
-#ifdef CONFIG_ESP_FOC_SCOPE
-    esp_foc_control_data_t control_data;
-#endif
-
-    axis->low_speed_ev = esp_foc_get_event_handle();
-    axis->downsampling_low_speed = ESP_FOC_LOW_SPEED_DOWNSAMPLING;
-
-    ESP_LOGI(tag,"Starting the low speed loop");
-
-    if(!axis->is_sensorless_mode) {
-        axis->rotor_shaft_ticks =
-            axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
-
-        axis->rotor_position =
-            axis->rotor_shaft_ticks * axis->shaft_ticks_to_radians_ratio * axis->natural_direction;
-        axis->rotor_position_prev = axis->rotor_position;
-        axis->current_speed = 0.0f;
-    } else {
-        axis->rotor_position = axis->observer->get_speed(axis->observer);
-    }
-
-    ESP_LOGI(tag,"Starting high low speed loop");
-
-    axis->inverter_driver->set_inverter_callback(axis->inverter_driver,
-        esp_foc_high_speed_loop,
-        axis);
-
-    while(1) {
-        esp_foc_wait_notifier();
-
-        if(!axis->is_sensorless_mode) {
-
-            axis->rotor_position = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver) *
-                                axis->shaft_ticks_to_radians_ratio * axis->natural_direction;
-
-            raw_speed = axis->rotor_position - axis->rotor_position_prev;
-            if (raw_speed >  M_PI)  raw_speed -= 2*M_PI;
-            if (raw_speed < -M_PI)  raw_speed += 2*M_PI;
-            raw_speed *= low_speed_inv_dt;
-
-            esp_foc_critical_enter();
-            axis->current_speed = esp_foc_low_pass_filter_update( &axis->velocity_filter, raw_speed);
-            axis->rotor_position_prev = axis->rotor_position;
-            esp_foc_critical_leave();
-        } else {
-            axis->current_speed = axis->observer->get_speed(axis->observer);
-        }
-        esp_foc_position_control_loop(axis);
-        esp_foc_velocity_control_loop(axis);
-
-#ifdef CONFIG_ESP_FOC_SCOPE
-        esp_foc_get_control_data(axis, &control_data);
-        esp_foc_scope_data_push(&control_data);
-#endif
-    }
-}
+static const char * tag = "ESP_FOC_CONTROL";
 
 IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                     esp_foc_inverter_t *inverter,
@@ -396,6 +176,14 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
             axis->rotor_sensor_driver->get_counts_per_revolution(axis->rotor_sensor_driver);
         ESP_LOGI(tag, "Shaft to ticks ratio: %f", axis->shaft_ticks_to_radians_ratio);
 
+        if(axis->enable_torque_control) {
+            axis->high_speed_loop_cb = do_current_mode_sensored_high_speed_loop;
+            axis->low_speed_loop_cb = do_current_mode_sensored_low_speed_loop;
+        } else {
+            axis->high_speed_loop_cb = do_voltage_mode_sensored_high_speed_loop;
+            axis->low_speed_loop_cb = do_voltage_mode_sensored_low_speed_loop;
+        }
+
     } else {
 
         axis->open_loop_observer = simu_observer_new(settings.motor_unit,
@@ -427,6 +215,9 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
             .friction = settings.friction,
             .dt = axis->dt * ESP_FOC_ESTIMATORS_DOWNSAMPLING
         });
+
+        axis->high_speed_loop_cb = do_current_mode_sensorless_high_speed_loop;
+        axis->low_speed_loop_cb = do_current_mode_sensorless_low_speed_loop;
     }
 
     esp_foc_sleep_ms(250);
@@ -603,7 +394,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis)
     esp_foc_scope_initalize();
 #endif
 
-    esp_foc_create_runner(esp_foc_low_speed_loop, axis, configMAX_PRIORITIES-1);
+    esp_foc_create_runner(axis->low_speed_loop_cb, axis, 1);
 
     ESP_LOGI(tag, "Starting foc loop task for axis: %p", axis);
     ESP_LOGI(tag, "FoC core base rate [Samples/S]: %f", axis->inverter_driver->get_inverter_pwm_rate(axis->inverter_driver));

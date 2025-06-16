@@ -36,8 +36,8 @@
 #include "espFoC/drivers/current_sensor_interface.h"
 #include "espFoC/drivers/rotor_sensor_interface.h"
 #include "espFoC/drivers/os_interface.h"
-#include "espFoC/esp_foc_units.h"
 #include "espFoC/esp_foc_observer_interface.h"
+#include "espFoC/esp_foc_units.h"
 
 typedef enum {
     ESP_FOC_OK = 0,
@@ -49,7 +49,9 @@ typedef enum {
     ESP_FOC_ERR_UNKNOWN = -128
 } esp_foc_err_t;
 
+
 #include "espFoC/esp_foc_axis.h"
+#include "espFoC/esp_foc_controls.h"
 
 typedef enum {
     ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,

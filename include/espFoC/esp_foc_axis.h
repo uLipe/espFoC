@@ -24,7 +24,11 @@
 
 #pragma once
 
-typedef struct {
+typedef struct esp_foc_axis_s esp_foc_axis_t;
+typedef void (*esp_foc_high_speed_loop_callback_t)(void *arg);
+typedef void (*esp_foc_low_speed_loop_callback_t)(void *arg);
+
+struct esp_foc_axis_s {
     esp_foc_q_current target_i_q;
     esp_foc_d_current target_i_d;
 
@@ -95,4 +99,6 @@ typedef struct {
     esp_foc_observer_t *current_observer;
 
     esp_foc_event_handle_t  low_speed_ev;
-} esp_foc_axis_t;
+    esp_foc_high_speed_loop_callback_t high_speed_loop_cb;
+    esp_foc_low_speed_loop_callback_t low_speed_loop_cb;
+};

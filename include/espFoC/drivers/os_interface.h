@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,10 +24,7 @@
 
 #pragma once
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
-typedef void (*foc_loop_runner) (void *arg);
+typedef void (*foc_loop_runner) (void *axis);
 typedef void*  esp_foc_event_handle_t;
 
 int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority);
