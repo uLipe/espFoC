@@ -109,6 +109,7 @@ typedef struct {
     esp_foc_beta_current i_beta;
 
     esp_foc_radians rotor_position;
+    esp_foc_radians extrapolated_rotor_position;
     esp_foc_radians position;
     esp_foc_radians_per_second speed;
 

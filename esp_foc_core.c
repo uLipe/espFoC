@@ -439,6 +439,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_c
         control_data->observer_angle.raw = axis->current_observer->get_angle(axis->current_observer);
     } else {
         control_data->rotor_position.raw =  axis->rotor_position;
+        control_data->extrapolated_rotor_position.raw =  axis->extrapolated_rotor_position;
         control_data->observer_angle.raw = 0.0f;
     }
 
