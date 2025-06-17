@@ -70,7 +70,6 @@ IRAM_ATTR void do_current_mode_sensored_high_speed_loop(void *arg)
         &axis->i_d.raw);
 
     esp_foc_current_control_loop(axis);
-    axis->isensor_driver->sample_isensors(axis->isensor_driver);
 
     esp_foc_modulate_dq_voltage(e_sin,
                     e_cos,
@@ -101,6 +100,8 @@ IRAM_ATTR void do_current_mode_sensored_high_speed_loop(void *arg)
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
     gpio_set_level(ESP_FOC_DEBUG_PIN, false);
 #endif
+
+    axis->isensor_driver->sample_isensors(axis->isensor_driver);
 }
 
 IRAM_ATTR void do_current_mode_sensored_low_speed_loop(void *arg)

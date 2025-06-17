@@ -65,7 +65,7 @@ static adc_continuous_config_t dig_cfg = {
 #if CONFIG_IDF_TARGET_ESP32
     .sample_freq_hz = 60000,
 #else
-    .sample_freq_hz = 80000,
+    .sample_freq_hz = 20000,
 #endif
     .conv_mode = ADC_CONV_SINGLE_UNIT_1,
     .pattern_num = 2,
