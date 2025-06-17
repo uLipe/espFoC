@@ -23,4 +23,5 @@ list(APPEND srcs    "drivers/inverter_3pwm_ledc.c"
 
 idf_component_register(SRCS "${srcs}"
                        INCLUDE_DIRS "${includes}"
-                       PRIV_REQUIRES "${requires}")
+                       PRIV_REQUIRES "${requires}"
+                       LDFRAGMENTS linker.lf)

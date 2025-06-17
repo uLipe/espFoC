@@ -1,0 +1,4 @@
+[mapping:espFoC]
+archive: libespFoC.a
+entries:
+    * (noflash)
