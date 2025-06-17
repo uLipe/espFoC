@@ -37,6 +37,11 @@
 #define ESP_FOC_DEBUG_PIN                  22
 static const char * tag = "ESP_FOC_CONTROL";
 
+IRAM_ATTR static void inverter_isr(void *data)
+{
+    esp_foc_axis_t *axis = (esp_foc_axis_t *)data;
+    axis->isensor_driver->sample_isensors(axis->isensor_driver);
+}
 
 IRAM_ATTR void do_current_mode_sensored_high_speed_loop(void *arg)
 {
@@ -101,7 +106,6 @@ IRAM_ATTR void do_current_mode_sensored_high_speed_loop(void *arg)
     gpio_set_level(ESP_FOC_DEBUG_PIN, false);
 #endif
 
-    axis->isensor_driver->sample_isensors(axis->isensor_driver);
 }
 
 IRAM_ATTR void do_current_mode_sensored_low_speed_loop(void *arg)
@@ -128,6 +132,10 @@ IRAM_ATTR void do_current_mode_sensored_low_speed_loop(void *arg)
     ESP_LOGI(tag,"Starting current mode sensored high speed loop");
 
     axis->inverter_driver->set_inverter_callback(axis->inverter_driver,
+        inverter_isr,
+        axis);
+
+    axis->isensor_driver->set_isensor_callback(axis->isensor_driver,
         axis->high_speed_loop_cb,
         axis);
 

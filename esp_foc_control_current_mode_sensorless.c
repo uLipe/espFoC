@@ -40,6 +40,12 @@
 
 static const char * tag = "ESP_FOC_CONTROL";
 
+IRAM_ATTR static void inverter_isr(void *data)
+{
+    esp_foc_axis_t *axis = (esp_foc_axis_t *)data;
+    axis->isensor_driver->sample_isensors(axis->isensor_driver);
+}
+
 IRAM_ATTR void do_current_mode_sensorless_high_speed_loop(void *arg)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
@@ -94,7 +100,6 @@ IRAM_ATTR void do_current_mode_sensorless_high_speed_loop(void *arg)
         &axis->i_d.raw);
 
     esp_foc_current_control_loop(axis);
-    axis->isensor_driver->sample_isensors(axis->isensor_driver);
 
     esp_foc_modulate_dq_voltage(e_sin,
                     e_cos,
@@ -145,6 +150,10 @@ IRAM_ATTR void do_current_mode_sensorless_low_speed_loop(void *arg)
     ESP_LOGI(tag,"Starting the current mode sensorless high speed loop");
 
     axis->inverter_driver->set_inverter_callback(axis->inverter_driver,
+        inverter_isr,
+        axis);
+
+    axis->isensor_driver->set_isensor_callback(axis->isensor_driver,
         axis->high_speed_loop_cb,
         axis);
 

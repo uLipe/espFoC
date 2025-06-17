@@ -50,22 +50,23 @@ typedef struct {
     float offsets[4];
     esp_foc_isensor_t interface;
     int number_of_channels;
-    bool on_convsersion;
+    isensor_callback_t callback;
+    void *user_data;
 }isensor_adc_t;
 
 static adc_continuous_handle_cfg_t adc_config = {
-    .max_store_buf_size = 8 * SOC_ADC_DIGI_RESULT_BYTES,
+    .max_store_buf_size = 2 * SOC_ADC_DIGI_RESULT_BYTES,
     .conv_frame_size = 2 * SOC_ADC_DIGI_RESULT_BYTES,
     .flags = {
-        .flush_pool = 0,
+        .flush_pool = 1,
     },
 };
 
 static adc_continuous_config_t dig_cfg = {
 #if CONFIG_IDF_TARGET_ESP32
-    .sample_freq_hz = 60000,
+    .sample_freq_hz = 40000,
 #else
-    .sample_freq_hz = 20000,
+    .sample_freq_hz = 40000,
 #endif
     .conv_mode = ADC_CONV_SINGLE_UNIT_1,
     .pattern_num = 2,
@@ -96,6 +97,10 @@ static bool IRAM_ATTR isensor_adc_done_callback(adc_continuous_handle_t handle, 
     for(int i = 0; i < isensor->number_of_channels; i++) {
         isensor->currents[i] = ((float)ADC_GET_DATA(p)) * adc_to_volts;
         p++;
+    }
+
+    if(isensor->callback != NULL) {
+        isensor->callback(isensor->user_data);
     }
 
     esp_foc_critical_leave();
@@ -184,6 +189,7 @@ IRAM_ATTR static void calibrate_isensors (esp_foc_isensor_t *self, int calibrati
 
     ESP_LOGI(TAG, "ADC calibrated, phase current offsets are: %f, %f, %f, %f",
             obj->offsets[0], obj->offsets[1], obj->offsets[2], obj->offsets[3]);
+    esp_foc_sleep_ms(100);
 
     /* Dummy read to check reading when no current is flowing*/
     self->sample_isensors(self);
@@ -192,6 +198,18 @@ IRAM_ATTR static void calibrate_isensors (esp_foc_isensor_t *self, int calibrati
 
     ESP_LOGI(TAG, "ADC calibrated, phase current offsets are: %f, %f, %f, %f, %f, %f",
             val.iu_axis_0, val.iv_axis_0, val.iw_axis_0, val.iu_axis_1, val.iv_axis_1, val.iw_axis_1);
+    esp_foc_sleep_ms(100);
+}
+
+IRAM_ATTR static void set_callback(esp_foc_isensor_t *self, isensor_callback_t cb, void *arg)
+{
+    isensor_adc_t *obj =
+        __containerof(self, isensor_adc_t, interface);
+
+    esp_foc_critical_enter();
+    obj->callback = cb;
+    obj->user_data = arg;
+    esp_foc_critical_leave();
 }
 
 
@@ -207,6 +225,7 @@ esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
     isensor_adc.interface.fetch_isensors = fetch_isensors;
     isensor_adc.interface.sample_isensors = sample_isensors;
     isensor_adc.interface.calibrate_isensors = calibrate_isensors;
+    isensor_adc.interface.set_isensor_callback = set_callback;
     isensor_adc.number_of_channels = config->number_of_channels;
     isensor_adc.channels[0] = config->axis_channels[0];
     isensor_adc.channels[1] = config->axis_channels[1];
@@ -220,7 +239,7 @@ esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
     isensor_adc.offsets[1] = 0.0f;
     isensor_adc.offsets[2] = 0.0f;
     isensor_adc.offsets[3] = 0.0f;
-    isensor_adc.on_convsersion = false;
+    isensor_adc.callback = NULL;
 
     esp_foc_low_pass_filter_init(&isensor_adc.current_filters[0], 1.0);
     esp_foc_low_pass_filter_init(&isensor_adc.current_filters[1], 1.0);
