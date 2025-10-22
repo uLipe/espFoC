@@ -3,7 +3,7 @@
 ![Build](https://github.com/uLipe/espFoC/workflows/Build/badge.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-![alt text](doc/images/pos_ctl.gif)
+![alt text](doc/images/espfoc_demo.gif)
 
 espFoC is a simple implementation of voltage mode, vector controller intended to be used with permanent-magnet synchronous motors (PMSM), and general brushless motors. This component was developed to be used with the ESP-IDF
 espressif framework.
