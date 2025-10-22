@@ -32,7 +32,7 @@
 
 #ifndef CONFIG_IDF_TARGET_ESP32P4
 
-#define LEDC_FREQUENCY_HZ       10000
+#define LEDC_FREQUENCY_HZ       ESP_FOC_PWM_RATE_HZ
 #define LEDC_RESOLUTION_STEPS   255.0
 
 typedef struct {
