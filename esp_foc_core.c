@@ -35,7 +35,7 @@
 #include "espFoC/esp_foc_pll_observer.h"
 
 #define ESP_FOC_ISENSOR_CALIBRATION_ROUNDS 100
-#define PLL_BANDWIDTH_HZ 200.0f
+#define PLL_BANDWIDTH_HZ 50.0f
 #define PLL_ZETA 0.707f
 
 static const char * tag = "ESP_FOC_CONTROL";
@@ -59,8 +59,18 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->enable_torque_control = settings.enable_torque_control;
     axis->is_sensorless_mode = (rotor != NULL) ? false : true;
 
+    if(!settings.is_fast_mode && axis->is_sensorless_mode) {
+        ESP_LOGE(tag, "Sensorless mode is not supported in slow control mode");
+        return ESP_FOC_ERR_INVALID_ARG;
+    }
+
     if(isensor == NULL && axis->enable_torque_control) {
         ESP_LOGE(tag, "Current sensor is mandatory when torque control");
+        return ESP_FOC_ERR_INVALID_ARG;
+    }
+
+    if(!axis->enable_torque_control && !settings.is_fast_mode) {
+        ESP_LOGE(tag, "Voltage mode is not supported in slow mode");
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
@@ -176,12 +186,17 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
             axis->rotor_sensor_driver->get_counts_per_revolution(axis->rotor_sensor_driver);
         ESP_LOGI(tag, "Shaft to ticks ratio: %f", axis->shaft_ticks_to_radians_ratio);
 
-        if(axis->enable_torque_control) {
-            axis->high_speed_loop_cb = do_current_mode_sensored_high_speed_loop;
-            axis->low_speed_loop_cb = do_current_mode_sensored_low_speed_loop;
+        if(settings.is_fast_mode) {
+            if(axis->enable_torque_control) {
+                axis->high_speed_loop_cb = do_current_mode_sensored_high_speed_loop;
+                axis->low_speed_loop_cb = do_current_mode_sensored_low_speed_loop;
+            } else {
+                axis->high_speed_loop_cb = do_voltage_mode_sensored_high_speed_loop;
+                axis->low_speed_loop_cb = do_voltage_mode_sensored_low_speed_loop;
+            }
         } else {
-            axis->high_speed_loop_cb = do_voltage_mode_sensored_high_speed_loop;
-            axis->low_speed_loop_cb = do_voltage_mode_sensored_low_speed_loop;
+            axis->high_speed_loop_cb = do_slow_current_mode_sensored_high_speed_loop;
+            axis->low_speed_loop_cb = do_slow_current_mode_sensored_low_speed_loop;
         }
 
     } else {

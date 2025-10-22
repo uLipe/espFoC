@@ -82,6 +82,7 @@ typedef struct {
     float inertia;
     float friction;
     int motor_unit;
+    bool is_fast_mode;
 } esp_foc_motor_control_settings_t;
 
 typedef struct {
