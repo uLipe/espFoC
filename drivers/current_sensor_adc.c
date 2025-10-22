@@ -46,6 +46,7 @@ typedef struct {
     adc_unit_t units[4];
     adc_continuous_handle_t handle;
     float adc_to_current_scale;
+    uint32_t raw_reads[4];
     float currents[4];
     float offsets[4];
     esp_foc_isensor_t interface;
@@ -95,7 +96,7 @@ static bool IRAM_ATTR isensor_adc_done_callback(adc_continuous_handle_t handle, 
     adc_digi_output_data_t *p = (adc_digi_output_data_t *)edata->conv_frame_buffer;
 
     for(int i = 0; i < isensor->number_of_channels; i++) {
-        isensor->currents[i] = ((float)ADC_GET_DATA(p)) * adc_to_volts;
+        isensor->raw_reads[i] = ADC_GET_DATA(p);
         p++;
     }
 
@@ -142,6 +143,11 @@ IRAM_ATTR static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *
         __containerof(self, isensor_adc_t, interface);
 
     esp_foc_critical_enter();
+    obj->currents[0] = (float)obj->raw_reads[0] * adc_to_volts;
+    obj->currents[1] = (float)obj->raw_reads[1] * adc_to_volts;
+    obj->currents[2] = (float)obj->raw_reads[2] * adc_to_volts;
+    obj->currents[3] = (float)obj->raw_reads[3] * adc_to_volts;
+    esp_foc_critical_leave();
 
     values->iu_axis_0 = esp_foc_low_pass_filter_update(&obj->current_filters[0], (obj->currents[0] - obj->offsets[0]) * isensor_adc.adc_to_current_scale);
     values->iv_axis_0 = esp_foc_low_pass_filter_update(&obj->current_filters[1], (obj->currents[1] - obj->offsets[1]) * isensor_adc.adc_to_current_scale);
@@ -150,7 +156,6 @@ IRAM_ATTR static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *
     values->iv_axis_1 = esp_foc_low_pass_filter_update(&obj->current_filters[3], (obj->currents[3] - obj->offsets[3]) * isensor_adc.adc_to_current_scale);
     values->iw_axis_1 = -(values->iu_axis_1 +  values->iv_axis_1);
 
-    esp_foc_critical_leave();
 }
 
 IRAM_ATTR static void sample_isensors(esp_foc_isensor_t *self)
@@ -176,10 +181,10 @@ IRAM_ATTR static void calibrate_isensors (esp_foc_isensor_t *self, int calibrati
         self->sample_isensors(self);
         esp_foc_sleep_ms(10);
 
-        obj->offsets[0] += obj->currents[0];
-        obj->offsets[1] += obj->currents[1];
-        obj->offsets[2] += obj->currents[2];
-        obj->offsets[3] += obj->currents[3];
+        obj->offsets[0] += ((float)obj->raw_reads[0] * adc_to_volts);
+        obj->offsets[1] += ((float)obj->raw_reads[0] * adc_to_volts);
+        obj->offsets[2] += ((float)obj->raw_reads[0] * adc_to_volts);
+        obj->offsets[3] += ((float)obj->raw_reads[0] * adc_to_volts);
     }
 
     obj->offsets[0] /= calibration_rounds;
