@@ -44,7 +44,7 @@ jobs:
         repository: espressif/esp-idf
         path: idf
         submodules: recursive
-        ref: master
+        ref: release/v5.4
 
     - name: Build Samples
       run: |

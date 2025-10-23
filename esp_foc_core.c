@@ -34,10 +34,6 @@
 #include "espFoC/esp_foc_simu_observer.h"
 #include "espFoC/esp_foc_pll_observer.h"
 
-#define ESP_FOC_ISENSOR_CALIBRATION_ROUNDS 100
-#define PLL_BANDWIDTH_HZ 50.0f
-#define PLL_ZETA 0.707f
-
 static const char * tag = "ESP_FOC_CONTROL";
 
 IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
@@ -180,6 +176,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->motor_pole_pairs = (float)settings.motor_pole_pairs;
     ESP_LOGI(tag, "Motor poler pairs: %f",  axis->motor_pole_pairs);
 
+    /* Select the proper FoC core control callback given the axis settings */
     if(!axis->is_sensorless_mode) {
         axis->rotor_sensor_driver = rotor;
         axis->shaft_ticks_to_radians_ratio = ((2.0 * M_PI)) /
@@ -195,8 +192,13 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                 axis->low_speed_loop_cb = do_voltage_mode_sensored_low_speed_loop;
             }
         } else {
-            axis->high_speed_loop_cb = do_slow_current_mode_sensored_high_speed_loop;
-            axis->low_speed_loop_cb = do_slow_current_mode_sensored_low_speed_loop;
+            if(axis->enable_torque_control) {
+                axis->high_speed_loop_cb = do_slow_current_mode_sensored_high_speed_loop;
+                axis->low_speed_loop_cb = do_slow_current_mode_sensored_low_speed_loop;
+            } else {
+                axis->high_speed_loop_cb = do_slow_voltage_mode_sensored_high_speed_loop;
+                axis->low_speed_loop_cb = do_slow_voltage_mode_sensored_low_speed_loop;
+            }
         }
 
     } else {
@@ -219,9 +221,9 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
         axis->current_observer = pll_observer_new(settings.motor_unit,
             (esp_foc_pll_observer_settings_t) {
-            .pll_kp = 2.0f * PLL_ZETA * 2.0f * M_PI * PLL_BANDWIDTH_HZ,
-            .pll_ki = (2.0f * M_PI * PLL_BANDWIDTH_HZ ) *
-                (2.0f * M_PI * PLL_BANDWIDTH_HZ),
+            .pll_kp = 2.0f * ESP_FOC_PLL_ZETA * 2.0f * M_PI * ESP_FOC_PLL_BANDWIDTH_HZ,
+            .pll_ki = (2.0f * M_PI * ESP_FOC_PLL_BANDWIDTH_HZ ) *
+                (2.0f * M_PI * ESP_FOC_PLL_BANDWIDTH_HZ),
             .phase_resistance = settings.motor_resistance,
             .phase_inductance = settings.motor_inductance,
             .pole_pairs = axis->motor_pole_pairs,
