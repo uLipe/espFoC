@@ -59,7 +59,6 @@ IRAM_ATTR void do_slow_voltage_mode_sensored_high_speed_loop(void *arg)
 IRAM_ATTR void do_slow_voltage_mode_sensored_low_speed_loop(void *arg)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
-    isensor_values_t ival;
     float low_speed_inv_dt = (axis->inv_dt / 10.0f);
     float raw_speed;
 
