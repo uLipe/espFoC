@@ -102,12 +102,20 @@ static inline void esp_foc_park_transform (float sin,
                                         float *v_d,
                                         float *v_q)
 {
-    *v_d = v_ab[0] * cos +
-        v_ab[1] * sin;
-
-    *v_q = v_ab[1] * cos -
-        v_ab[0] * sin;
+    *v_d = v_ab[0] * cos + v_ab[1] * sin;
+    *v_q = -v_ab[0] * sin + v_ab[1] * cos;
 }
+
+static inline void esp_foc_inverse_park_transform (float sin,
+                                                float cos,
+                                                float v_dq[2],
+                                                float *v_alpha,
+                                                float *v_beta)
+{
+    *v_alpha = v_dq[0] * cos - v_dq[1] * sin;
+    *v_beta = v_dq[0] * sin + v_dq[1] * cos;
+}
+
 
 static inline void esp_foc_inverse_clarke_transform (float v_ab[2],
                                                     float *v_u,
@@ -123,19 +131,6 @@ static inline void esp_foc_inverse_clarke_transform (float v_ab[2],
     *v_u = a;
     *v_v = b;
     *v_w = c;
-}
-
-static inline void esp_foc_inverse_park_transform (float sin,
-                                                float cos,
-                                                float v_dq[2],
-                                                float *v_alpha,
-                                                float *v_beta)
-{
-    *v_alpha = v_dq[0] * cos -
-        v_dq[1] * sin;
-
-    *v_beta = v_dq[1] * cos +
-        v_dq[0] * sin;
 }
 
 static inline void esp_foc_limit_voltage(float *v_alpha, float *v_beta, float v_dc)

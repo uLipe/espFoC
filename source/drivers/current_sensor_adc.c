@@ -65,9 +65,9 @@ static adc_continuous_handle_cfg_t adc_config = {
 
 static adc_continuous_config_t dig_cfg = {
 #if CONFIG_IDF_TARGET_ESP32
-    .sample_freq_hz = 40000,
+    .sample_freq_hz = 80000,
 #else
-    .sample_freq_hz = 40000,
+    .sample_freq_hz = 80000,
 #endif
     .conv_mode = ADC_CONV_SINGLE_UNIT_1,
     .pattern_num = 2,
@@ -182,9 +182,9 @@ IRAM_ATTR static void calibrate_isensors (esp_foc_isensor_t *self, int calibrati
         esp_foc_sleep_ms(10);
 
         obj->offsets[0] += ((float)obj->raw_reads[0] * adc_to_volts);
-        obj->offsets[1] += ((float)obj->raw_reads[0] * adc_to_volts);
-        obj->offsets[2] += ((float)obj->raw_reads[0] * adc_to_volts);
-        obj->offsets[3] += ((float)obj->raw_reads[0] * adc_to_volts);
+        obj->offsets[1] += ((float)obj->raw_reads[1] * adc_to_volts);
+        obj->offsets[2] += ((float)obj->raw_reads[2] * adc_to_volts);
+        obj->offsets[3] += ((float)obj->raw_reads[3] * adc_to_volts);
     }
 
     obj->offsets[0] /= calibration_rounds;
@@ -201,7 +201,7 @@ IRAM_ATTR static void calibrate_isensors (esp_foc_isensor_t *self, int calibrati
     esp_foc_sleep_ms(10);
     self->fetch_isensors(self, &val);
 
-    ESP_LOGI(TAG, "ADC calibrated, phase current offsets are: %f, %f, %f, %f, %f, %f",
+    ESP_LOGI(TAG, "No current flow isensor test read: %f, %f, %f, %f, %f,%f",
             val.iu_axis_0, val.iv_axis_0, val.iw_axis_0, val.iu_axis_1, val.iv_axis_1, val.iw_axis_1);
     esp_foc_sleep_ms(100);
 }

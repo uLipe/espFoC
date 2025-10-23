@@ -46,7 +46,7 @@ typedef struct {
 }esp_foc_mcpwm_inverter_t;
 
 #define MCPWM_RATE_HZ         ESP_FOC_PWM_RATE_HZ
-#define MCPWM_RESOLUTION_HZ   10000000
+#define MCPWM_RESOLUTION_HZ   160000000
 #define MCPWM_PERIOD_TOP      MCPWM_RESOLUTION_HZ / MCPWM_RATE_HZ
 #define MCPWM_PERIOD_TOP_HALF MCPWM_PERIOD_TOP / 2
 

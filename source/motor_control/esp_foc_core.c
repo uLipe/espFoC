@@ -65,11 +65,6 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
-    if(!axis->enable_torque_control && !settings.is_fast_mode) {
-        ESP_LOGE(tag, "Voltage mode is not supported in slow mode");
-        return ESP_FOC_ERR_INVALID_ARG;
-    }
-
 #ifdef CONFIG_ESP_FOC_CUSTOM_MATH
     extern void esp_foc_fast_init_sqrt_table(void);
     esp_foc_fast_init_sqrt_table();
@@ -147,14 +142,18 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     esp_foc_pid_reset(&axis->velocity_controller);
     esp_foc_low_pass_filter_init(&axis->velocity_filter, 1.0f);
 
-    current_control_analog_bandwith = (2.0f * M_PI * (inverter->get_inverter_pwm_rate(inverter))) / 100.0f;
+    if(settings.is_fast_mode){
+        current_control_analog_bandwith = (2.0f * M_PI * (inverter->get_inverter_pwm_rate(inverter))) / 100.0f;
+    } else {
+        current_control_analog_bandwith = (2.0f * M_PI * (inverter->get_inverter_pwm_rate(inverter) / ESP_FOC_LOW_SPEED_DOWNSAMPLING)) / 100.0f;
+    }
 
     axis->torque_controller[0].kp = settings.motor_inductance * current_control_analog_bandwith;
     axis->torque_controller[0].ki = settings.motor_resistance * current_control_analog_bandwith;
     axis->torque_controller[0].kd = 0.0f;
     axis->torque_controller[0].integrator_limit = 1e+3f;
     axis->torque_controller[0].max_output_value = axis->biased_dc_link_voltage/*settings.torque_control_settings[0].max_output_value*/;
-    axis->torque_controller[0].dt = axis->dt;
+    axis->torque_controller[0].dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING;
     axis->torque_controller[0].inv_dt = (1.0f / axis->torque_controller[0].dt);
     esp_foc_pid_reset(&axis->torque_controller[0]);
     esp_foc_low_pass_filter_init(&axis->current_filters[0], 0.75f);
@@ -164,17 +163,17 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->torque_controller[1].kd = 0.0f;
     axis->torque_controller[1].integrator_limit = 1e+3f;
     axis->torque_controller[1].max_output_value = axis->biased_dc_link_voltage /* settings.torque_control_settings[1].max_output_value */;
-    axis->torque_controller[1].dt = axis->dt;
+    axis->torque_controller[1].dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING;
     axis->torque_controller[1].inv_dt = (1.0f / axis->torque_controller[1].dt);
     esp_foc_pid_reset(&axis->torque_controller[1]);
     esp_foc_low_pass_filter_init(&axis->current_filters[1], 0.75f);
 
     ESP_LOGI(tag, "Position controller is: %s",  settings.enable_position_control ? "on" : "off");
     ESP_LOGI(tag, "Speed controller is: %s",  settings.enable_velocity_control ? "on" : "off");
-    ESP_LOGI(tag, "Position controller is: %s",  settings.enable_torque_control ? "on" : "off");
+    ESP_LOGI(tag, "Torque controller is: %s",  settings.enable_torque_control ? "on" : "off");
 
     axis->motor_pole_pairs = (float)settings.motor_pole_pairs;
-    ESP_LOGI(tag, "Motor poler pairs: %f",  axis->motor_pole_pairs);
+    ESP_LOGI(tag, "Motor poles pairs: %f",  axis->motor_pole_pairs);
 
     /* Select the proper FoC core control callback given the axis settings */
     if(!axis->is_sensorless_mode) {
@@ -213,7 +212,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         );
 
         if(axis->open_loop_observer == NULL) {
-            ESP_LOGE(tag, "FAiled to setup the observer");
+            ESP_LOGE(tag, "Failed to setup the observer");
             return ESP_FOC_ERR_INVALID_ARG;
         }
 

@@ -59,7 +59,7 @@ IRAM_ATTR void do_slow_voltage_mode_sensored_high_speed_loop(void *arg)
 IRAM_ATTR void do_slow_voltage_mode_sensored_low_speed_loop(void *arg)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
-    float low_speed_inv_dt = (axis->inv_dt / 10.0f);
+    float low_speed_inv_dt = 1.0f / (axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING);
     float raw_speed;
 
 #ifdef CONFIG_ESP_FOC_SCOPE
@@ -69,7 +69,7 @@ IRAM_ATTR void do_slow_voltage_mode_sensored_low_speed_loop(void *arg)
     axis->low_speed_ev = esp_foc_get_event_handle();
     axis->downsampling_low_speed = ESP_FOC_LOW_SPEED_DOWNSAMPLING;
 
-    ESP_LOGI(tag,"Starting the current mode sensored low speed loop");
+    ESP_LOGI(tag,"Starting the voltage mode sensored low speed loop");
 
     axis->rotor_shaft_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
     axis->rotor_position =
@@ -77,7 +77,7 @@ IRAM_ATTR void do_slow_voltage_mode_sensored_low_speed_loop(void *arg)
     axis->rotor_position_prev = axis->rotor_position;
     axis->current_speed = 0.0f;
 
-    ESP_LOGI(tag,"Starting current mode sensored high speed loop");
+    ESP_LOGI(tag,"Starting voltage mode sensored high speed loop");
 
     axis->inverter_driver->set_inverter_callback(axis->inverter_driver,
         inverter_isr,
@@ -97,10 +97,7 @@ IRAM_ATTR void do_slow_voltage_mode_sensored_low_speed_loop(void *arg)
         float e_sin = esp_foc_sine(axis->rotor_elec_angle);
         float e_cos = esp_foc_cosine(axis->rotor_elec_angle);
 
-        raw_speed = axis->rotor_position - axis->rotor_position_prev;
-        if (raw_speed >  M_PI)  raw_speed -= 2*M_PI;
-        if (raw_speed < -M_PI)  raw_speed += 2*M_PI;
-        raw_speed *= low_speed_inv_dt;
+        raw_speed = (axis->rotor_position - axis->rotor_position_prev) * low_speed_inv_dt;
 
         esp_foc_critical_enter();
         axis->current_speed = esp_foc_low_pass_filter_update(&axis->velocity_filter, raw_speed);

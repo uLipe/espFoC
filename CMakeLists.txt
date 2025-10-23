@@ -1,6 +1,6 @@
 idf_build_get_property(target IDF_TARGET)
 
-set(requires driver esp_adc freertos esp_system esp_timer)
+set(requires esp_driver_uart esp_driver_pcnt esp_driver_gpio esp_driver_mcpwm esp_driver_ledc esp_adc driver freertos esp_system esp_timer)
 set(srcs    "source/motor_control/esp_foc_core.c"
             "source/motor_control/esp_foc_control_current_mode_sensored.c"
             "source/motor_control/esp_foc_control_voltage_mode_sensored.c"

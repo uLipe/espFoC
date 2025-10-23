@@ -60,8 +60,10 @@ IRAM_ATTR void do_slow_current_mode_sensored_low_speed_loop(void *arg)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
     isensor_values_t ival;
-    float low_speed_inv_dt = (axis->inv_dt / 10.0f);
+    float low_speed_inv_dt = 1.0f / (axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING);
     float raw_speed;
+    float elec_delta;
+    float theta_timestamp;
 
 #ifdef CONFIG_ESP_FOC_SCOPE
     esp_foc_control_data_t control_data;
@@ -96,10 +98,17 @@ IRAM_ATTR void do_slow_current_mode_sensored_low_speed_loop(void *arg)
 #endif
         /* Start to read the ADC and read the Angle sensor simulating simultaneous sampling*/
         axis->isensor_driver->sample_isensors(axis->isensor_driver);
+        theta_timestamp = esp_foc_now_seconds();
+
         axis->rotor_position = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver) *
-        axis->shaft_ticks_to_radians_ratio * axis->natural_direction;
+                                axis->shaft_ticks_to_radians_ratio * axis->natural_direction;
+
+        theta_timestamp = esp_foc_now_seconds() - theta_timestamp;
+
+        elec_delta = esp_foc_mechanical_to_elec_angle(axis->current_speed, axis->motor_pole_pairs);
+
         axis->rotor_elec_angle = esp_foc_mechanical_to_elec_angle(axis->rotor_position, axis->motor_pole_pairs);
-        axis->rotor_elec_angle = esp_foc_normalize_angle(axis->rotor_elec_angle);
+        axis->rotor_elec_angle = esp_foc_normalize_angle(axis->rotor_elec_angle - (elec_delta * theta_timestamp));
 
         /* The ADC readings are already buffered while the Angle sensor is being read */
         axis->isensor_driver->fetch_isensors(axis->isensor_driver, &ival);
@@ -110,10 +119,7 @@ IRAM_ATTR void do_slow_current_mode_sensored_low_speed_loop(void *arg)
         float e_sin = esp_foc_sine(axis->rotor_elec_angle);
         float e_cos = esp_foc_cosine(axis->rotor_elec_angle);
 
-        raw_speed = axis->rotor_position - axis->rotor_position_prev;
-        if (raw_speed >  M_PI)  raw_speed -= 2*M_PI;
-        if (raw_speed < -M_PI)  raw_speed += 2*M_PI;
-        raw_speed *= low_speed_inv_dt;
+        raw_speed = (axis->rotor_position - axis->rotor_position_prev) * low_speed_inv_dt;
 
         esp_foc_critical_enter();
         axis->current_speed = esp_foc_low_pass_filter_update(&axis->velocity_filter, raw_speed);
