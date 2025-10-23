@@ -47,6 +47,14 @@ menu "espFoC Settings"
 
     endchoice
 
+    config ESP_FOC_ENABLE_LEGACY_LEDC_PWM
+        bool "Enable the Legacy LEDC PWM driver"
+        default n
+
+    config ESP_FOC_ENABLE_PCNT_DRIVER
+        bool "Enable the PNCT driver"
+        default n
+
     config ESP_FOC_DEBUG_CORE_TIMING
         bool "output on a pin the time taken to compute espfoc core ops"
         default n

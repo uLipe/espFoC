@@ -30,7 +30,9 @@
 #include "esp_attr.h"
 #include "esp_log.h"
 
-#ifndef CONFIG_IDF_TARGET_ESP32P4
+static const char *TAG = "INVERTER_LEDC";
+
+#ifdef  CONFIG_ESP_FOC_ENABLE_LEGACY_LEDC_PWM
 
 #define LEDC_FREQUENCY_HZ       ESP_FOC_PWM_RATE_HZ
 #define LEDC_RESOLUTION_STEPS   255.0
@@ -280,7 +282,6 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
 }
 
 #else
-#warning "LEDC driver is not supported on espFoC running on ESP32P4, please use the MCPWM driver instead"
 esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
                                         ledc_channel_t ch_v,
                                         ledc_channel_t ch_w,
@@ -291,6 +292,7 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
                                         float dc_link_voltage,
                                         int port)
 {
+    ESP_LOGE(TAG,"LEDC driver is not enabled, please set CONFIG_ESP_FOC_ENABLE_LEGACY_LEDC_PWM=y on your sdkconfig.defaults");
     return NULL;
 }
 #endif
