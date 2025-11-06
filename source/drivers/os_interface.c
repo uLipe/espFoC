@@ -77,6 +77,11 @@ float esp_foc_now_seconds(void)
     return(now * scale);
 }
 
+uint64_t esp_foc_now_useconds(void)
+{
+    return esp_timer_get_time();
+}
+
 /* the fpu in isr tricks below are required for xtensa based archs: */
 void IRAM_ATTR esp_foc_fpu_isr_enter(void)
 {

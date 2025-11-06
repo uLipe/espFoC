@@ -31,6 +31,7 @@ int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority);
 void esp_foc_sleep_ms(int sleep_ms);
 void esp_foc_runner_yield(void);
 float esp_foc_now_seconds(void);
+uint64_t esp_foc_now_useconds(void);
 void esp_foc_fpu_isr_enter(void);
 void esp_foc_fpu_isr_leave(void);
 void esp_foc_critical_enter(void);

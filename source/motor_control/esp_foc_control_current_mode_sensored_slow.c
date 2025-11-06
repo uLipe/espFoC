@@ -53,7 +53,9 @@ IRAM_ATTR static void inverter_isr(void *data)
 
 IRAM_ATTR void do_slow_current_mode_sensored_high_speed_loop(void *arg)
 {
-    /* Nothing to do in the ADC callback */
+    /* timestamp the current readings */
+    uint64_t * current_timestamp = (uint64_t *)arg;
+    *current_timestamp = esp_foc_now_useconds();
 }
 
 IRAM_ATTR void do_slow_current_mode_sensored_low_speed_loop(void *arg)
@@ -63,7 +65,8 @@ IRAM_ATTR void do_slow_current_mode_sensored_low_speed_loop(void *arg)
     float low_speed_inv_dt = 1.0f / (axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING);
     float raw_speed;
     float elec_delta;
-    float theta_timestamp;
+    float theta_timestamp = 0.0f;
+    uint64_t current_timestamp = 0;
 
 #ifdef CONFIG_ESP_FOC_SCOPE
     esp_foc_control_data_t control_data;
@@ -88,7 +91,7 @@ IRAM_ATTR void do_slow_current_mode_sensored_low_speed_loop(void *arg)
 
     axis->isensor_driver->set_isensor_callback(axis->isensor_driver,
         axis->high_speed_loop_cb,
-        axis);
+        &current_timestamp);
 
     while(1) {
         esp_foc_wait_notifier();
@@ -96,25 +99,24 @@ IRAM_ATTR void do_slow_current_mode_sensored_low_speed_loop(void *arg)
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
         gpio_set_level(ESP_FOC_DEBUG_PIN, true);
 #endif
-        /* Start to read the ADC and read the Angle sensor simulating simultaneous sampling*/
-        axis->isensor_driver->sample_isensors(axis->isensor_driver);
-        theta_timestamp = esp_foc_now_seconds();
-
-        axis->rotor_position = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver) *
-                                axis->shaft_ticks_to_radians_ratio * axis->natural_direction;
-
-        theta_timestamp = esp_foc_now_seconds() - theta_timestamp;
-
-        elec_delta = esp_foc_mechanical_to_elec_angle(axis->current_speed, axis->motor_pole_pairs);
-
-        axis->rotor_elec_angle = esp_foc_mechanical_to_elec_angle(axis->rotor_position, axis->motor_pole_pairs);
-        axis->rotor_elec_angle = esp_foc_normalize_angle(axis->rotor_elec_angle - (elec_delta * theta_timestamp));
-
         /* The ADC readings are already buffered while the Angle sensor is being read */
         axis->isensor_driver->fetch_isensors(axis->isensor_driver, &ival);
         axis->i_u = ival.iu_axis_0;
         axis->i_v = ival.iv_axis_0;
         axis->i_w = ival.iw_axis_0;
+
+        /* After picking the previous sample start the new one immediately (it will be used on the next loop step )*/
+        axis->isensor_driver->sample_isensors(axis->isensor_driver);
+
+        axis->rotor_position = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver) *
+                                axis->shaft_ticks_to_radians_ratio * axis->natural_direction;
+
+        theta_timestamp = fabs(esp_foc_now_seconds() - ((float)(current_timestamp) * 0.000001f));
+
+        elec_delta = esp_foc_mechanical_to_elec_angle(axis->current_speed, axis->motor_pole_pairs);
+        axis->rotor_elec_angle = esp_foc_mechanical_to_elec_angle(axis->rotor_position, axis->motor_pole_pairs);
+        axis->rotor_elec_angle = esp_foc_normalize_angle(axis->rotor_elec_angle - (elec_delta * theta_timestamp));
+
 
         float e_sin = esp_foc_sine(axis->rotor_elec_angle);
         float e_cos = esp_foc_cosine(axis->rotor_elec_angle);
