@@ -37,62 +37,10 @@
 #define ESP_FOC_DEBUG_PIN                  22
 static const char * tag = "ESP_FOC_CONTROL";
 
+
 IRAM_ATTR static void inverter_isr(void *data)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)data;
-    axis->isensor_driver->sample_isensors(axis->isensor_driver);
-}
-
-IRAM_ATTR void do_current_mode_sensored_high_speed_loop(void *arg)
-{
-    esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
-
-#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
-    gpio_set_level(ESP_FOC_DEBUG_PIN, true);
-#endif
-
-    isensor_values_t val;
-    axis->isensor_driver->fetch_isensors(axis->isensor_driver, &val);
-    axis->i_u = val.iu_axis_0;
-    axis->i_v = val.iv_axis_0;
-    axis->i_w = val.iw_axis_0;
-
-    float ext_delta = (axis->dt * (ESP_FOC_LOW_SPEED_DOWNSAMPLING - axis->downsampling_low_speed));
-    axis->extrapolated_rotor_position = axis->rotor_position + axis->current_speed * ext_delta;
-    axis->rotor_elec_angle = esp_foc_mechanical_to_elec_angle(axis->extrapolated_rotor_position, axis->motor_pole_pairs);
-    axis->rotor_elec_angle = esp_foc_normalize_angle(axis->rotor_elec_angle);
-    float e_sin = esp_foc_sine(axis->rotor_elec_angle);
-    float e_cos = esp_foc_cosine(axis->rotor_elec_angle);
-
-    esp_foc_get_dq_currents(e_sin,
-        e_cos,
-        axis->i_u,
-        axis->i_v,
-        axis->i_w,
-        &axis->i_alpha.raw,
-        &axis->i_beta.raw,
-        &axis->i_q.raw,
-        &axis->i_d.raw);
-
-    esp_foc_current_control_loop(axis);
-
-    esp_foc_modulate_dq_voltage(e_sin,
-                    e_cos,
-                    axis->u_d.raw,
-                    axis->u_q.raw,
-                    &axis->u_alpha.raw,
-                    &axis->u_beta.raw,
-                    &axis->u_u.raw,
-                    &axis->u_v.raw,
-                    &axis->u_w.raw,
-                    axis->biased_dc_link_voltage,
-                    axis->dc_link_to_normalized);
-
-
-    axis->inverter_driver->set_voltages(axis->inverter_driver,
-                                        axis->u_u.raw,
-                                        axis->u_v.raw,
-                                        axis->u_w.raw);
 
     if(axis->downsampling_low_speed) {
         axis->downsampling_low_speed--;
@@ -101,18 +49,17 @@ IRAM_ATTR void do_current_mode_sensored_high_speed_loop(void *arg)
             esp_foc_send_notification(axis->low_speed_ev);
         }
     }
+}
 
-#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
-    gpio_set_level(ESP_FOC_DEBUG_PIN, false);
-#endif
-
+IRAM_ATTR void do_current_mode_sensored_high_speed_loop(void *arg)
+{
+    /* Samples already buffered nothing to do here */
 }
 
 IRAM_ATTR void do_current_mode_sensored_low_speed_loop(void *arg)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
-    float low_speed_inv_dt = (axis->inv_dt / 10.0f);
-    float raw_speed;
+    isensor_values_t ival;
 
 #ifdef CONFIG_ESP_FOC_SCOPE
     esp_foc_control_data_t control_data;
@@ -137,30 +84,92 @@ IRAM_ATTR void do_current_mode_sensored_low_speed_loop(void *arg)
 
     axis->isensor_driver->set_isensor_callback(axis->isensor_driver,
         axis->high_speed_loop_cb,
-        axis);
+        &current_timestamp);
 
     while(1) {
         esp_foc_wait_notifier();
 
-        axis->rotor_position = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver) *
-                            axis->shaft_ticks_to_radians_ratio * axis->natural_direction;
+#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
+        gpio_set_level(ESP_FOC_DEBUG_PIN, true);
+#endif
+        axis->isensor_driver->fetch_isensors(axis->isensor_driver, &ival);
+        axis->i_u = ival.iu_axis_0;
+        axis->i_v = ival.iv_axis_0;
+        axis->i_w = ival.iw_axis_0;
 
-        raw_speed = axis->rotor_position - axis->rotor_position_prev;
-        if (raw_speed >  M_PI)  raw_speed -= 2*M_PI;
-        if (raw_speed < -M_PI)  raw_speed += 2*M_PI;
-        raw_speed *= low_speed_inv_dt;
+        /* After picking the previous sample start the new converstion immediately
+         * (it will be used on the next loop step )
+         */
+        axis->isensor_driver->sample_isensors(axis->isensor_driver);
 
-        esp_foc_critical_enter();
-        axis->current_speed = esp_foc_low_pass_filter_update( &axis->velocity_filter, raw_speed);
-        axis->rotor_position_prev = axis->rotor_position;
-        esp_foc_critical_leave();
+        axis->rotor_position = axis->observer->get_angle(axis->observer);
 
+        axis->current_speed = axis->observer->get_speed(axis->observer);
         esp_foc_position_control_loop(axis);
         esp_foc_velocity_control_loop(axis);
+
+
+        /* Current control stuff */
+        float e_sin = esp_foc_sine(axis->rotor_elec_angle);
+        float e_cos = esp_foc_cosine(axis->rotor_elec_angle);
+
+        esp_foc_get_dq_currents(e_sin,
+            e_cos,
+            axis->i_u,
+            axis->i_v,
+            axis->i_w,
+            &axis->i_alpha.raw,
+            &axis->i_beta.raw,
+            &axis->i_q.raw,
+            &axis->i_d.raw);
+
+        esp_foc_current_control_loop(axis);
+
+        esp_foc_modulate_dq_voltage(e_sin,
+                        e_cos,
+                        axis->u_d.raw,
+                        axis->u_q.raw,
+                        &axis->u_alpha.raw,
+                        &axis->u_beta.raw,
+                        &axis->u_u.raw,
+                        &axis->u_v.raw,
+                        &axis->u_w.raw,
+                        axis->max_voltage,
+                        axis->biased_dc_link_voltage,
+                        axis->dc_link_to_normalized);
+
+        axis->inverter_driver->set_voltages(axis->inverter_driver,
+                                            axis->u_u.raw,
+                                            axis->u_v.raw,
+                                            axis->u_w.raw);
+
+        /* Observer update */
+        esp_foc_observer_inputs_t in = {
+            .i_dq[0] = axis->i_d.raw,
+            .i_dq[1]  =  axis->i_q.raw,
+            .u_dq[0] = axis->u_d.raw,
+            .u_dq[1]  =  axis->u_q.raw,
+            .u_alpha_beta[0] = axis->u_alpha.raw,
+            .u_alpha_beta[1] = axis->u_beta.raw,
+            .i_alpha_beta[0] = axis->i_alpha.raw,
+            .i_alpha_beta[1] = axis->i_beta.raw,
+        };
+
+        axis->open_loop_observer->update(axis->open_loop_observer, &in);
+        if(axis->isensor_driver != NULL) {
+            int not_conv = axis->current_observer->update(axis->current_observer, &in);
+            if(!not_conv) {
+                //TODO perform swap to current observer.
+            }
+        }
 
 #ifdef CONFIG_ESP_FOC_SCOPE
         esp_foc_get_control_data(axis, &control_data);
         esp_foc_scope_data_push(&control_data);
+#endif
+
+#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
+        gpio_set_level(ESP_FOC_DEBUG_PIN, false);
 #endif
     }
 }

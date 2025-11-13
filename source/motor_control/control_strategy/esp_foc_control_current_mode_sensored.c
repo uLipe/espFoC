@@ -51,14 +51,14 @@ IRAM_ATTR static void inverter_isr(void *data)
     }
 }
 
-IRAM_ATTR void do_slow_current_mode_sensored_high_speed_loop(void *arg)
+IRAM_ATTR void do_current_mode_sensored_high_speed_loop(void *arg)
 {
     /* timestamp the current readings */
     uint64_t * current_timestamp = (uint64_t *)arg;
     *current_timestamp = esp_foc_now_useconds();
 }
 
-IRAM_ATTR void do_slow_current_mode_sensored_low_speed_loop(void *arg)
+IRAM_ATTR void do_current_mode_sensored_low_speed_loop(void *arg)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
     isensor_values_t ival;
@@ -152,6 +152,7 @@ IRAM_ATTR void do_slow_current_mode_sensored_low_speed_loop(void *arg)
                         &axis->u_u.raw,
                         &axis->u_v.raw,
                         &axis->u_w.raw,
+                        axis->max_voltage,
                         axis->biased_dc_link_voltage,
                         axis->dc_link_to_normalized);
 
