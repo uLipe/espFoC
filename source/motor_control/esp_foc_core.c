@@ -55,11 +55,6 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->enable_torque_control = settings.enable_torque_control;
     axis->is_sensorless_mode = (rotor != NULL) ? false : true;
 
-    if(!settings.is_fast_mode && axis->is_sensorless_mode) {
-        ESP_LOGE(tag, "Sensorless mode is not supported in slow control mode");
-        return ESP_FOC_ERR_INVALID_ARG;
-    }
-
     if(isensor == NULL && axis->enable_torque_control) {
         ESP_LOGE(tag, "Current sensor is mandatory when torque control");
         return ESP_FOC_ERR_INVALID_ARG;
@@ -142,11 +137,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     esp_foc_pid_reset(&axis->velocity_controller);
     esp_foc_low_pass_filter_init(&axis->velocity_filter, 1.0f);
 
-    if(settings.is_fast_mode){
-        current_control_analog_bandwith = (2.0f * M_PI * (inverter->get_inverter_pwm_rate(inverter))) / 100.0f;
-    } else {
-        current_control_analog_bandwith = (2.0f * M_PI * (inverter->get_inverter_pwm_rate(inverter) / ESP_FOC_LOW_SPEED_DOWNSAMPLING)) / 100.0f;
-    }
+    current_control_analog_bandwith = (2.0f * M_PI * (inverter->get_inverter_pwm_rate(inverter) / ESP_FOC_LOW_SPEED_DOWNSAMPLING)) / 100.0f;
 
     axis->torque_controller[0].kp = settings.motor_inductance * current_control_analog_bandwith;
     axis->torque_controller[0].ki = settings.motor_resistance * current_control_analog_bandwith;
@@ -182,22 +173,12 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
             axis->rotor_sensor_driver->get_counts_per_revolution(axis->rotor_sensor_driver);
         ESP_LOGI(tag, "Shaft to ticks ratio: %f", axis->shaft_ticks_to_radians_ratio);
 
-        if(settings.is_fast_mode) {
-            if(axis->enable_torque_control) {
-                axis->high_speed_loop_cb = do_current_mode_sensored_high_speed_loop;
-                axis->low_speed_loop_cb = do_current_mode_sensored_low_speed_loop;
-            } else {
-                axis->high_speed_loop_cb = do_voltage_mode_sensored_high_speed_loop;
-                axis->low_speed_loop_cb = do_voltage_mode_sensored_low_speed_loop;
-            }
+        if(axis->enable_torque_control) {
+            axis->high_speed_loop_cb = do_current_mode_sensored_high_speed_loop;
+            axis->low_speed_loop_cb = do_current_mode_sensored_low_speed_loop;
         } else {
-            if(axis->enable_torque_control) {
-                axis->high_speed_loop_cb = do_slow_current_mode_sensored_high_speed_loop;
-                axis->low_speed_loop_cb = do_slow_current_mode_sensored_low_speed_loop;
-            } else {
-                axis->high_speed_loop_cb = do_slow_voltage_mode_sensored_high_speed_loop;
-                axis->low_speed_loop_cb = do_slow_voltage_mode_sensored_low_speed_loop;
-            }
+            axis->high_speed_loop_cb = do_voltage_mode_sensored_high_speed_loop;
+            axis->low_speed_loop_cb = do_voltage_mode_sensored_low_speed_loop;
         }
 
     } else {
