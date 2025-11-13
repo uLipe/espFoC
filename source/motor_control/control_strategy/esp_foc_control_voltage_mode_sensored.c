@@ -119,6 +119,7 @@ IRAM_ATTR void do_voltage_mode_sensored_low_speed_loop(void *arg)
                         &axis->u_u.raw,
                         &axis->u_v.raw,
                         &axis->u_w.raw,
+                        axis->max_voltage,
                         axis->biased_dc_link_voltage,
                         axis->dc_link_to_normalized);
 

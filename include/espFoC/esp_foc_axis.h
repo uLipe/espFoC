@@ -78,6 +78,7 @@ struct esp_foc_axis_s {
     float dc_link_voltage;
     float biased_dc_link_voltage;
     float dc_link_to_normalized;
+    float max_voltage;
     float motor_pole_pairs;
     float natural_direction;
 

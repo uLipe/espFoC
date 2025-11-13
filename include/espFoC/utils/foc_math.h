@@ -69,6 +69,17 @@ static inline float esp_foc_sqrtf(float x)
 #endif
 }
 
+/* Fast rsqrt (Quake-style), then one NR iteration for accuracy */
+static inline float esp_foc_rsqrt_fast(float x) {
+    float xhalf = 0.5f * x;
+    float y = x;
+    uint32_t i = *(uint32_t*)&y;
+    i = 0x5f3759df - (i >> 1);
+    y = *(float*)&i;
+    y = y * (1.5f - xhalf * y * y);
+    return y;
+}
+
 static inline float esp_foc_mechanical_to_elec_angle(float mech_angle,
                                                     float pole_pairs)
 {
@@ -133,15 +144,16 @@ static inline void esp_foc_inverse_clarke_transform (float v_ab[2],
     *v_w = c;
 }
 
-static inline void esp_foc_limit_voltage(float *v_alpha, float *v_beta, float v_dc)
+static inline void esp_foc_limit_voltage(float *v_d, float *v_q, float v_dc)
 {
     float v_max = v_dc;
-    float v_mag = esp_foc_sqrtf((*v_alpha) * (*v_alpha) + (*v_beta) * (*v_beta));
+    float v_max_sq = v_dc * v_dc;
+    float v_mag_sq = (*v_d) * (*v_d) + (*v_q) * (*v_q);
 
-    if (v_mag > v_max) {
-        float scale = v_max / v_mag;
-        *v_alpha *= scale;
-        *v_beta *= scale;
+    if (v_mag_sq > v_max_sq && v_mag_sq > 1e-12f) {
+        float scale = v_max * esp_foc_rsqrt_fast(v_mag_sq);
+        *v_d *= scale;
+        *v_q *= scale;
     }
 }
 

@@ -60,11 +60,6 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
-#ifdef CONFIG_ESP_FOC_CUSTOM_MATH
-    extern void esp_foc_fast_init_sqrt_table(void);
-    esp_foc_fast_init_sqrt_table();
-#endif
-
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
         gpio_config_t drv_en_config = {
             .mode = GPIO_MODE_OUTPUT,
@@ -83,12 +78,13 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->dc_link_voltage =
         axis->inverter_driver->get_dc_link_voltage(axis->inverter_driver);
 
-#ifdef CONFIG_ESP_FOC_USE_SINE_PWM
-    axis->biased_dc_link_voltage = axis->dc_link_voltage / 4.0f;
+    axis->biased_dc_link_voltage = axis->dc_link_voltage / 2.0f;
     axis->dc_link_to_normalized = 1.0f / axis->dc_link_voltage;
+
+#ifdef CONFIG_ESP_FOC_USE_SINE_PWM
+    axis->max_voltage = axis->dc_link_voltage / 2.0f;
 #else
-    axis->biased_dc_link_voltage = (axis->dc_link_voltage * ESP_FOC_SQRT3_TWO) / 2.0f;
-    axis->dc_link_to_normalized = 1.0f / (axis->dc_link_voltage * ESP_FOC_SQRT3_TWO);
+    axis->max_voltage = axis->dc_link_voltage / ESP_FOC_CLARKE_PARK_SQRT3;
 #endif
     axis->inverter_driver->set_voltages(axis->inverter_driver, 0.0, 0.0, 0.0);
 
@@ -252,7 +248,8 @@ IRAM_ATTR esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     axis->inverter_driver->enable(axis->inverter_driver);
     esp_foc_sleep_ms(500);
 
-    esp_foc_modulate_dq_voltage(e_sin, e_cos, 1.0f, 0.0f,&a, &b, &u, &v,&w, axis->biased_dc_link_voltage,
+    esp_foc_modulate_dq_voltage(e_sin, e_cos, 1.0f, 0.0f,&a, &b, &u, &v,&w, axis->max_voltage,
+                            axis->biased_dc_link_voltage,
                             axis->dc_link_to_normalized);
 
     axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);

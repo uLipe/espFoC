@@ -8,7 +8,6 @@ set(srcs    "source/motor_control/esp_foc_core.c"
             "source/motor_control/esp_foc_scope.c"
             "source/motor_control/esp_foc_consts.c"
             "source/motor_control/esp_foc_sine_cosine.c"
-            "source/motor_control/esp_foc_sqrtf.c"
             "source/motor_control/observers/esp_foc_pll_observer.c"
             "source/motor_control/observers/esp_foc_simu_observer.c")
 
