@@ -29,7 +29,7 @@
 #define ESP_FOC_VELOCITY_PID_DOWNSAMPLING  1
 #define ESP_FOC_POSITION_PID_DOWNSAMPLING  10
 #define ESP_FOC_ESTIMATORS_DOWNSAMPLING    4
-#define ESP_FOC_LOW_SPEED_DOWNSAMPLING     20
+#define ESP_FOC_LOW_SPEED_DOWNSAMPLING     10
 #define ESP_FOC_PWM_RATE_HZ                20000
 #define ESP_FOC_ISENSOR_CALIBRATION_ROUNDS 100
 #define ESP_FOC_PLL_BANDWIDTH_HZ 50.0f
@@ -96,11 +96,3 @@ void do_current_mode_sensored_low_speed_loop(void *arg);
 /* current mode sensorless core controllers */
 void do_current_mode_sensorless_high_speed_loop(void *arg);
 void do_current_mode_sensorless_low_speed_loop(void *arg);
-
-/* Slow mode current control, runs everything from the thread */
-void do_slow_current_mode_sensored_high_speed_loop(void *arg);
-void do_slow_current_mode_sensored_low_speed_loop(void *arg);
-
-/* Slow mode voltage control, runs everything from the thread */
-void do_slow_voltage_mode_sensored_high_speed_loop(void *arg);
-void do_slow_voltage_mode_sensored_low_speed_loop(void *arg);
