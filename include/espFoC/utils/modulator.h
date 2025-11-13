@@ -33,6 +33,7 @@ static inline void esp_foc_modulate_dq_voltage (float sin,
                                             float *v_u,
                                             float *v_v,
                                             float *v_w,
+                                            float vmax,
                                             float bias,
                                             float normalization_scale)
 {
@@ -41,22 +42,20 @@ static inline void esp_foc_modulate_dq_voltage (float sin,
 
 #ifdef CONFIG_ESP_FOC_USE_SINE_PWM
     float a,b,c;
-
+    esp_foc_limit_voltage(&dq_frame[0], &dq_frame[1], vmax);
     esp_foc_inverse_park_transform(sin, cos, dq_frame, &ab_frame[0], &ab_frame[1]);
-    *v_alpha = ab_frame[0];
-    *v_beta = ab_frame[1];
     esp_foc_inverse_clarke_transform(ab_frame, &a, &b, &c);
-    *v_u = (a + bias) * normalization_scale;
-    *v_v = (b + bias) * normalization_scale;
-    *v_w = (c + bias) * normalization_scale;
-#elif defined(CONFIG_ESP_FOC_USE_SPACE_VECTOR_PWM)
-    esp_foc_inverse_park_transform(sin, cos, dq_frame, &ab_frame[0], &ab_frame[1]);
+    *v_u = 0.5f + (a * normalization_scale);
+    *v_v = 0.5f + (b * normalization_scale);
+    *v_w = 0.5f + (c * normalization_scale);
     *v_alpha = ab_frame[0];
     *v_beta = ab_frame[1];
-    esp_foc_limit_voltage(&ab_frame[0], &ab_frame[1], 2.0f * bias);
-    ab_frame[0] *= normalization_scale;
-    ab_frame[1] *= normalization_scale;
-    esp_foc_svm_set(ab_frame[0], ab_frame[1], v_u, v_v, v_w);
+#elif defined(CONFIG_ESP_FOC_USE_SPACE_VECTOR_PWM)
+    esp_foc_limit_voltage(&dq_frame[0], &dq_frame[1], vmax);
+    esp_foc_inverse_park_transform(sin, cos, dq_frame, &ab_frame[0], &ab_frame[1]);
+    esp_foc_svm_set(ab_frame[0], ab_frame[1], normalization_scale ,v_u, v_v, v_w);
+    *v_alpha = ab_frame[0];
+    *v_beta = ab_frame[1];
 #else
     #error "Modulation not supported!"
 #endif

@@ -51,12 +51,12 @@ IRAM_ATTR static void inverter_isr(void *data)
     }
 }
 
-IRAM_ATTR void do_current_mode_sensored_high_speed_loop(void *arg)
+IRAM_ATTR void do_current_mode_sensorless_high_speed_loop(void *arg)
 {
     /* Samples already buffered nothing to do here */
 }
 
-IRAM_ATTR void do_current_mode_sensored_low_speed_loop(void *arg)
+IRAM_ATTR void do_current_mode_sensorless_low_speed_loop(void *arg)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
     isensor_values_t ival;
@@ -84,7 +84,7 @@ IRAM_ATTR void do_current_mode_sensored_low_speed_loop(void *arg)
 
     axis->isensor_driver->set_isensor_callback(axis->isensor_driver,
         axis->high_speed_loop_cb,
-        &current_timestamp);
+        axis);
 
     while(1) {
         esp_foc_wait_notifier();
@@ -97,7 +97,7 @@ IRAM_ATTR void do_current_mode_sensored_low_speed_loop(void *arg)
         axis->i_v = ival.iv_axis_0;
         axis->i_w = ival.iw_axis_0;
 
-        /* After picking the previous sample start the new converstion immediately
+        /* After picking the previous sample start the new conversion immediately
          * (it will be used on the next loop step )
          */
         axis->isensor_driver->sample_isensors(axis->isensor_driver);
@@ -134,6 +134,7 @@ IRAM_ATTR void do_current_mode_sensored_low_speed_loop(void *arg)
                         &axis->u_u.raw,
                         &axis->u_v.raw,
                         &axis->u_w.raw,
+                        axis->max_voltage,
                         axis->biased_dc_link_voltage,
                         axis->dc_link_to_normalized);
 
@@ -158,7 +159,7 @@ IRAM_ATTR void do_current_mode_sensored_low_speed_loop(void *arg)
         if(axis->isensor_driver != NULL) {
             int not_conv = axis->current_observer->update(axis->current_observer, &in);
             if(!not_conv) {
-                //TODO perform swap to current observer.
+                axis->observer = axis->current_observer;
             }
         }
 

@@ -119,6 +119,7 @@ IRAM_ATTR void do_voltage_mode_sensored_low_speed_loop(void *arg)
                         &axis->u_u.raw,
                         &axis->u_v.raw,
                         &axis->u_w.raw,
+                        axis->max_voltage,
                         axis->biased_dc_link_voltage,
                         axis->dc_link_to_normalized);
 
@@ -129,7 +130,7 @@ IRAM_ATTR void do_voltage_mode_sensored_low_speed_loop(void *arg)
 
 
         /* call the dummy high speed loop just to keep the compiler quiet */
-        do_slow_voltage_mode_sensored_high_speed_loop(axis);
+        do_voltage_mode_sensored_high_speed_loop(axis);
 
         #ifdef CONFIG_ESP_FOC_SCOPE
         esp_foc_get_control_data(axis, &control_data);
