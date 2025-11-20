@@ -31,8 +31,8 @@
 #include "driver/gpio.h"
 #endif
 #include "espFoC/esp_foc.h"
-#include "espFoC/esp_foc_simu_observer.h"
-#include "espFoC/esp_foc_pll_observer.h"
+#include "espFoC/observer/esp_foc_simu_observer.h"
+#include "espFoC/observer/esp_foc_pll_observer.h"
 
 #define ESP_FOC_DEBUG_PIN                  22
 static const char * tag = "ESP_FOC_CONTROL";

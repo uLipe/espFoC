@@ -61,12 +61,7 @@ static inline float esp_foc_cosine(float x)
 
 static inline float esp_foc_sqrtf(float x)
 {
-#ifdef CONFIG_ESP_FOC_CUSTOM_MATH
-    extern float esp_foc_fast_sqrt(float x);
-    return esp_foc_fast_sqrt(x);
-#else
     return sqrtf(x);
-#endif
 }
 
 /* Fast rsqrt (Quake-style), then one NR iteration for accuracy */

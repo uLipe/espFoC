@@ -28,7 +28,7 @@
 #include <sys/cdefs.h>
 #include "esp_attr.h"
 #include "esp_log.h"
-#include "espFoC/esp_foc_simu_observer.h"
+#include "espFoC/observer/esp_foc_simu_observer.h"
 
 #define SIMUL_FLUX_LINKAGE 0.015f // Lambda_m (Weber)
 #define SIMUL_INERTIA 0.00024f // J (kg⋅m²)

@@ -28,7 +28,7 @@
 #include <sys/cdefs.h>
 #include "esp_attr.h"
 #include "esp_log.h"
-#include "espFoC/esp_foc_pll_observer.h"
+#include "espFoC/observer/esp_foc_pll_observer.h"
 
 #define PLL_OBSERVER_CONVERGE_WAIT_TIME  5.0f
 #define SIMUL_FLUX_LINKAGE 0.015f // Lambda_m (Weber)
