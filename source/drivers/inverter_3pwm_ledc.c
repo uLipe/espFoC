@@ -58,8 +58,6 @@ static const char *TAG = "INVERTER_LEDC";
 
 IRAM_ATTR static void ledc_isr(void *arg)
 {
-    esp_foc_fpu_isr_enter();
-
     esp_foc_ledc_inverter *obj = (esp_foc_ledc_inverter *)arg;
 
     obj->hw->int_clr.val = (LEDC_LSTIMER0_OVF_INT_ENA |
@@ -70,8 +68,6 @@ IRAM_ATTR static void ledc_isr(void *arg)
     if(obj->notifier) {
         obj->notifier(obj->arg);
     }
-
-    esp_foc_fpu_isr_leave();
 }
 
 /* This function is required because the ledc driver does not support update from

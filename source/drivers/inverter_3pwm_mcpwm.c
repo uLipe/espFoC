@@ -72,15 +72,12 @@ static const char *TAG = "INVERTER_MCPWM";
 
 static IRAM_ATTR bool inverter_isr(mcpwm_timer_handle_t timer, const mcpwm_timer_event_data_t *edata, void *user_data)
 {
-    esp_foc_fpu_isr_enter();
-
     esp_foc_mcpwm_inverter_t *inverter = (esp_foc_mcpwm_inverter_t *)user_data;
 
     if(inverter->notifier) {
         inverter->notifier(inverter->arg);
     }
 
-    esp_foc_fpu_isr_leave();
     return false;
 }
 
