@@ -186,7 +186,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                 .phase_resistance = settings.motor_resistance,
                 .phase_inductance = settings.motor_inductance,
                 .pole_pairs = (float)settings.motor_pole_pairs,
-                .dt = axis->dt * ESP_FOC_ESTIMATORS_DOWNSAMPLING
+                .dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING
             }
         );
 
@@ -208,7 +208,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
             .flux_linkage = settings.flux_linkage,
             .inertia = settings.inertia,
             .friction = settings.friction,
-            .dt = axis->dt * ESP_FOC_ESTIMATORS_DOWNSAMPLING
+            .dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING
         });
 
         axis->high_speed_loop_cb = do_current_mode_sensorless_high_speed_loop;
