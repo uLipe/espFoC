@@ -70,11 +70,8 @@ IRAM_ATTR void do_current_mode_sensorless_low_speed_loop(void *arg)
 
     ESP_LOGI(tag,"Starting the current mode sensored low speed loop");
 
-    axis->rotor_shaft_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
-    axis->rotor_position =
-        axis->rotor_shaft_ticks * axis->shaft_ticks_to_radians_ratio * axis->natural_direction;
-    axis->rotor_position_prev = axis->rotor_position;
-    axis->current_speed = 0.0f;
+    axis->rotor_position = axis->observer->get_angle(axis->observer);
+    axis->current_speed = axis->observer->get_speed(axis->observer);
 
     ESP_LOGI(tag,"Starting current mode sensored high speed loop");
 
@@ -102,28 +99,35 @@ IRAM_ATTR void do_current_mode_sensorless_low_speed_loop(void *arg)
          */
         axis->isensor_driver->sample_isensors(axis->isensor_driver);
 
-        axis->rotor_position = axis->observer->get_angle(axis->observer);
 
+        axis->rotor_position = axis->observer->get_angle(axis->observer);
+        axis->rotor_elec_angle = axis->rotor_position;
         axis->current_speed = axis->observer->get_speed(axis->observer);
         esp_foc_position_control_loop(axis);
         esp_foc_velocity_control_loop(axis);
-
 
         /* Current control stuff */
         float e_sin = esp_foc_sine(axis->rotor_elec_angle);
         float e_cos = esp_foc_cosine(axis->rotor_elec_angle);
 
+#ifdef CONFIG_ESP_FOC_OPEN_LOOP_ONLY
+        axis->u_d.raw = axis->target_u_d.raw;
+        axis->u_q.raw = axis->target_u_q.raw;
+
+#else
+
         esp_foc_get_dq_currents(e_sin,
-            e_cos,
-            axis->i_u,
-            axis->i_v,
-            axis->i_w,
-            &axis->i_alpha.raw,
-            &axis->i_beta.raw,
-            &axis->i_q.raw,
-            &axis->i_d.raw);
+                        e_cos,
+                        axis->i_u,
+                        axis->i_v,
+                        axis->i_w,
+                        &axis->i_alpha.raw,
+                        &axis->i_beta.raw,
+                        &axis->i_q.raw,
+                        &axis->i_d.raw);
 
         esp_foc_current_control_loop(axis);
+#endif
 
         esp_foc_modulate_dq_voltage(e_sin,
                         e_cos,
@@ -146,9 +150,9 @@ IRAM_ATTR void do_current_mode_sensorless_low_speed_loop(void *arg)
         /* Observer update */
         esp_foc_observer_inputs_t in = {
             .i_dq[0] = axis->i_d.raw,
-            .i_dq[1]  =  axis->i_q.raw,
+            .i_dq[1] = axis->i_q.raw,
             .u_dq[0] = axis->u_d.raw,
-            .u_dq[1]  =  axis->u_q.raw,
+            .u_dq[1] = axis->u_q.raw,
             .u_alpha_beta[0] = axis->u_alpha.raw,
             .u_alpha_beta[1] = axis->u_beta.raw,
             .i_alpha_beta[0] = axis->i_alpha.raw,
@@ -156,12 +160,15 @@ IRAM_ATTR void do_current_mode_sensorless_low_speed_loop(void *arg)
         };
 
         axis->open_loop_observer->update(axis->open_loop_observer, &in);
+
+#ifndef CONFIG_ESP_FOC_OPEN_LOOP_ONLY
         if(axis->isensor_driver != NULL) {
             int not_conv = axis->current_observer->update(axis->current_observer, &in);
             if(!not_conv) {
                 axis->observer = axis->current_observer;
             }
         }
+#endif
 
 #ifdef CONFIG_ESP_FOC_SCOPE
         esp_foc_get_control_data(axis, &control_data);
