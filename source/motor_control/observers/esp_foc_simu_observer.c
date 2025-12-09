@@ -62,7 +62,7 @@ IRAM_ATTR static int simu_observer_update(esp_foc_observer_t *self, esp_foc_obse
 
     obj->omega += acceleration * obj->dt;
     obj->angle += obj->omega * obj->dt;
-    esp_foc_normalize_angle(obj->angle * obj->pp);
+    obj->angle = esp_foc_normalize_angle(obj->angle);
 
     return 0;
 }

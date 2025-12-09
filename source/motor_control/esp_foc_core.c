@@ -34,6 +34,8 @@
 #include "espFoC/observer/esp_foc_simu_observer.h"
 #include "espFoC/observer/esp_foc_pll_observer.h"
 
+#define ESP_FOC_DEBUG_PIN                  22
+
 static const char * tag = "ESP_FOC_CONTROL";
 
 IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
@@ -184,7 +186,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                 .phase_resistance = settings.motor_resistance,
                 .phase_inductance = settings.motor_inductance,
                 .pole_pairs = (float)settings.motor_pole_pairs,
-                .dt = axis->dt,
+                .dt = axis->dt * ESP_FOC_ESTIMATORS_DOWNSAMPLING
             }
         );
 
