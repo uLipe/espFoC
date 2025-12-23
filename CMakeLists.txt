@@ -15,6 +15,7 @@ set(includes "include" "source/drivers")
 
 list(APPEND srcs    "source/drivers/inverter_3pwm_ledc.c"
                     "source/drivers/inverter_3pwm_mcpwm.c"
+                    "source/drivers/inverter_6pwm_mcpwm.c"
                     "source/drivers/rotor_sensor_as5600.c"
                     "source/drivers/rotor_sensor_pcnt.c"
                     "source/drivers/current_sensor_adc.c"
