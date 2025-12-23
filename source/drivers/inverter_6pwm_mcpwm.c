@@ -273,12 +273,12 @@ esp_foc_inverter_t *inverter_6pwm_mpcwm_new(int gpio_u_high, int gpio_u_low,
     const uint32_t dt_ticks = deadtime_us_to_ticks(MCPWM_DEADTIME_US);
     mcpwm_dead_time_config_t dt_cfg = {
         .posedge_delay_ticks = dt_ticks,
-        .negedge_delay_ticks = dt_ticks,
+        .negedge_delay_ticks = 0,
         .flags.invert_output = false,
     };
 
     for (int i = 0; i < 3; i++) {
-        esp_err_t err = mcpwm_generator_set_dead_time(obj->gen_high[i], obj->gen_low[i], &dt_cfg);
+        esp_err_t err = mcpwm_generator_set_dead_time(obj->gen_high[i], obj->gen_high[i], &dt_cfg);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "Dead-time config failed on phase %d (err=%d). Continuing without dead-time.", i, (int)err);
         }
