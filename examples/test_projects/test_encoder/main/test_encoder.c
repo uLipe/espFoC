@@ -21,59 +21,37 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+#include "esp_log.h"
+#include "esp_err.h"
 
-#include <stdint.h>
-#include <math.h>
-#include "esp_attr.h"
+#include "espFoC/rotor_sensor_as5600.h"
+#include "espFoC/esp_foc.h"
 
-#define SQRT_TABLE_BITS 12
-#define SQRT_TABLE_SIZE (1 << SQRT_TABLE_BITS)
+static const char *TAG = "esp-foc-example";
 
-static float sqrt_table[SQRT_TABLE_SIZE];
+static esp_foc_rotor_sensor_t *sensor;
 
-void esp_foc_fast_init_sqrt_table(void)
+static void initialize_foc_drivers(void)
 {
-    for (int i = 0; i < SQRT_TABLE_SIZE; i++) {
-        float x = 1.0f + 3.0f * ((float)i / (SQRT_TABLE_SIZE - 1));
-        sqrt_table[i] = sqrtf(x);
+    sensor = rotor_sensor_as5600_new(
+        CONFIG_FOC_ENCODER_SDA_PIN,
+        CONFIG_FOC_ENCODER_SCL_PIN,
+        0
+    );
+
+    if(sensor == NULL) {
+        ESP_LOGE(TAG, "failed to create the inverter driver, aborting!");
+        ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
+        abort();
     }
 }
 
-IRAM_ATTR float esp_foc_fast_sqrt(float x)
+void app_main(void)
 {
-    if (x <= 0.0f) {
-        return 0.0f;
+    initialize_foc_drivers();
+
+    while(1) {
+        esp_foc_sleep_ms(100);
+        ESP_LOGI(TAG, "Turn the motor axis by Hand! Encoder reding raw:  %f", sensor->read_counts(sensor));
     }
-
-    union {
-        float f;
-        uint32_t i;
-    } u = { x };
-
-    int e = (u.i >> 23) & 0xff;
-    int exponent = e - 127;
-    float m = 1.0f + (u.i & 0x7fffff) / 8388608.0f;
-    int odd = exponent & 1;
-
-    if (odd) {
-        m *= 2.0f;
-    }
-
-    float t = (m - 1.0f) / 3.0f;
-    float pos = t * (SQRT_TABLE_SIZE - 1);
-    int index = (int) pos;
-
-    if (index >= SQRT_TABLE_SIZE - 1) {
-        index = SQRT_TABLE_SIZE - 2;
-    }
-
-    float frac = pos - index;
-    float sqrt_m = sqrt_table[index] + frac * (sqrt_table[index + 1] - sqrt_table[index]);
-
-    if (odd) {
-        sqrt_m *= 0.707106781186547524f;
-    }
-
-    int new_exp = exponent >> 1;
-    return ldexpf(sqrt_m, new_exp);
 }

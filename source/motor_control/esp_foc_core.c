@@ -31,8 +31,10 @@
 #include "driver/gpio.h"
 #endif
 #include "espFoC/esp_foc.h"
-#include "espFoC/esp_foc_simu_observer.h"
-#include "espFoC/esp_foc_pll_observer.h"
+#include "espFoC/observer/esp_foc_simu_observer.h"
+#include "espFoC/observer/esp_foc_pll_observer.h"
+
+#define ESP_FOC_DEBUG_PIN                  22
 
 static const char * tag = "ESP_FOC_CONTROL";
 
@@ -55,20 +57,10 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->enable_torque_control = settings.enable_torque_control;
     axis->is_sensorless_mode = (rotor != NULL) ? false : true;
 
-    if(!settings.is_fast_mode && axis->is_sensorless_mode) {
-        ESP_LOGE(tag, "Sensorless mode is not supported in slow control mode");
-        return ESP_FOC_ERR_INVALID_ARG;
-    }
-
     if(isensor == NULL && axis->enable_torque_control) {
         ESP_LOGE(tag, "Current sensor is mandatory when torque control");
         return ESP_FOC_ERR_INVALID_ARG;
     }
-
-#ifdef CONFIG_ESP_FOC_CUSTOM_MATH
-    extern void esp_foc_fast_init_sqrt_table(void);
-    esp_foc_fast_init_sqrt_table();
-#endif
 
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
         gpio_config_t drv_en_config = {
@@ -88,12 +80,13 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->dc_link_voltage =
         axis->inverter_driver->get_dc_link_voltage(axis->inverter_driver);
 
-#ifdef CONFIG_ESP_FOC_USE_SINE_PWM
-    axis->biased_dc_link_voltage = axis->dc_link_voltage / 4.0f;
+    axis->biased_dc_link_voltage = axis->dc_link_voltage / 2.0f;
     axis->dc_link_to_normalized = 1.0f / axis->dc_link_voltage;
+
+#ifdef CONFIG_ESP_FOC_USE_SINE_PWM
+    axis->max_voltage = axis->dc_link_voltage / 2.0f;
 #else
-    axis->biased_dc_link_voltage = (axis->dc_link_voltage * ESP_FOC_SQRT3_TWO) / 2.0f;
-    axis->dc_link_to_normalized = 1.0f / (axis->dc_link_voltage * ESP_FOC_SQRT3_TWO);
+    axis->max_voltage = axis->dc_link_voltage / ESP_FOC_CLARKE_PARK_SQRT3;
 #endif
     axis->inverter_driver->set_voltages(axis->inverter_driver, 0.0, 0.0, 0.0);
 
@@ -142,11 +135,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     esp_foc_pid_reset(&axis->velocity_controller);
     esp_foc_low_pass_filter_init(&axis->velocity_filter, 1.0f);
 
-    if(settings.is_fast_mode){
-        current_control_analog_bandwith = (2.0f * M_PI * (inverter->get_inverter_pwm_rate(inverter))) / 100.0f;
-    } else {
-        current_control_analog_bandwith = (2.0f * M_PI * (inverter->get_inverter_pwm_rate(inverter) / ESP_FOC_LOW_SPEED_DOWNSAMPLING)) / 100.0f;
-    }
+    current_control_analog_bandwith = (2.0f * M_PI * (inverter->get_inverter_pwm_rate(inverter) / ESP_FOC_LOW_SPEED_DOWNSAMPLING)) / 100.0f;
 
     axis->torque_controller[0].kp = settings.motor_inductance * current_control_analog_bandwith;
     axis->torque_controller[0].ki = settings.motor_resistance * current_control_analog_bandwith;
@@ -182,22 +171,12 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
             axis->rotor_sensor_driver->get_counts_per_revolution(axis->rotor_sensor_driver);
         ESP_LOGI(tag, "Shaft to ticks ratio: %f", axis->shaft_ticks_to_radians_ratio);
 
-        if(settings.is_fast_mode) {
-            if(axis->enable_torque_control) {
-                axis->high_speed_loop_cb = do_current_mode_sensored_high_speed_loop;
-                axis->low_speed_loop_cb = do_current_mode_sensored_low_speed_loop;
-            } else {
-                axis->high_speed_loop_cb = do_voltage_mode_sensored_high_speed_loop;
-                axis->low_speed_loop_cb = do_voltage_mode_sensored_low_speed_loop;
-            }
+        if(axis->enable_torque_control) {
+            axis->high_speed_loop_cb = do_current_mode_sensored_high_speed_loop;
+            axis->low_speed_loop_cb = do_current_mode_sensored_low_speed_loop;
         } else {
-            if(axis->enable_torque_control) {
-                axis->high_speed_loop_cb = do_slow_current_mode_sensored_high_speed_loop;
-                axis->low_speed_loop_cb = do_slow_current_mode_sensored_low_speed_loop;
-            } else {
-                axis->high_speed_loop_cb = do_slow_voltage_mode_sensored_high_speed_loop;
-                axis->low_speed_loop_cb = do_slow_voltage_mode_sensored_low_speed_loop;
-            }
+            axis->high_speed_loop_cb = do_voltage_mode_sensored_high_speed_loop;
+            axis->low_speed_loop_cb = do_voltage_mode_sensored_low_speed_loop;
         }
 
     } else {
@@ -207,7 +186,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                 .phase_resistance = settings.motor_resistance,
                 .phase_inductance = settings.motor_inductance,
                 .pole_pairs = (float)settings.motor_pole_pairs,
-                .dt = axis->dt,
+                .dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING
             }
         );
 
@@ -229,7 +208,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
             .flux_linkage = settings.flux_linkage,
             .inertia = settings.inertia,
             .friction = settings.friction,
-            .dt = axis->dt * ESP_FOC_ESTIMATORS_DOWNSAMPLING
+            .dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING
         });
 
         axis->high_speed_loop_cb = do_current_mode_sensorless_high_speed_loop;
@@ -271,7 +250,8 @@ IRAM_ATTR esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     axis->inverter_driver->enable(axis->inverter_driver);
     esp_foc_sleep_ms(500);
 
-    esp_foc_modulate_dq_voltage(e_sin, e_cos, 1.0f, 0.0f,&a, &b, &u, &v,&w, axis->biased_dc_link_voltage,
+    esp_foc_modulate_dq_voltage(e_sin, e_cos, 1.0f, 0.0f,&a, &b, &u, &v,&w, axis->max_voltage,
+                            axis->biased_dc_link_voltage,
                             axis->dc_link_to_normalized);
 
     axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);

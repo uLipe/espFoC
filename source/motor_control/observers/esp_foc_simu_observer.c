@@ -28,7 +28,7 @@
 #include <sys/cdefs.h>
 #include "esp_attr.h"
 #include "esp_log.h"
-#include "espFoC/esp_foc_simu_observer.h"
+#include "espFoC/observer/esp_foc_simu_observer.h"
 
 #define SIMUL_FLUX_LINKAGE 0.015f // Lambda_m (Weber)
 #define SIMUL_INERTIA 0.00024f // J (kg⋅m²)
@@ -62,7 +62,7 @@ IRAM_ATTR static int simu_observer_update(esp_foc_observer_t *self, esp_foc_obse
 
     obj->omega += acceleration * obj->dt;
     obj->angle += obj->omega * obj->dt;
-    esp_foc_normalize_angle(obj->angle * obj->pp);
+    obj->angle = esp_foc_normalize_angle(obj->angle);
 
     return 0;
 }

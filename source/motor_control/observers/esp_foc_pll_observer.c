@@ -28,7 +28,7 @@
 #include <sys/cdefs.h>
 #include "esp_attr.h"
 #include "esp_log.h"
-#include "espFoC/esp_foc_pll_observer.h"
+#include "espFoC/observer/esp_foc_pll_observer.h"
 
 #define PLL_OBSERVER_CONVERGE_WAIT_TIME  5.0f
 #define SIMUL_FLUX_LINKAGE 0.015f // Lambda_m (Weber)
@@ -76,14 +76,14 @@ IRAM_ATTR static int pll_observer_update(esp_foc_observer_t *self, esp_foc_obser
     est->omega_mech += acceleration * est->dt;
     est->theta_mech += est->omega_mech * est->dt * est->pp;
 
-    esp_foc_normalize_angle(est->theta_mech);
+    est->theta_mech = esp_foc_normalize_angle(est->theta_mech);
 
     /* Estimate the angle using the motor parameters */
     est->e_alpha = in->u_alpha_beta[0] - est->r * in->i_alpha_beta[0] - est->l * di_alpha_dt;
     est->e_beta = in->u_alpha_beta[1] - est->r * in->i_alpha_beta[1]- est->l * di_beta_dt;
     est->theta_mes = atan2f(est->e_beta, est->e_alpha);
 
-    esp_foc_normalize_angle(est->theta_mes);
+    est->theta_mes = esp_foc_normalize_angle(est->theta_mes);
 
     /* Perform PLL step to filter out the noise and extracts the rotor speed as well*/
     est->theta_error = est->theta_mech - est->theta_est;
@@ -91,7 +91,7 @@ IRAM_ATTR static int pll_observer_update(esp_foc_observer_t *self, esp_foc_obser
     est->omega_est = (est->kp * est->theta_error) + (est->ki * est->integral);
     est->theta_est += est->omega_est * est->dt;
 
-    esp_foc_normalize_angle(est->theta_est);
+    est->theta_est = esp_foc_normalize_angle(est->theta_est);
 
 
     est->i_alpha_prev = in->i_alpha_beta[0];

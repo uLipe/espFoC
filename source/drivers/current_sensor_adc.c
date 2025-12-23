@@ -89,9 +89,6 @@ static bool IRAM_ATTR isensor_adc_done_callback(adc_continuous_handle_t handle, 
     adc_hal_digi_enable(false);
     adc_hal_digi_connect(false);
 
-    esp_foc_fpu_isr_enter();
-    esp_foc_critical_enter();
-
     isensor_adc_t *isensor = (isensor_adc_t *)user_data;
     adc_digi_output_data_t *p = (adc_digi_output_data_t *)edata->conv_frame_buffer;
 
@@ -104,8 +101,6 @@ static bool IRAM_ATTR isensor_adc_done_callback(adc_continuous_handle_t handle, 
         isensor->callback(isensor->user_data);
     }
 
-    esp_foc_critical_leave();
-    esp_foc_fpu_isr_leave();
     return false;
 }
 

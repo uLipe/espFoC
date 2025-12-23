@@ -59,6 +59,10 @@ menu "espFoC Settings"
         bool "output on a pin the time taken to compute espfoc core ops"
         default n
 
+    config ESP_FOC_OPEN_LOOP_ONLY
+        bool "Enable open loop simulated observer on sensorless mode"
+        default n
+
 endmenu
 
 
