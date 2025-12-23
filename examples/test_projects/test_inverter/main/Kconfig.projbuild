@@ -20,4 +20,27 @@ menu "Frerunning FoC example menu"
         range 0 34
         default 14
 
+    config FOC_TEST_6_PWM
+        bool "Enable test for the 6-MCPWM"
+        default n
+
+    config FOC_PWM_UL_PIN
+        int "Gpio number for PWM of phase U low"
+        depends on FOC_TEST_6_PWM
+        range 0 34
+        default 21
+
+    config FOC_PWM_VL_PIN
+        int "Gpio number for PWM of phase V low"
+        range 0 34
+        depends on FOC_TEST_6_PWM
+        default 10
+
+    config FOC_PWM_WL_PIN
+        int "Gpio number for PWM of phase W low"
+        range 0 46
+        depends on FOC_TEST_6_PWM
+        default 11
+
+
 endmenu

@@ -24,8 +24,13 @@
 #include "esp_log.h"
 #include "esp_err.h"
 
-#include "espFoC/inverter_3pwm_mcpwm.h"
 #include "espFoC/esp_foc.h"
+
+#ifdef CONFIG_FOC_TEST_6_PWM
+#include "espFoC/inverter_6pwm_mcpwm.h"
+#else
+#include "espFoC/inverter_3pwm_mcpwm.h"
+#endif
 
 static const char *TAG = "esp-foc-example";
 
@@ -33,7 +38,19 @@ static esp_foc_inverter_t *inverter;
 
 static void initialize_foc_drivers(void)
 {
-
+#ifdef CONFIG_FOC_TEST_6_PWM
+    inverter = inverter_6pwm_mpcwm_new(
+        CONFIG_FOC_PWM_U_PIN,
+        CONFIG_FOC_PWM_UL_PIN,
+        CONFIG_FOC_PWM_V_PIN,
+        CONFIG_FOC_PWM_VL_PIN,
+        CONFIG_FOC_PWM_W_PIN,
+        CONFIG_FOC_PWM_WL_PIN,
+        CONFIG_FOC_PWM_EN_PIN,
+        24.0f,
+        0
+    );
+#else
     inverter = inverter_3pwm_mpcwm_new(
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_V_PIN,
@@ -42,6 +59,7 @@ static void initialize_foc_drivers(void)
         24.0f,
         0
     );
+#endif
 
     if(inverter == NULL) {
         ESP_LOGE(TAG, "failed to create the inverter driver, aborting!");
