@@ -1,100 +1,39 @@
-# espFoC – Vector FOC Controller for PMSM / BLDC Motors on ESP32
+# espFoC
+### Field Oriented Control (FOC) library for PMSM / BLDC motors on ESP32
+
 
 ![Build](https://github.com/uLipe/espFoC/workflows/Build/badge.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ![alt text](doc/images/espfoc_demo.gif)
 
-**espFoC** is a Field-Oriented Control (**FOC**) library for **PMSM / BLDC motors** running on **ESP32 SoCs**. It is distributed as an **ESP-IDF component**, providing a clean and extensible architecture for voltage-mode and current-mode motor control, speed/position loops, and multiple sensor/inverter backends.
+espFoC is a **modular, real-time oriented Field Oriented Control (FOC) library**
+designed for **PMSM and BLDC motors**, targeting the **ESP32 family** using
+**ESP-IDF**.
 
-The goal of espFoC is to provide a **simple, readable, and flexible** FOC engine that can be integrated into research projects.
+The project focuses on:
+- deterministic timing
+- clean separation between control logic and hardware drivers
+- extensibility (inverters, sensors, control strategies)
+- real hardware usage (not simulations)
 
----
-
-## ✨ Features
-
-- **Voltage-mode FOC**
-  Apply direct d/q-axis voltages (`Ud`, `Uq`). The library handles Park/Clarke/SVPWM automatically.
-
-- **Current-mode FOC (Id/Iq control)**
-  When a current sensor backend (`esp_foc_isensor_t`) is provided, the axis runs **current-regulated FOC** using internal PI controllers.
-  This enables higher torque bandwidth, better dynamic performance, and supports closed-loop speed/position control.
-
-- **Closed-loop speed and position control**
-  Configure outer loops through `esp_foc_motor_control_settings_t`.
-
-- **Rotor sensor backends included**
-  - Simulated/open-loop rotor sensor (electrical + mechanical model)
-  - I²C encoder (e.g., AS5600)
-  - Analog encoder
-  - Dummy/no-sensor mode for test projects
-
-- **Inverter driver backends**
-  - 3-PWM inverter using ESP32 MCPWM/LEDC (`inverter_3pwm_mcpwm`)
-
-- **Current sensor backend**
-  - ADC shunt-based measurement (`current_sensor_adc.h`)
-
-- **FOC loop synchronized to PWM**
-  Ensures deterministic sampling and consistent current/angle alignment.
-
-- **Built-in scope & telemetry**
-  Compatible with **Better Serial Plotter** for real-time visualization.
-
-- **ESP-IDF integration**
-  Install directly from the Espressif Component Registry.
+espFoC behaves like a **smart motor drive implemented as a library**.
 
 ---
 
-## 🧱 High-Level Architecture
+## ✨ Key Features
 
-The core of espFoC is the **axis**, represented by:
-
-### `esp_foc_axis_t`
-This object contains:
-- Motor configuration
-- Internal FOC controller
-- Optional current controller
-- Speed and position loops
-- Links to hardware drivers (inverter, current sensor, rotor sensor)
-
-The axis is composed of three independent backends:
-
-### `esp_foc_inverter_t`
-Generates the 3-phase PWM output.
-
-### `esp_foc_rotor_sensor_t`
-Provides electrical/mechanical angle and speed.
-
-### `esp_foc_isensor_t` (optional)
-Provides phase current samples for **current-mode control**.
-If not provided, the axis runs in **voltage-mode**.
-
-### Configuration structure:
-#### `esp_foc_motor_control_settings_t`
-Includes:
-- Motor parameters (pole pairs, direction)
-- Current-loop gains (if in current mode)
-- Speed and position controller gains
-- Downsampling rates
-- Output limits
-
----
-
-## 📚 Examples
-
-All examples can be created directly via the Espressif Component Registry:
-
-| Example          | Description                                                                 |
-|------------------|-----------------------------------------------------------------------------|
-| `open_loop`      | Open-loop voltage FOC using the simulated rotor sensor.                     |
-| `current_control`| **Current-mode FOC** using ADC shunts and simulated rotor sensor.           |
-| `simple_velocity`| Basic speed loop using a 3-PWM inverter + analog encoder.                   |
-| `simple_servo`   | Closed-loop **position** control using I²C encoder.                         |
-| `speed_control`  | Closed-loop **speed** control using I²C encoder.                            |
-| `test_project`   | Testbench for voltage and current FOC using simulated rotor sensor.         |
-
-For micro-ROS integration, see `microROS_FoC`.
+- Voltage-mode FOC (open-loop and sensored)
+- Current-mode FOC (Id / Iq) using ADC shunt sensing
+- Speed and position control loops
+- Open-loop operation with observer support
+- Modular driver architecture:
+  - Inverters (3-PWM, 6-PWM MCPWM)
+  - Rotor sensors (encoders, observers, open-loop)
+  - Current sensors (ADC shunt)
+- Hardware-synchronized PWM loop
+- Dead-time insertion using MCPWM hardware
+- Designed for **ESP-IDF v5+**
 
 ---
 
@@ -133,31 +72,179 @@ idf.py build flash monitor
 
 ---
 
-## 🌪️ Minimal Open-Loop Voltage-Mode Example
+## 🧠 Architectural Overview
+
+![Wiring](/doc/images/wiring.png)
+
+espFoC is built around a **motor axis abstraction**.
+
+Each axis is composed of:
+- one **inverter driver**
+- one **rotor sensor** (optional for open-loop)
+- one **current sensor** (optional)
+- one **control strategy**
+
+```
+
+Application
+|
+v
+esp_foc_axis
+|
++-- inverter (PWM generation)
++-- rotor sensor (position / speed)
++-- current sensor (Id / Iq)
++-- control strategy (voltage / current / speed / position)
+
+```
+
+This design allows mixing and matching hardware blocks without
+changing the control core.
+
+---
+
+## ⚙️ Control Modes
+
+### Voltage Mode
+- Direct control of Ud / Uq
+- Supports:
+  - open-loop operation
+  - sensored operation
+- Commonly used for:
+  - motor bring-up
+  - observer initialization
+  - simple control applications
+
+### Current Mode
+- Closed-loop Id / Iq control
+- Requires current sensor
+- Enables:
+  - torque control
+  - robust speed control
+  - position control
+
+### Speed & Position Control
+- Implemented as outer control loops
+- Executed deterministically inside espFoC
+- Applications only provide setpoints
+
+---
+
+## 🔌 Inverter Drivers
+
+### 3-PWM Inverters
+- LEDC based
+- MCPWM based
+- Single output per phase
+- Suitable for integrated power stages
+
+### 6-PWM MCPWM Inverter
+- Complementary outputs per phase (high-side / low-side)
+- Hardware dead-time insertion
+- Suitable for:
+  - discrete MOSFET bridges
+  - external gate drivers
+
+Dead-time is handled **in hardware** using the MCPWM peripheral and is
+configured conservatively by default.
+
+> ⚠️ Dead-time configuration assumes complementary outputs and appropriate
+> external power stage protection.
+
+---
+
+## 📐 Rotor Sensors
+
+Supported rotor sensing methods include:
+- Open-loop (no sensor)
+- Incremental encoders
+- Magnetic encoders (e.g. AS5600)
+- Observer-based estimation
+
+Rotor sensors are implemented as pluggable drivers and can be replaced
+without modifying the control logic.
+
+---
+
+## ⚡ Current Sensing
+
+espFoC supports **ADC shunt current sensing**:
+- Single or multi-shunt configurations
+- Synchronized with PWM events
+- Used for:
+  - current-mode FOC
+  - observer feedback
+  - protection mechanisms
+
+---
+
+## ⏱️ Real-Time Design
+
+espFoC is designed around **hardware-driven timing**:
+
+- PWM timer drives the control loop
+- ADC sampling is synchronized to PWM
+- High-speed ISR captures timestamps and samples
+- Control computation runs in a deterministic task
+
+This architecture minimizes jitter and ensures stable motor behavior.
+
+---
+
+## 🧪 Examples
+
+The repository includes multiple examples demonstrating:
+- Open-loop voltage control
+- Sensored voltage mode
+- Speed and position control
+- Current-mode FOC
+- Observer usage
+- Inverter and sensor bring-up
+
+Examples are located in the `examples/` directory.
+
+---
+
+## 🚀 Sample Code
+
+Below is a minimal example showing how to initialize and run espFoC and drive the
+target motor in **sensored voltage mode** using:
+
+- MCPWM inverter
+- rotor sensor
+- optional current sensor
 
 ```c
 #include "esp_log.h"
 #include "esp_err.h"
 
-#include "espFoC/rotor_sensor_open_loop.h"
+#include "espFoC/rotor_sensor_as5600.h"
 #include "espFoC/inverter_3pwm_mcpwm.h"
+#include "espFoC/current_sensor_adc.h"
 #include "espFoC/esp_foc.h"
 
 static const char *TAG = "esp-foc-example";
 
-static esp_foc_inverter_t     *inverter;
-static esp_foc_rotor_sensor_t *sensor;
-static esp_foc_axis_t          axis;
+static esp_foc_inverter_t *inverter;
+static esp_foc_inverter_t *inverter;
+static esp_foc_isensor_t  *shunts;
 
+static esp_foc_rotor_sensor_t *sensor;
+static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
-    .downsampling_position_rate = 0,
-    .downsampling_speed_rate    = 0,
-    .motor_pole_pairs           = 4,
-    .natural_direction          = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
+    .motor_pole_pairs = 4,
+    .velocity_control_settings.kp = 1.0f,
+    .velocity_control_settings.ki = 0.0f,
+    .velocity_control_settings.kd = 0.0f,
+    .velocity_control_settings.integrator_limit = 100.0f,
+    .velocity_control_settings.max_output_value = 4.0f, //conservative setpoint to the current controller
+    .torque_control_settings[0].max_output_value = 6.0f, //Uses the max driver voltage allowed as limit
+    .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
 };
 
 static void initialize_foc_drivers(void)
 {
+
     inverter = inverter_3pwm_mpcwm_new(
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_V_PIN,
@@ -167,102 +254,106 @@ static void initialize_foc_drivers(void)
         0
     );
 
-    sensor = rotor_sensor_open_loop_new(
-        1.5f,
-        0.012f,
-        &axis.target_u_q.raw,
-        &axis.dt
+    if(inverter == NULL) {
+        ESP_LOGE(TAG, "failed to create the inverter driver, aborting!");
+        ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
+        abort();
+    }
+
+    sensor = rotor_sensor_as5600_new(
+        CONFIG_FOC_ENCODER_SDA_PIN,
+        CONFIG_FOC_ENCODER_SCL_PIN,
+        0
     );
+
+    if(sensor == NULL) {
+        ESP_LOGE(TAG, "failed to create the inverter driver, aborting!");
+        ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
+        abort();
+    }
+
+    esp_foc_isensor_adc_config_t shunt_cfg = {
+        .axis_channels = {ADC_CHANNEL_7, ADC_CHANNEL_6},
+        .amp_gain = 50.0f,
+        .shunt_resistance = 0.01f,
+        .number_of_channels = 2,
+    };
+
+    shunts = isensor_adc_new(&shunt_cfg);
+    if(sensor == NULL) {
+        ESP_LOGE(TAG, "failed to create the shunt sensor driver, aborting!");
+        ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
+        abort();
+    }
 }
 
 void app_main(void)
 {
-    esp_foc_q_voltage uq = { .raw = 5.0f };
+    esp_foc_control_data_t control_data;
+    esp_foc_q_voltage uq = {.raw = -6.0f};
+
+    ESP_LOGI(TAG, "Initializing the esp foc motor controller!");
 
     initialize_foc_drivers();
 
-    esp_foc_initialize_axis(&axis, inverter, sensor, NULL, settings);
+    esp_foc_initialize_axis(
+        &axis,
+        inverter,
+        sensor,
+        shunts,
+        settings
+    );
+
     esp_foc_align_axis(&axis);
     esp_foc_run(&axis);
 
-    esp_foc_set_target_voltage(&axis, uq, (esp_foc_d_voltage){ .raw = 0.0f });
+    /* Set velocity by using state vector given by vq+vd */
+    esp_foc_set_target_voltage(&axis, (esp_foc_q_voltage){.raw = 0.0}, (esp_foc_d_voltage){.raw = 0.0});
+
+    /* ramp the velocity */
+    uq.raw = 1.0f;
+
+    while(1) {
+        esp_foc_set_target_voltage(&axis, uq, (esp_foc_d_voltage){.raw = 0.0});
+        uq.raw *= -1.0f;
+        esp_foc_sleep_ms(200);
+        esp_foc_get_control_data(&axis, &control_data);
+        ESP_LOGI(TAG, "Estimated speed: %f rad/s, dt: %f s", control_data.speed.raw, control_data.dt.raw);
+        esp_foc_set_target_voltage(&axis, (esp_foc_q_voltage){.raw = 0.0}, (esp_foc_d_voltage){.raw = 0.0});
+        esp_foc_sleep_ms(200);
+    }
 }
+
+```
+
+## 📁 Repository Structure
+
+```
+espFoC/
+├── include/        # Public headers
+├── source/         # Core implementation and drivers
+│   ├── drivers/
+│   ├── motor_control/
+│   └── strategies/
+├── examples/       # Example applications
+├── doc/            # Additional documentation
+└── README.md
+
 ```
 
 ---
 
-## ⚡ Current-Mode Example Overview
+## 🚧 Project Status
 
-In **current-mode**, the user must provide a current sensor backend:
-
-```c
-esp_foc_isensor_t *cs = current_sensor_adc_new(...);
-
-esp_foc_initialize_axis(
-    &axis,
-    inverter,
-    sensor,
-    cs,      // enables current-mode FOC (Id/Iq control)
-    settings
-);
-```
-
-The FOC engine will:
-
-* Read currents via ADC
-* Regulate Id → 0 A
-* Regulate Iq → desired torque-producing current
-* Apply SVPWM based on controller output
-
-See `examples/current_control`.
+espFoC is experimental but **actively developed** and tested on real hardware.
 
 ---
 
-## 🔌 Typical Hardware Setup
+## 📜 License
 
-* ESP32 / ESP32-S3 / ESP32-P4 board
-* 3-PWM inverter (L6234, DRV83xx, MakerBase FoC board, etc.)
-* PMSM / BLDC motor
-* One of:
+espFoC is released under the **MIT License**.
 
-  * I²C encoder (AS5600, AS5048, etc.)
-  * Analog encoder
-  * Simulated rotor sensor (testing, no real motor needed)
-* Optional:
-
-  * ADC-based current sensing for **current-mode FOC**
-
-Pinouts are fully configurable through `menuconfig`. For the voltage-mode
-The typical wiring is shown below:
-
-![Wiring](/doc/images/wiring.png)
-
----
-
-## 🧪 Supported Devices
-
-* **ESP32**
-* **ESP32-S3**
-* **ESP32-P4**
-
-Requires **ESP-IDF v5.0+**.
-
----
-
-## 📈 Real-Time Debugging
-
-Enable scope output in menuconfig:
-
-```
-CONFIG_ESP_FOC_SCOPE
-```
-
-Then use **Better Serial Plotter** to visualize:
-
-* d/q currents
-* rotor position
-* PWM duty cycles
-* controller outputs
+See `LICENSE` for details.
 
 ---
 
@@ -274,8 +365,3 @@ Maintainer: **Felipe Neves**
 `ryukokki.felipe@gmail.com`
 
 ---
-
-## 📄 License
-
-espFoC is licensed under the **MIT License**.
-See `LICENSE` for details.
