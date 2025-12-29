@@ -12,7 +12,7 @@
  *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -23,6 +23,8 @@
  */
 
 #pragma once
+
+#include <math.h>
 
 typedef struct {
     float alpha;
@@ -37,12 +39,20 @@ static inline void esp_foc_low_pass_filter_init(esp_foc_lp_filter_t *filter,
         alpha = 1.0f;
     } else if (alpha < 0.0f) {
         alpha = 0.0f;
-    } 
+    }
 
     filter->y_n_prev = 0.0f;
     filter->alpha = alpha;
     filter->beta = 1.0f - alpha;
 
+}
+
+static inline void esp_foc_low_pass_filter_set_cutoff(esp_foc_lp_filter_t *filter,
+                                                    float cutoff, float fs)
+{
+    float wc_norm = (2.0f * M_PI * (cutoff / fs));
+    float alpha =  wc_norm / (1 + wc_norm);
+    esp_foc_low_pass_filter_init(filter, alpha);
 }
 
 static inline float esp_foc_low_pass_filter_update(esp_foc_lp_filter_t *filter,
