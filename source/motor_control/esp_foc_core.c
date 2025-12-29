@@ -204,10 +204,6 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                 (2.0f * M_PI * ESP_FOC_PLL_BANDWIDTH_HZ),
             .phase_resistance = settings.motor_resistance,
             .phase_inductance = settings.motor_inductance,
-            .pole_pairs = axis->motor_pole_pairs,
-            .flux_linkage = settings.flux_linkage,
-            .inertia = settings.inertia,
-            .friction = settings.friction,
             .dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING
         });
 
