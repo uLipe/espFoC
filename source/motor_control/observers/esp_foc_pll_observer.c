@@ -36,6 +36,7 @@ typedef struct {
     float theta_est;
     float omega_est;
     float theta_error;
+    esp_foc_lp_filter_t current_filters[2];
     float e_alpha;
     float e_beta;
     float i_alpha_prev;
@@ -58,9 +59,16 @@ IRAM_ATTR static int pll_observer_update(esp_foc_observer_t *self, esp_foc_obser
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
 
+    in->i_alpha_beta[0] = esp_foc_low_pass_filter_update(&est->current_filters[0], in->i_alpha_beta[0]);
+    in->i_alpha_beta[1] = esp_foc_low_pass_filter_update(&est->current_filters[1], in->i_alpha_beta[1]);
+
     /* Estimate the back EMF alpha/beta voltages using motor parameters plus the current observed */
     float di_alpha_dt = (in->i_alpha_beta[0] - est->i_alpha_prev) * est->inv_dt;
     float di_beta_dt = (in->i_alpha_beta[1] - est->i_beta_prev)  * est->inv_dt;
+
+    est->i_alpha_prev = in->i_alpha_beta[0];
+    est->i_beta_prev = in->i_alpha_beta[1];
+
     est->e_alpha = in->u_alpha_beta[0] - est->r * in->i_alpha_beta[0] - est->l * di_alpha_dt;
     est->e_beta = in->u_alpha_beta[1] - est->r * in->i_alpha_beta[1]- est->l * di_beta_dt;
 
@@ -82,9 +90,6 @@ IRAM_ATTR static int pll_observer_update(esp_foc_observer_t *self, esp_foc_obser
     if(est->converging_count) {
         est->converging_count--;
     }
-
-    est->i_alpha_prev = in->i_alpha_beta[0];
-    est->i_beta_prev = in->i_alpha_beta[1];
 
     return est->converging_count;
 }
@@ -154,6 +159,8 @@ esp_foc_observer_t *pll_observer_new(int unit, esp_foc_pll_observer_settings_t s
     est->l = settings.phase_inductance;
     est->dt = settings.dt * 2.0f;
     est->inv_dt = (1.0f / est->dt);
+    esp_foc_low_pass_filter_set_cutoff(&est->current_filters[0], 0.2f * est->inv_dt, est->inv_dt);
+    esp_foc_low_pass_filter_set_cutoff(&est->current_filters[1], 0.2f * est->inv_dt, est->inv_dt);
     est->converging_count = (int)( PLL_OBSERVER_CONVERGE_WAIT_TIME / settings.dt);
 
     ESP_LOGI(TAG, "Observer sample time %f s", est->dt);
