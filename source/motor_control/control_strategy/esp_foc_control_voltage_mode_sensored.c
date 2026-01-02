@@ -25,7 +25,6 @@
 #include <string.h>
 #include <math.h>
 #include <stdbool.h>
-#include "esp_attr.h"
 #include "esp_log.h"
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
 #include "driver/gpio.h"
@@ -37,7 +36,7 @@
 #define ESP_FOC_DEBUG_PIN                  22
 static const char * tag = "ESP_FOC_CONTROL";
 
-IRAM_ATTR static void inverter_isr(void *data)
+static void inverter_isr(void *data)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)data;
 
@@ -50,13 +49,13 @@ IRAM_ATTR static void inverter_isr(void *data)
     }
 }
 
-IRAM_ATTR void do_voltage_mode_sensored_high_speed_loop(void *arg)
+void do_voltage_mode_sensored_high_speed_loop(void *arg)
 {
     /* Nothing to do in the ADC callback */
     (void)arg;
 }
 
-IRAM_ATTR void do_voltage_mode_sensored_low_speed_loop(void *arg)
+void do_voltage_mode_sensored_low_speed_loop(void *arg)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
     float low_speed_inv_dt = 1.0f / (axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING);

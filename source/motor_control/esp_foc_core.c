@@ -25,7 +25,6 @@
 #include <string.h>
 #include <math.h>
 #include <stdbool.h>
-#include "esp_attr.h"
 #include "esp_log.h"
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
 #include "driver/gpio.h"
@@ -38,11 +37,11 @@
 
 static const char * tag = "ESP_FOC_CONTROL";
 
-IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
-                                    esp_foc_inverter_t *inverter,
-                                    esp_foc_rotor_sensor_t *rotor,
-                                    esp_foc_isensor_t *isensor,
-                                    esp_foc_motor_control_settings_t settings)
+esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
+                                esp_foc_inverter_t *inverter,
+                                esp_foc_rotor_sensor_t *rotor,
+                                esp_foc_isensor_t *isensor,
+                                esp_foc_motor_control_settings_t settings)
 {
     if(axis == NULL) {
         ESP_LOGE(tag, "invalid axis object!");
@@ -227,7 +226,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     return ESP_FOC_OK;
 }
 
-IRAM_ATTR esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
+esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 {
     float a,b,u, v, w, e_sin, e_cos;
 
@@ -286,9 +285,9 @@ IRAM_ATTR esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     return ESP_FOC_OK;
 }
 
-IRAM_ATTR esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis,
-                                        esp_foc_q_voltage uq,
-                                        esp_foc_d_voltage ud)
+esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis,
+                                    esp_foc_q_voltage uq,
+                                    esp_foc_d_voltage ud)
 {
     if(axis == NULL) {
         ESP_LOGE(tag, "invalid axis object!");
@@ -319,7 +318,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis,
     return ESP_FOC_OK;
 }
 
-IRAM_ATTR esp_foc_err_t esp_foc_set_target_current(esp_foc_axis_t *axis, esp_foc_q_current iq, esp_foc_d_current id)
+esp_foc_err_t esp_foc_set_target_current(esp_foc_axis_t *axis, esp_foc_q_current iq, esp_foc_d_current id)
 {
     if(axis == NULL) {
         ESP_LOGE(tag, "invalid axis object!");
@@ -340,8 +339,8 @@ IRAM_ATTR esp_foc_err_t esp_foc_set_target_current(esp_foc_axis_t *axis, esp_foc
     return ESP_FOC_OK;
 }
 
-IRAM_ATTR esp_foc_err_t esp_foc_set_target_speed(esp_foc_axis_t *axis,
-                                                esp_foc_radians_per_second speed)
+esp_foc_err_t esp_foc_set_target_speed(esp_foc_axis_t *axis,
+                                    esp_foc_radians_per_second speed)
 {
     if(axis == NULL) {
         ESP_LOGE(tag, "invalid axis object!");
@@ -359,8 +358,8 @@ IRAM_ATTR esp_foc_err_t esp_foc_set_target_speed(esp_foc_axis_t *axis,
     return ESP_FOC_OK;
 }
 
-IRAM_ATTR esp_foc_err_t esp_foc_set_target_position(esp_foc_axis_t *axis,
-                                                    esp_foc_radians position)
+esp_foc_err_t esp_foc_set_target_position(esp_foc_axis_t *axis,
+                                        esp_foc_radians position)
 {
     if(axis == NULL) {
         ESP_LOGE(tag, "invalid axis object!");
@@ -378,7 +377,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_set_target_position(esp_foc_axis_t *axis,
     return ESP_FOC_OK;
 }
 
-IRAM_ATTR esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis)
+esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis)
 {
     if(axis == NULL) {
         ESP_LOGE(tag, "invalid axis object!");
@@ -402,7 +401,7 @@ IRAM_ATTR esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis)
     return ESP_FOC_OK;
 }
 
-IRAM_ATTR esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_data_t *control_data)
+esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_data_t *control_data)
 {
     if(axis == NULL) {
         ESP_LOGE(tag, "invalid axis object!");

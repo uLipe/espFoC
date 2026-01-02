@@ -55,7 +55,7 @@ typedef struct {
 static const char * TAG = "ESP-FOC-PLL-OBS";
 static DRAM_ATTR angle_estimator_pll_t pll_observers[CONFIG_NOOF_AXIS];
 
-IRAM_ATTR static int pll_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs_t * in)
+static int pll_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs_t * in)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
 
@@ -94,19 +94,19 @@ IRAM_ATTR static int pll_observer_update(esp_foc_observer_t *self, esp_foc_obser
     return est->converging_count;
 }
 
-IRAM_ATTR static float pll_observer_get_angle(esp_foc_observer_t *self)
+static float pll_observer_get_angle(esp_foc_observer_t *self)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
     return est->theta_est;
 }
 
-IRAM_ATTR static float pll_observer_get_speed(esp_foc_observer_t *self)
+static float pll_observer_get_speed(esp_foc_observer_t *self)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
     return est->omega_est;
 }
 
-IRAM_ATTR static void pll_observer_reset(esp_foc_observer_t *self, float offset)
+static void pll_observer_reset(esp_foc_observer_t *self, float offset)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
     est->theta_est = offset;

@@ -28,7 +28,6 @@
 #include <stdio.h>
 #include <sdkconfig.h>
 #include "espFoC/esp_foc.h"
-#include "esp_attr.h"
 #include "esp_log.h"
 
 static bool scope_enable = false;
@@ -52,7 +51,7 @@ __attribute__((weak)) void esp_foc_send_buffer_callback(const uint8_t *buffer, i
     esp_foc_sleep_ms(100);
 }
 
-IRAM_ATTR static void esp_foc_scope_daemon_thread(void *arg)
+static void esp_foc_scope_daemon_thread(void *arg)
 {
     char out_buf[512] = {0,};
     esp_foc_control_data_t *next_sample;

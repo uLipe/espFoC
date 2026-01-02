@@ -46,9 +46,9 @@ typedef struct {
 }esp_foc_simul_observer_t;
 
 static const char * TAG = "ESP-FOC-SIMU-OBS";
-DRAM_ATTR static  esp_foc_simul_observer_t simu_observers[CONFIG_NOOF_AXIS];
+static  esp_foc_simul_observer_t simu_observers[CONFIG_NOOF_AXIS];
 
-IRAM_ATTR static int simu_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs_t * in)
+static int simu_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs_t * in)
 {
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
 
@@ -64,19 +64,19 @@ IRAM_ATTR static int simu_observer_update(esp_foc_observer_t *self, esp_foc_obse
     return 0;
 }
 
-IRAM_ATTR static float simu_observer_get_angle(esp_foc_observer_t *self)
+static float simu_observer_get_angle(esp_foc_observer_t *self)
 {
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
     return obj->angle;
 }
 
-IRAM_ATTR static float simu_observer_get_speed(esp_foc_observer_t *self)
+static float simu_observer_get_speed(esp_foc_observer_t *self)
 {
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
     return obj->omega;
 }
 
-IRAM_ATTR static void simu_observer_reset(esp_foc_observer_t *self, float offset)
+static void simu_observer_reset(esp_foc_observer_t *self, float offset)
 {
     (void)offset;
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);

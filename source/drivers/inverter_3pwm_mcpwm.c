@@ -24,10 +24,9 @@
 
 #include <sys/cdefs.h>
 #include "espFoC/inverter_3pwm_mcpwm.h"
+#include "driver/mcpwm_prelude.h"
 #include "driver/gpio.h"
 #include "esp_err.h"
-#include "esp_attr.h"
-#include "driver/mcpwm_prelude.h"
 #include "esp_log.h"
 
 typedef struct {

@@ -2,7 +2,6 @@
 #include "espFoC/rotor_sensor_pcnt.h"
 #include "driver/pulse_cnt.h"
 #include "esp_err.h"
-#include "esp_attr.h"
 #include "esp_log.h"
 
 static const char *TAG = "SENSOR_PCNT";
@@ -19,7 +18,7 @@ typedef struct {
 
 static bool pcnt_configured = false;
 
-DRAM_ATTR static esp_foc_pcnt_t rotor_sensors[CONFIG_NOOF_AXIS];
+static esp_foc_pcnt_t rotor_sensors[CONFIG_NOOF_AXIS];
 
 static void pcnt_overflow_handler(void *arg)
 {
@@ -34,7 +33,7 @@ static void pcnt_overflow_handler(void *arg)
     }
 }
 
-IRAM_ATTR static float read_accumulated_counts(esp_foc_rotor_sensor_t *self)
+static float read_accumulated_counts(esp_foc_rotor_sensor_t *self)
 {
     int16_t raw_count;
     esp_foc_pcnt_t *obj =
@@ -44,7 +43,7 @@ IRAM_ATTR static float read_accumulated_counts(esp_foc_rotor_sensor_t *self)
     return obj->accumulated + fabs((float)raw_count);
 }
 
-IRAM_ATTR  static void set_to_zero(esp_foc_rotor_sensor_t *self)
+static void set_to_zero(esp_foc_rotor_sensor_t *self)
 {
     esp_foc_pcnt_t *obj =
         __containerof(self,esp_foc_pcnt_t, interface);
@@ -52,7 +51,7 @@ IRAM_ATTR  static void set_to_zero(esp_foc_rotor_sensor_t *self)
     pcnt_counter_clear(obj->pcnt_unit);
 }
 
-IRAM_ATTR static float get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
+static float get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
 {
     esp_foc_pcnt_t *obj =
         __containerof(self,esp_foc_pcnt_t, interface);
@@ -60,7 +59,7 @@ IRAM_ATTR static float get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
     return obj->pulses_per_revolution;
 }
 
-IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
+static float read_counts(esp_foc_rotor_sensor_t *self)
 {
     int16_t raw_count;
     esp_foc_pcnt_t *obj =

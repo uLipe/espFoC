@@ -27,7 +27,6 @@
 #include <sdkconfig.h>
 #include "espFoC/current_sensor_adc.h"
 #include "hal/adc_hal.h"
-#include "esp_attr.h"
 #include "esp_log.h"
 
 #if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S2
@@ -84,7 +83,7 @@ DRAM_ATTR static isensor_adc_t isensor_adc;
 static bool adc_initialized = false;
 static const float adc_to_volts = ((3.9f)/ 4096.0f);
 
-static bool IRAM_ATTR isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
+static bool isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
 {
     adc_hal_digi_enable(false);
     adc_hal_digi_connect(false);
@@ -132,7 +131,7 @@ static void continuous_adc_init(isensor_adc_t *isensor)
     esp_foc_sleep_ms(10);
 }
 
-IRAM_ATTR static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
+static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
 {
     isensor_adc_t *obj =
         __containerof(self, isensor_adc_t, interface);
@@ -153,13 +152,13 @@ IRAM_ATTR static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *
 
 }
 
-IRAM_ATTR static void sample_isensors(esp_foc_isensor_t *self)
+static void sample_isensors(esp_foc_isensor_t *self)
 {
     adc_hal_digi_connect(true);
     adc_hal_digi_enable(true);
 }
 
-IRAM_ATTR static void calibrate_isensors (esp_foc_isensor_t *self, int calibration_rounds)
+static void calibrate_isensors (esp_foc_isensor_t *self, int calibration_rounds)
 {
     isensor_values_t val;
     isensor_adc_t *obj =
@@ -201,7 +200,7 @@ IRAM_ATTR static void calibrate_isensors (esp_foc_isensor_t *self, int calibrati
     esp_foc_sleep_ms(100);
 }
 
-IRAM_ATTR static void set_callback(esp_foc_isensor_t *self, isensor_callback_t cb, void *arg)
+static void set_callback(esp_foc_isensor_t *self, isensor_callback_t cb, void *arg)
 {
     isensor_adc_t *obj =
         __containerof(self, isensor_adc_t, interface);

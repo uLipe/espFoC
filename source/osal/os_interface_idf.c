@@ -25,7 +25,6 @@
 #include <sys/cdefs.h>
 #include <unistd.h>
 #include "espFoC/esp_foc.h"
-#include "esp_attr.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -79,27 +78,27 @@ uint64_t esp_foc_now_useconds(void)
     return esp_timer_get_time();
 }
 
-IRAM_ATTR void esp_foc_critical_enter(void)
+void esp_foc_critical_enter(void)
 {
     portENTER_CRITICAL(&spinlock);
 }
 
-IRAM_ATTR void esp_foc_critical_leave(void)
+void esp_foc_critical_leave(void)
 {
     portEXIT_CRITICAL(&spinlock);
 }
 
-IRAM_ATTR esp_foc_event_handle_t esp_foc_get_event_handle(void)
+esp_foc_event_handle_t esp_foc_get_event_handle(void)
 {
     return ((esp_foc_event_handle_t) xTaskGetCurrentTaskHandle());
 }
 
-IRAM_ATTR void esp_foc_wait_notifier(void)
+void esp_foc_wait_notifier(void)
 {
     ulTaskNotifyTake(pdFALSE ,portMAX_DELAY);
 }
 
-IRAM_ATTR void esp_foc_send_notification(esp_foc_event_handle_t handle)
+void esp_foc_send_notification(esp_foc_event_handle_t handle)
 {
     BaseType_t wake;
     vTaskNotifyGiveFromISR((TaskHandle_t)handle, &wake);

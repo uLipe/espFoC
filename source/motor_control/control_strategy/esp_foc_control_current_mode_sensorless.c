@@ -25,7 +25,6 @@
 #include <string.h>
 #include <math.h>
 #include <stdbool.h>
-#include "esp_attr.h"
 #include "esp_log.h"
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
 #include "driver/gpio.h"
@@ -38,7 +37,7 @@
 static const char * tag = "ESP_FOC_CONTROL";
 
 
-IRAM_ATTR static void inverter_isr(void *data)
+static void inverter_isr(void *data)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)data;
 
@@ -51,12 +50,12 @@ IRAM_ATTR static void inverter_isr(void *data)
     }
 }
 
-IRAM_ATTR void do_current_mode_sensorless_high_speed_loop(void *arg)
+void do_current_mode_sensorless_high_speed_loop(void *arg)
 {
     /* Samples already buffered nothing to do here */
 }
 
-IRAM_ATTR void do_current_mode_sensorless_low_speed_loop(void *arg)
+void do_current_mode_sensorless_low_speed_loop(void *arg)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
     isensor_values_t ival;

@@ -27,7 +27,6 @@
 #include "espFoC/inverter_3pwm_ledc.h"
 #include "hal/ledc_hal.h"
 #include "driver/gpio.h"
-#include "esp_attr.h"
 #include "esp_log.h"
 
 static const char *TAG = "INVERTER_LEDC";
@@ -56,7 +55,7 @@ DRAM_ATTR static esp_foc_ledc_inverter ledc[CONFIG_NOOF_AXIS];
 
 static const char *TAG = "INVERTER_LEDC";
 
-IRAM_ATTR static void ledc_isr(void *arg)
+static void ledc_isr(void *arg)
 {
     esp_foc_ledc_inverter *obj = (esp_foc_ledc_inverter *)arg;
 
@@ -73,7 +72,7 @@ IRAM_ATTR static void ledc_isr(void *arg)
 /* This function is required because the ledc driver does not support update from
  * ISR
  */
-IRAM_ATTR static void ledc_update(esp_foc_ledc_inverter *obj, ledc_channel_t channel, float duty)
+static void ledc_update(esp_foc_ledc_inverter *obj, ledc_channel_t channel, float duty)
 {
     /* set duty parameters */
     ledc_ll_set_hpoint(obj->hw, LEDC_LOW_SPEED_MODE, channel, 0);
@@ -90,7 +89,7 @@ IRAM_ATTR static void ledc_update(esp_foc_ledc_inverter *obj, ledc_channel_t cha
 }
 
 
-IRAM_ATTR static float get_dc_link_voltage (esp_foc_inverter_t *self)
+static float get_dc_link_voltage (esp_foc_inverter_t *self)
 {
     esp_foc_ledc_inverter *obj =
     __containerof(self, esp_foc_ledc_inverter, interface);
@@ -98,10 +97,10 @@ IRAM_ATTR static float get_dc_link_voltage (esp_foc_inverter_t *self)
     return obj->dc_link_voltage;
 }
 
-IRAM_ATTR static void set_voltages(esp_foc_inverter_t *self,
-                    float v_u,
-                    float v_v,
-                    float v_w)
+static void set_voltages(esp_foc_inverter_t *self,
+                float v_u,
+                float v_v,
+                float v_w)
 {
     esp_foc_ledc_inverter *obj =
         __containerof(self, esp_foc_ledc_inverter, interface);
@@ -115,7 +114,7 @@ IRAM_ATTR static void set_voltages(esp_foc_inverter_t *self,
     ledc_update(obj, obj->ledc_channel[2], obj->voltage_to_duty_ratio * v_w);
 }
 
-IRAM_ATTR static void set_inverter_callback(esp_foc_inverter_t *self,
+static void set_inverter_callback(esp_foc_inverter_t *self,
                         esp_foc_inverter_callback_t callback,
                         void *argument)
 {
@@ -132,18 +131,18 @@ IRAM_ATTR static void set_inverter_callback(esp_foc_inverter_t *self,
                         LEDC_LSTIMER3_OVF_INT_ENA );
 }
 
-IRAM_ATTR static void phase_remap(esp_foc_inverter_t *self)
+static void phase_remap(esp_foc_inverter_t *self)
 {
     (void)self;
 }
 
-IRAM_ATTR static float get_inverter_pwm_rate (esp_foc_inverter_t *self)
+static float get_inverter_pwm_rate (esp_foc_inverter_t *self)
 {
     (void)self;
     return (float)LEDC_FREQUENCY_HZ;
 }
 
-IRAM_ATTR static void inverter_enable(esp_foc_inverter_t *self)
+static void inverter_enable(esp_foc_inverter_t *self)
 {
     esp_foc_ledc_inverter *obj =
     __containerof(self, esp_foc_ledc_inverter, interface);
@@ -151,7 +150,7 @@ IRAM_ATTR static void inverter_enable(esp_foc_inverter_t *self)
     gpio_set_level(obj->enable_gpio, true);
 }
 
-IRAM_ATTR static void inverter_disable(esp_foc_inverter_t *self)
+static void inverter_disable(esp_foc_inverter_t *self)
 {
     esp_foc_ledc_inverter *obj =
     __containerof(self, esp_foc_ledc_inverter, interface);

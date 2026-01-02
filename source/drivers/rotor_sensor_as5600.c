@@ -27,7 +27,6 @@
 #include "driver/gpio.h"
 #include "driver/i2c.h"
 #include "esp_err.h"
-#include "esp_attr.h"
 #include "esp_log.h"
 
 #define AS5600_SLAVE_ADDR 0x36
@@ -47,10 +46,10 @@ typedef struct {
 
 static bool i2c_bus_configured = false;
 
-DRAM_ATTR static esp_foc_as5600_t rotor_sensors[CONFIG_NOOF_AXIS];
+static esp_foc_as5600_t rotor_sensors[CONFIG_NOOF_AXIS];
 static const float encoder_wrap_value = AS5600_PULSES_PER_REVOLUTION * 0.95f;
 
-IRAM_ATTR static uint16_t read_angle_sensor(int i2c_port)
+static uint16_t read_angle_sensor(int i2c_port)
 {
     uint8_t write_buffer = AS5600_ANGLE_REGISTER_H;
     uint8_t read_buffer[2] = {0,0};
@@ -79,7 +78,7 @@ IRAM_ATTR static uint16_t read_angle_sensor(int i2c_port)
     return raw;
 }
 
-IRAM_ATTR static float read_accumulated_counts (esp_foc_rotor_sensor_t *self)
+static float read_accumulated_counts (esp_foc_rotor_sensor_t *self)
 {
     esp_foc_as5600_t *obj =
         __containerof(self,esp_foc_as5600_t, interface);
@@ -87,7 +86,7 @@ IRAM_ATTR static float read_accumulated_counts (esp_foc_rotor_sensor_t *self)
     return obj->accumulated + obj->previous;
 }
 
-IRAM_ATTR  static void set_to_zero(esp_foc_rotor_sensor_t *self)
+static void set_to_zero(esp_foc_rotor_sensor_t *self)
 {
     esp_foc_as5600_t *obj =
         __containerof(self,esp_foc_as5600_t, interface);
@@ -96,13 +95,13 @@ IRAM_ATTR  static void set_to_zero(esp_foc_rotor_sensor_t *self)
     ESP_LOGI(tag, "Setting %d [ticks] as offset.", obj->zero_offset);
 }
 
-IRAM_ATTR static float get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
+static float get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
 {
     (void)self;
     return AS5600_PULSES_PER_REVOLUTION;
 }
 
-IRAM_ATTR static float read_counts(esp_foc_rotor_sensor_t *self)
+static float read_counts(esp_foc_rotor_sensor_t *self)
 {
     esp_foc_as5600_t *obj =
         __containerof(self,esp_foc_as5600_t, interface);

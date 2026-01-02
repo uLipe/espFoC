@@ -24,8 +24,6 @@
 
 #pragma once
 
-#include "esp_attr.h"
-
 #define ESP_FOC_VELOCITY_PID_DOWNSAMPLING  1
 #define ESP_FOC_POSITION_PID_DOWNSAMPLING  10
 #define ESP_FOC_ESTIMATORS_DOWNSAMPLING    4
@@ -36,7 +34,7 @@
 #define ESP_FOC_PLL_ZETA 0.707f
 
 
-IRAM_ATTR static inline void esp_foc_current_control_loop(esp_foc_axis_t *axis)
+static inline void esp_foc_current_control_loop(esp_foc_axis_t *axis)
 {
 
     axis->u_q.raw =  esp_foc_pid_update( &axis->torque_controller[0],
@@ -50,7 +48,7 @@ IRAM_ATTR static inline void esp_foc_current_control_loop(esp_foc_axis_t *axis)
                                             &axis->current_filters[1], axis->i_d.raw));
 }
 
-IRAM_ATTR static inline void esp_foc_position_control_loop(esp_foc_axis_t *axis)
+static inline void esp_foc_position_control_loop(esp_foc_axis_t *axis)
 {
     /* position control is disabled */
     if(!axis->downsampling_position) return;
@@ -66,7 +64,7 @@ IRAM_ATTR static inline void esp_foc_position_control_loop(esp_foc_axis_t *axis)
     }
 }
 
-IRAM_ATTR static inline void esp_foc_velocity_control_loop(esp_foc_axis_t *axis)
+static inline void esp_foc_velocity_control_loop(esp_foc_axis_t *axis)
 {
     /* speed control is disabled */
     if(!axis->downsampling_speed) return;

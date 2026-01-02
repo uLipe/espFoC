@@ -24,7 +24,6 @@
 
 #include <math.h>
 #include <stdint.h>
-#include "esp_attr.h"
 
 static const float sine_table[4096] = {
       0.000000f,   0.001534f,   0.003068f,   0.004602f,   0.006136f,   0.007670f,   0.009204f,   0.010738f,
@@ -1059,14 +1058,14 @@ static const float cosine_table[4096] = {
 const static float full2pi = M_PI * 2.0f;
 const static float index_scale = (4096.0f / full2pi);
 
-IRAM_ATTR float esp_foc_fast_sine(float angle)
+float esp_foc_fast_sine(float angle)
 {
     uint16_t index = (uint16_t)(fabsf(angle) * index_scale);
     index &= (4096 - 1);
     return sine_table[index];
 }
 
-IRAM_ATTR float esp_foc_fast_cosine(float angle)
+float esp_foc_fast_cosine(float angle)
 {
     uint16_t index = (uint16_t)(fabsf(angle) * index_scale);
     index &= (4096 - 1);
