@@ -106,23 +106,9 @@ IRAM_ATTR static void set_voltages(esp_foc_inverter_t *self,
     esp_foc_ledc_inverter *obj =
         __containerof(self, esp_foc_ledc_inverter, interface);
 
-    if(v_u > 1.0f) {
-        v_u = 1.0f;
-    } else if (v_u < 0.0f) {
-        v_u = 0.0f;
-    }
-
-    if(v_v > 1.0f) {
-        v_v = 1.0f;
-    } else if (v_v < 0.0f) {
-        v_v = 0.0f;
-    }
-
-    if(v_w > 1.0f) {
-        v_w = 1.0f;
-    } else if (v_w < 0.0f) {
-        v_w = 0.0f;
-    }
+    v_u = esp_foc_clamp(v_u, 0.0f, 1.0f);
+    v_v = esp_foc_clamp(v_v, 0.0f, 1.0f);
+    v_w = esp_foc_clamp(v_w, 0.0f, 1.0f);
 
     ledc_update(obj, obj->ledc_channel[0], obj->voltage_to_duty_ratio * v_u);
     ledc_update(obj, obj->ledc_channel[1], obj->voltage_to_duty_ratio * v_v);

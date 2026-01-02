@@ -183,3 +183,10 @@ static inline void esp_foc_third_harmonic_injection(float *v_alpha, float *v_bet
 #endif
 
 }
+
+static inline float esp_foc_clamp(float x, float min, float max)
+{
+    if (x < min) return min;
+    if (x > max) return max;
+    return x;
+}

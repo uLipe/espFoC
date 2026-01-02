@@ -101,23 +101,9 @@ IRAM_ATTR static void set_voltages(esp_foc_inverter_t *self,
     esp_foc_mcpwm_inverter_t *obj =
         __containerof(self, esp_foc_mcpwm_inverter_t, interface);
 
-    if(v_u > 1.0f) {
-        v_u = 1.0f;
-    } else if (v_u < 0.0f) {
-        v_u = 0.0f;
-    }
-
-    if(v_v > 1.0f) {
-        v_v = 1.0f;
-    } else if (v_v < 0.0f) {
-        v_v = 0.0f;
-    }
-
-    if(v_w > 1.0f) {
-        v_w = 1.0f;
-    } else if (v_w < 0.0f) {
-        v_w = 0.0f;
-    }
+    v_u = esp_foc_clamp(v_u, 0.0f, 1.0f);
+    v_v = esp_foc_clamp(v_v, 0.0f, 1.0f);
+    v_w = esp_foc_clamp(v_w, 0.0f, 1.0f);
 
     v_u *= obj->voltage_to_duty_ratio;
     v_v *= obj->voltage_to_duty_ratio;
