@@ -26,15 +26,6 @@ menu "espFoC Settings"
         default 256 if !SPIRAM
         default 280 if SPIRAM
 
-
-    config ESP_FOC_SCOPE_TXD_PIN
-        int "TXD Pin of the uart used for espFoC Scope"
-        default 22
-
-    config ESP_FOC_SCOPE_RXD_PIN
-        int "RXD Pin of the uart used for espFoC Scope"
-        default 21
-
     choice
         prompt "Select espFoC modulation type"
         default ESP_FOC_USE_SPACE_VECTOR_PWM
@@ -58,6 +49,11 @@ menu "espFoC Settings"
     config ESP_FOC_DEBUG_CORE_TIMING
         bool "output on a pin the time taken to compute espfoc core ops"
         default n
+
+    config ESP_FOC_DEBUG_PIN
+        int "GPIO number of the debug pin"
+        depends on ESP_FOC_DEBUG_CORE_TIMING
+        default 22
 
     config ESP_FOC_OPEN_LOOP_ONLY
         bool "Enable open loop simulated observer on sensorless mode"

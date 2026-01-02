@@ -26,16 +26,11 @@
 #include <math.h>
 #include <stdbool.h>
 #include "esp_log.h"
-#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
-#include "driver/gpio.h"
-#endif
 #include "espFoC/esp_foc.h"
 #include "espFoC/observer/esp_foc_simu_observer.h"
 #include "espFoC/observer/esp_foc_pll_observer.h"
 
-#define ESP_FOC_DEBUG_PIN                  22
 static const char * tag = "ESP_FOC_CONTROL";
-
 
 static void inverter_isr(void *data)
 {
@@ -86,7 +81,7 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
         esp_foc_wait_notifier();
 
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
-        gpio_set_level(ESP_FOC_DEBUG_PIN, true);
+        esp_foc_debug_pin_set();
 #endif
         axis->isensor_driver->fetch_isensors(axis->isensor_driver, &ival);
         axis->i_u = ival.iu_axis_0;
@@ -175,7 +170,7 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
 #endif
 
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
-        gpio_set_level(ESP_FOC_DEBUG_PIN, false);
+        esp_foc_debug_pin_clear();
 #endif
     }
 }

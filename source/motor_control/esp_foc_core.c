@@ -26,14 +26,9 @@
 #include <math.h>
 #include <stdbool.h>
 #include "esp_log.h"
-#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
-#include "driver/gpio.h"
-#endif
 #include "espFoC/esp_foc.h"
 #include "espFoC/observer/esp_foc_simu_observer.h"
 #include "espFoC/observer/esp_foc_pll_observer.h"
-
-#define ESP_FOC_DEBUG_PIN                  22
 
 static const char * tag = "ESP_FOC_CONTROL";
 
@@ -62,12 +57,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     }
 
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
-        gpio_config_t drv_en_config = {
-            .mode = GPIO_MODE_OUTPUT,
-            .pin_bit_mask = 1ULL << ESP_FOC_DEBUG_PIN,
-        };
-        gpio_config(&drv_en_config);
-        gpio_set_level(ESP_FOC_DEBUG_PIN, false);
+    esp_foc_debug_pin_init(CONFIG_ESP_FOC_DEBUG_PIN);
 #endif
 
     float current_control_analog_bandwith;

@@ -26,7 +26,6 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <sdkconfig.h>
 #include "espFoC/esp_foc.h"
 #include "esp_log.h"
 

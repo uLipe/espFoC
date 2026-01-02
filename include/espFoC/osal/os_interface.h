@@ -37,3 +37,6 @@ void esp_foc_critical_leave(void);
 esp_foc_event_handle_t esp_foc_get_event_handle(void);
 void esp_foc_wait_notifier(void);
 void esp_foc_send_notification(esp_foc_event_handle_t handle);
+int esp_foc_debug_pin_init(int debug_pin);
+int esp_foc_debug_pin_set(void);
+int esp_foc_debug_pin_clear(void);

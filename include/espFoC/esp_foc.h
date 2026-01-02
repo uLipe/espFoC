@@ -49,7 +49,6 @@ typedef enum {
     ESP_FOC_ERR_UNKNOWN = -128
 } esp_foc_err_t;
 
-
 #include "espFoC/esp_foc_axis.h"
 #include "espFoC/esp_foc_controls.h"
 

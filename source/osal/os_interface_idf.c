@@ -29,10 +29,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_cpu.h"
+#include "driver/gpio.h"
 
 static const float scale = 0.000001f;
 
 static portMUX_TYPE spinlock =  portMUX_INITIALIZER_UNLOCKED;
+static int debug_pin_internal = -1;
 
 int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority)
 {
@@ -105,4 +107,32 @@ void esp_foc_send_notification(esp_foc_event_handle_t handle)
     if (wake == pdTRUE) {
         portYIELD_FROM_ISR();
     }
+}
+
+int esp_foc_debug_pin_init(int debug_pin)
+{
+    gpio_config_t drv_en_config = {
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = 1ULL << debug_pin,
+    };
+    gpio_config(&drv_en_config);
+    gpio_set_level(debug_pin, false);
+
+    debug_pin_internal = debug_pin;
+
+    return 0;
+}
+
+int esp_foc_debug_pin_set(void)
+{
+    gpio_set_level(debug_pin_internal, true);
+
+    return 0;
+}
+
+int esp_foc_debug_pin_clear(void)
+{
+    gpio_set_level(debug_pin_internal, false);
+
+    return 0;
 }
