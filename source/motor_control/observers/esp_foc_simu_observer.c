@@ -32,10 +32,7 @@
 
 #define SIMUL_FLUX_LINKAGE 0.015f // Lambda_m (Weber)
 #define SIMUL_INERTIA 0.00024f // J (kg⋅m²)
-#define SIMUL_FRICTION 0.0001f // B (Viscous friction)
-#define DRIFT_COMP_CYCLE 200000
-#define SIMUL_MAX_IQ 5.0f
-#define SIMUL_MINIMUM_DIQ 1e-6f
+#define SIMUL_FRICTION 0.001f // B (Viscous friction)
 
 typedef struct {
     float r;
@@ -57,7 +54,7 @@ IRAM_ATTR static int simu_observer_update(esp_foc_observer_t *self, esp_foc_obse
 
     float d_iq = ((in->u_dq[1] - obj->r * obj->estim_iq - SIMUL_FLUX_LINKAGE * obj->omega) / obj->l);
     obj->estim_iq +=  d_iq * obj->dt;
-    float torque = 1.5f * SIMUL_FLUX_LINKAGE * obj->estim_iq;
+    float torque = 1.5f * obj->pp * SIMUL_FLUX_LINKAGE * obj->estim_iq;
     float acceleration = (torque - (SIMUL_FRICTION * obj->omega)) / SIMUL_INERTIA;
 
     obj->omega += acceleration * obj->dt;
