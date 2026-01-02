@@ -24,5 +24,9 @@
 
 #pragma once
 
+#include <stdint.h>
+
 void esp_foc_scope_initalize(void);
 void esp_foc_scope_data_push(esp_foc_control_data_t *control_data);
+void esp_foc_init_bus_callback(void);
+void esp_foc_send_buffer_callback(const uint8_t *buffer, int size);
