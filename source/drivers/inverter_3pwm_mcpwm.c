@@ -49,7 +49,7 @@ typedef struct {
 #define MCPWM_PERIOD_TOP      MCPWM_RESOLUTION_HZ / MCPWM_RATE_HZ
 #define MCPWM_PERIOD_TOP_HALF MCPWM_PERIOD_TOP / 2
 
-DRAM_ATTR static esp_foc_mcpwm_inverter_t mcpwms[CONFIG_NOOF_AXIS];
+static esp_foc_mcpwm_inverter_t mcpwms[CONFIG_NOOF_AXIS];
 
 static mcpwm_timer_config_t timer_config = {
     .group_id = 0,
@@ -69,7 +69,7 @@ static mcpwm_comparator_config_t compare_config = {
 
 static const char *TAG = "INVERTER_MCPWM";
 
-static IRAM_ATTR bool inverter_isr(mcpwm_timer_handle_t timer, const mcpwm_timer_event_data_t *edata, void *user_data)
+static bool inverter_isr(mcpwm_timer_handle_t timer, const mcpwm_timer_event_data_t *edata, void *user_data)
 {
     esp_foc_mcpwm_inverter_t *inverter = (esp_foc_mcpwm_inverter_t *)user_data;
 
@@ -84,7 +84,7 @@ const static mcpwm_timer_event_callbacks_t driver_cb = {
     .on_full = inverter_isr,
 };
 
-IRAM_ATTR static float get_dc_link_voltage (esp_foc_inverter_t *self)
+static float get_dc_link_voltage (esp_foc_inverter_t *self)
 {
     esp_foc_mcpwm_inverter_t *obj =
     __containerof(self, esp_foc_mcpwm_inverter_t, interface);
@@ -92,7 +92,7 @@ IRAM_ATTR static float get_dc_link_voltage (esp_foc_inverter_t *self)
     return obj->dc_link_voltage;
 }
 
-IRAM_ATTR static void set_voltages(esp_foc_inverter_t *self,
+static void set_voltages(esp_foc_inverter_t *self,
                     float v_u,
                     float v_v,
                     float v_w)
@@ -113,7 +113,7 @@ IRAM_ATTR static void set_voltages(esp_foc_inverter_t *self,
     mcpwm_comparator_set_compare_value(obj->comparators[2], (uint16_t)v_w);
 }
 
-IRAM_ATTR static void set_inverter_callback(esp_foc_inverter_t *self,
+static void set_inverter_callback(esp_foc_inverter_t *self,
                         esp_foc_inverter_callback_t callback,
                         void *argument)
 {
@@ -124,18 +124,18 @@ IRAM_ATTR static void set_inverter_callback(esp_foc_inverter_t *self,
     obj->arg = argument;
 }
 
-IRAM_ATTR static void phase_remap(esp_foc_inverter_t *self)
+static void phase_remap(esp_foc_inverter_t *self)
 {
     (void)self;
 }
 
-IRAM_ATTR static float get_inverter_pwm_rate (esp_foc_inverter_t *self)
+static float get_inverter_pwm_rate (esp_foc_inverter_t *self)
 {
     (void)self;
     return (float)MCPWM_RATE_HZ;
 }
 
-IRAM_ATTR static void inverter_enable(esp_foc_inverter_t *self)
+static void inverter_enable(esp_foc_inverter_t *self)
 {
     esp_foc_mcpwm_inverter_t *obj =
     __containerof(self, esp_foc_mcpwm_inverter_t, interface);
@@ -143,7 +143,7 @@ IRAM_ATTR static void inverter_enable(esp_foc_inverter_t *self)
     gpio_set_level(obj->enable_gpio, true);
 }
 
-IRAM_ATTR static void inverter_disable(esp_foc_inverter_t *self)
+static void inverter_disable(esp_foc_inverter_t *self)
 {
     esp_foc_mcpwm_inverter_t *obj =
     __containerof(self, esp_foc_mcpwm_inverter_t, interface);
