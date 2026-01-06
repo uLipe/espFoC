@@ -205,6 +205,41 @@ Examples are located in the `examples/` directory.
 
 ---
 
+## 🦀 Rust Sample (esp-idf-sys)
+
+This repository includes an optional Rust integration under [`rust/`](rust/), built on top of **`esp-idf-sys` (STD)**.
+The Rust code talks to espFoC through a small C FFI shim (`include/rust/` + `source/rust/`).
+
+### Build & Flash (example: open-loop Vq ramp)
+
+1) Go to the Rust folder:
+
+```bash
+cd rust
+```
+
+2) Build (pick the correct target for your MCU):
+
+- ESP32: `xtensa-esp32-espidf`
+- ESP32-S3: `xtensa-esp32s3-espidf`
+- ESP32-C3: `riscv32imc-esp-espidf`
+
+```bash
+cargo build --target xtensa-esp32-espidf
+```
+
+3) Flash + monitor the example:
+
+```bash
+MCU=esp32 cargo espflash flash --target xtensa-esp32-espidf --example open_loop_voltage_ramp --monitor
+```
+
+> Adjust GPIO assignments and DC link voltage at the top of `rust/examples/open_loop_voltage_ramp.rs`.
+
+For more details, see `rust/README.md`.
+
+---
+
 ## 🚀 Sample Code
 
 Below is a minimal example showing how to initialize and run espFoC and drive the

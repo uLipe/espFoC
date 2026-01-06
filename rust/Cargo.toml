@@ -1,0 +1,19 @@
+[package]
+name = "espfoc-rust"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+members = ["esp-foc-sys", "esp-foc"]
+
+[dependencies]
+esp-foc = { path = "esp-foc" }
+esp-idf-sys = { version = "0.36", features = ["binstart"] }
+
+[build-dependencies]
+embuild = "0.33"
+
+[package.metadata.esp-idf-sys]
+# Build espFoC as an extra ESP-IDF component (this repository root is an ESP-IDF component)
+extra_components = [".."]

@@ -22,6 +22,7 @@ list(APPEND srcs    "source/drivers/inverter_3pwm_ledc.c"
                     "source/drivers/rotor_sensor_as5600.c"
                     "source/drivers/rotor_sensor_pcnt.c"
                     "source/drivers/current_sensor_adc.c"
+                    "source/rust/esp_foc_ffi.c"
                     "source/osal/os_interface_idf.c")
 
 idf_component_register(SRCS "${srcs}"
