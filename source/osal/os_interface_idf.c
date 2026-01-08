@@ -39,19 +39,13 @@ static int debug_pin_internal = -1;
 int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority)
 {
     /* Allows cretion of low-priority tasks */
-    int cpu_num = APP_CPU_NUM ;
+    int cpu_num = 1 ;
     if(priority < 0) {
         priority = (configMAX_PRIORITIES - 1);
         cpu_num = PRO_CPU_NUM;
     }
 
-#ifdef __XTENSA__
     int ret = xTaskCreatePinnedToCore(runner,"", CONFIG_FOC_TASK_STACK_SIZE, argument, configMAX_PRIORITIES - priority, NULL, cpu_num);
-#else
-    (void) cpu_num;
-    int ret = xTaskCreate(runner,"", CONFIG_FOC_TASK_STACK_SIZE, argument, configMAX_PRIORITIES - priority, NULL);
-#endif
-
     if (ret != pdPASS) {
         return -ESP_ERR_NO_MEM;
     }

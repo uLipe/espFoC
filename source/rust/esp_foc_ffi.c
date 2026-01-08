@@ -22,7 +22,10 @@
  * SOFTWARE.
  */
 
+
 #include "rust/esp_foc_ffi.h"
+
+#ifdef CONFIG_ESP_FOC_RUST
 
 #include <stdlib.h>
 #include <string.h>
@@ -177,3 +180,4 @@ esp_foc_err_t espfoc_get_control_data(espfoc_axis_handle_t axis, esp_foc_control
     }
     return esp_foc_get_control_data(axis_from_handle(axis), out);
 }
+#endif
