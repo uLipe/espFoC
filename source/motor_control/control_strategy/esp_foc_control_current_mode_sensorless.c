@@ -83,6 +83,8 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
         esp_foc_debug_pin_set();
 #endif
+
+#ifndef CONFIG_ESP_FOC_OPEN_LOOP_ONLY
         axis->isensor_driver->fetch_isensors(axis->isensor_driver, &ival);
         axis->i_u = ival.iu_axis_0;
         axis->i_v = ival.iv_axis_0;
@@ -92,7 +94,7 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
          * (it will be used on the next loop step )
          */
         axis->isensor_driver->sample_isensors(axis->isensor_driver);
-
+#endif
 
         axis->rotor_position = axis->observer->get_angle(axis->observer);
         axis->rotor_elec_angle = axis->rotor_position;
