@@ -25,11 +25,14 @@
 #include "esp_err.h"
 
 #include "espFoC/rotor_sensor_as5600.h"
+#include "espFoC/rotor_sensor_as5048.h"
 #include "espFoC/esp_foc.h"
 
 static const char *TAG = "esp-foc-example";
 
 static esp_foc_rotor_sensor_t *sensor;
+static esp_foc_rotor_sensor_t *sensor2;
+
 
 static void initialize_foc_drivers(void)
 {
@@ -40,9 +43,20 @@ static void initialize_foc_drivers(void)
     );
 
     if(sensor == NULL) {
-        ESP_LOGE(TAG, "failed to create the inverter driver, aborting!");
-        ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
-        abort();
+        ESP_LOGE(TAG, "failed to create as5600 encoder driver");
+    }
+
+    sensor2 = rotor_sensor_as5048_new(
+        CONFIG_FOC_ENCODER_MOSI_PIN,
+        CONFIG_FOC_ENCODER_MISO_PIN,
+        CONFIG_FOC_ENCODER_SCK_PIN,
+        CONFIG_FOC_ENCODER_CS_PIN,
+        0,
+        0
+    );
+
+    if(sensor2 == NULL) {
+        ESP_LOGE(TAG, "failed to create as5048 encoder driver");
     }
 }
 
@@ -52,6 +66,7 @@ void app_main(void)
 
     while(1) {
         esp_foc_sleep_ms(100);
-        ESP_LOGI(TAG, "Turn the motor axis by Hand! Encoder reding raw:  %f", sensor->read_counts(sensor));
+        ESP_LOGI(TAG, "Turn the motor axis by Hand! Encoder reding raw:  %f", ((sensor != NULL) ? sensor->read_counts(sensor) : 0));
+        ESP_LOGI(TAG, "Turn the motor axis by Hand! Encoder SPI reding raw:  %f", ((sensor2 != NULL) ? sensor2->read_counts(sensor2) : 0));
     }
 }

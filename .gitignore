@@ -4,3 +4,4 @@
 *.lock
 /dist/
 examples/test_project/
+/.cache/

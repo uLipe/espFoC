@@ -10,4 +10,24 @@ menu "Frerunning FoC example menu"
         range 0 34
         default 9
 
+    config FOC_ENCODER_MISO_PIN
+        int "Encoder sensor scl pin value"
+        range 0 34
+        default 4
+
+    config FOC_ENCODER_MOSI_PIN
+        int "Encoder sensor scl pin value"
+        range 0 34
+        default 5
+
+    config FOC_ENCODER_SCK_PIN
+        int "Encoder sensor scl pin value"
+        range 0 34
+        default 6
+
+    config FOC_ENCODER_CS_PIN
+        int "Encoder sensor scl pin value"
+        range 0 34
+        default 7
+
 endmenu
