@@ -70,6 +70,8 @@ static mcpwm_timer_config_t timer_config = {
 };
 
 static mcpwm_operator_config_t operator_config = {
+    .flags.update_gen_action_on_tep = true,
+    .flags.update_gen_action_on_tez = true,
     .group_id = 0,
 };
 
@@ -259,8 +261,8 @@ esp_foc_inverter_t *inverter_6pwm_mpcwm_new(int gpio_u_high, int gpio_u_low,
             MCPWM_GEN_COMPARE_EVENT_ACTION_END());
 
         mcpwm_generator_set_actions_on_compare_event(obj->gen_low[i],
-            MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, obj->comparators[i], MCPWM_GEN_ACTION_HIGH),
-            MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_DOWN, obj->comparators[i], MCPWM_GEN_ACTION_LOW),
+            MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, obj->comparators[i], MCPWM_GEN_ACTION_LOW),
+            MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_DOWN, obj->comparators[i], MCPWM_GEN_ACTION_HIGH),
             MCPWM_GEN_COMPARE_EVENT_ACTION_END());
     }
 
@@ -276,6 +278,17 @@ esp_foc_inverter_t *inverter_6pwm_mpcwm_new(int gpio_u_high, int gpio_u_low,
 
     for (int i = 0; i < 3; i++) {
         esp_err_t err = mcpwm_generator_set_dead_time(obj->gen_high[i], obj->gen_high[i], &dt_cfg);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Dead-time config failed on phase %d (err=%d). Continuing without dead-time.", i, (int)err);
+        }
+    }
+
+    dt_cfg.posedge_delay_ticks = 0;
+    dt_cfg.negedge_delay_ticks = dt_ticks;
+    dt_cfg.flags.invert_output = true;
+
+    for (int i = 0; i < 3; i++) {
+        esp_err_t err = mcpwm_generator_set_dead_time(obj->gen_low[i], obj->gen_low[i], &dt_cfg);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "Dead-time config failed on phase %d (err=%d). Continuing without dead-time.", i, (int)err);
         }
