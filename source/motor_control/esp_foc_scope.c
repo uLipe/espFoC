@@ -92,7 +92,7 @@ static void esp_foc_scope_daemon_thread(void *arg)
         // control_data->i_d = axis->i_d;
 
 
-        sprintf(out_buf, "%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+        sprintf(out_buf, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
             next_sample->dt.raw,
             next_sample->u_alpha.raw,
             next_sample->u_beta.raw,
