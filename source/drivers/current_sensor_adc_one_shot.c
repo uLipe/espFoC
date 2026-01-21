@@ -28,6 +28,7 @@
 #include "espFoC/current_sensor_adc_one_shot.h"
 #include "hal/adc_hal.h"
 #include "hal/adc_oneshot_hal.h"
+#include "driver/gpio.h"
 #include "esp_intr_alloc.h"
 #include "esp_log.h"
 #include "esp_clk_tree.h"
@@ -53,7 +54,9 @@ typedef struct {
 
 #define ISENSOR_HWREG(x)    (*((volatile uint32_t *)(x)))
 #define ISENSOR_LP_ADC 0x50127000
-#define ISENSOR_LP_ADC_INT_ENA_OFFSET 0x004C
+#define ISENSOR_LP_ADC_INT_CLR_OFFSET     0x0054
+#define ISENSOR_LP_ADC_INT_ENA_SET_OFFSET 0x0058
+#define ISENSOR_LP_ADC_READER1_CTRL_OFFSET 0x0000
 
 DRAM_ATTR static isensor_adc_t isensor_adc;
 static bool adc_initialized = false;
@@ -75,11 +78,13 @@ static void oneshot_adc_start_sample(isensor_adc_t *isensor, adc_channel_t chann
 static void isensor_adc_isr(void *arg)
 {
     isensor_adc_t * isensor = (isensor_adc_t *)arg;
-    uint32_t event = 0;
+    uint32_t event = (isensor->units[isensor->number_of_conversions] ==  ADC_UNIT_1) ?
+                    ADC_LL_EVENT_ADC1_ONESHOT_DONE : ADC_LL_EVENT_ADC2_ONESHOT_DONE;
 
-    adc_oneshot_ll_get_event(event);
-    if((event == ADC_LL_EVENT_ADC1_ONESHOT_DONE) ||
-       (event == ADC_LL_EVENT_ADC2_ONESHOT_DONE)) {
+    /* Clear the interrupts flags */
+    ISENSOR_HWREG(ISENSOR_LP_ADC + ISENSOR_LP_ADC_INT_CLR_OFFSET) = 0x7F;
+
+    if(adc_oneshot_ll_get_event(event)) {
 
         isensor->raw_reads[isensor->number_of_conversions] =
             adc_oneshot_ll_get_raw_result(isensor->hal.unit);
@@ -104,11 +109,55 @@ static void isensor_adc_isr(void *arg)
     }
 }
 
+static int8_t adc_get_io_num(adc_unit_t adc_unit, uint8_t adc_channel)
+{
+    assert(adc_unit < SOC_ADC_PERIPH_NUM);
+    uint8_t adc_n = (adc_unit == ADC_UNIT_1) ? 0 : 1;
+    return adc_channel_io_map[adc_n][adc_channel];
+}
+
+static esp_err_t adc_gpio_init(adc_unit_t adc_unit, uint16_t channel_mask)
+{
+    esp_err_t ret = ESP_OK;
+    uint64_t gpio_mask = 0;
+    uint32_t n = 0;
+    int8_t io = 0;
+
+    while (channel_mask) {
+        if (channel_mask & 0x1) {
+            io = adc_get_io_num(adc_unit, n);
+            if (io < 0) {
+                return ESP_ERR_INVALID_ARG;
+            }
+            gpio_mask |= BIT64(io);
+        }
+        channel_mask = channel_mask >> 1;
+        n++;
+    }
+
+    gpio_config_t cfg = {
+        .pin_bit_mask = gpio_mask,
+        .mode = GPIO_MODE_DISABLE,
+    };
+    ret = gpio_config(&cfg);
+
+    return ret;
+}
+
+
 static void oneshot_adc_init(isensor_adc_t *isensor)
 {
+    for(int i = 0; i < isensor->number_of_channels; i++) {
+        uint16_t adc_mask = (1 << isensor->channels[i]);
+        adc_gpio_init(isensor->units[i], adc_mask);
+    }
+
+    ESP_LOGI(TAG, "interrupt source is :%"PRIx8, ETS_LP_ADC_INTR_SOURCE);
     /* And allocate the LP_ADC interrupt vector */
-    esp_intr_alloc(ETS_LP_ADC_INTR_SOURCE, ESP_INTR_FLAG_IRAM,
+    esp_err_t sts = esp_intr_alloc(ETS_LP_ADC_INTR_SOURCE, ESP_INTR_FLAG_IRAM,
         (intr_handler_t)isensor_adc_isr, (void *)isensor,NULL);
+
+    ESP_ERROR_CHECK(sts);
 
     esp_foc_sleep_ms(10);
 }
@@ -122,9 +171,10 @@ static void oneshot_adc_start_sample(isensor_adc_t *isensor, adc_channel_t chann
     adc_oneshot_ll_enable(unit);
 
     /* Tweak LP ADC registers to enable their both interrupts */
-    ISENSOR_HWREG(ISENSOR_LP_ADC + ISENSOR_LP_ADC_INT_ENA_OFFSET) = 0x03;
+    ISENSOR_HWREG(ISENSOR_LP_ADC + ISENSOR_LP_ADC_INT_ENA_SET_OFFSET) = 0x03;
 
     adc_oneshot_ll_start(unit);
+
 }
 
 static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
