@@ -49,8 +49,15 @@ typedef enum {
     ESP_FOC_ERR_UNKNOWN = -128
 } esp_foc_err_t;
 
+typedef struct esp_foc_axis_s esp_foc_axis_t;
+
+typedef void (*esp_foc_motor_regulation_callback_t) (esp_foc_axis_t *axis, esp_foc_d_current *id_ref, esp_foc_q_current *iq_ref,
+                                                    esp_foc_d_voltage *ud_forward, esp_foc_q_voltage *uq_forward);
+
+
 #include "espFoC/esp_foc_axis.h"
 #include "espFoC/esp_foc_controls.h"
+#include "espFoC/esp_foc_servo.h"
 
 typedef enum {
     ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
@@ -58,28 +65,11 @@ typedef enum {
 } esp_foc_motor_direction_t;
 
 typedef struct {
-    float kp;
-    float ki;
-    float kd;
-    float integrator_limit;
-    float max_output_value;
-} esp_foc_control_settings_t;
-
-typedef struct {
-    esp_foc_control_settings_t torque_control_settings[2];
-    esp_foc_control_settings_t velocity_control_settings;
-    esp_foc_control_settings_t position_control_settings;
     esp_foc_motor_direction_t natural_direction;
-    bool enable_position_control;
-    bool enable_velocity_control;
-    bool enable_torque_control;
     int motor_pole_pairs;
     float motor_resistance;
     float motor_inductance;
     float motor_inertia;
-    float flux_linkage;
-    float inertia;
-    float friction;
     int motor_unit;
 } esp_foc_motor_control_settings_t;
 
@@ -120,17 +110,9 @@ typedef struct {
 
 #include "espFoC/esp_foc_scope.h"
 
-esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
-                                    esp_foc_inverter_t *inverter,
-                                    esp_foc_rotor_sensor_t *rotor,
-                                    esp_foc_isensor_t *isensor,
-                                    esp_foc_motor_control_settings_t settings);
+esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis, esp_foc_inverter_t *inverter, esp_foc_rotor_sensor_t *rotor,
+                                    esp_foc_isensor_t *isensor, esp_foc_motor_control_settings_t settings);
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis);
-
-esp_foc_err_t esp_foc_set_target_voltage(esp_foc_axis_t *axis, esp_foc_q_voltage uq, esp_foc_d_voltage ud);
-esp_foc_err_t esp_foc_set_target_current(esp_foc_axis_t *axis, esp_foc_q_current iq, esp_foc_d_current id);
-esp_foc_err_t esp_foc_set_target_speed(esp_foc_axis_t *axis, esp_foc_radians_per_second speed);
-esp_foc_err_t esp_foc_set_target_position(esp_foc_axis_t *axis, esp_foc_radians position);
-
+esp_foc_err_t esp_foc_set_regulation_callback(esp_foc_axis_t *axis, esp_foc_motor_regulation_callback_t callback);
 esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_data_t *control_data);

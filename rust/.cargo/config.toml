@@ -1,6 +1,0 @@
-# Optional: configure a default target for your MCU.
-# Examples:
-# [build]
-# target = "xtensa-esp32-espidf"     # ESP32
-# target = "xtensa-esp32s3-espidf"   # ESP32-S3
-# target = "riscv32imc-esp-espidf"   # ESP32-C3

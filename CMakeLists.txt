@@ -1,12 +1,14 @@
 set(srcs    "source/motor_control/esp_foc_core.c"
             "source/motor_control/control_strategy/esp_foc_control_current_mode_sensored.c"
-            "source/motor_control/control_strategy/esp_foc_control_voltage_mode_sensored.c"
             "source/motor_control/control_strategy/esp_foc_control_current_mode_sensorless.c"
             "source/motor_control/esp_foc_scope.c"
             "source/motor_control/esp_foc_consts.c"
             "source/motor_control/esp_foc_sine_cosine.c"
             "source/motor_control/observers/esp_foc_pll_observer.c"
-            "source/motor_control/observers/esp_foc_simu_observer.c")
+            "source/motor_control/observers/esp_foc_simu_observer.c"
+            "source/motor_control/servo_control/esp_foc_servo_position.c"
+            "source/motor_control/servo_control/esp_foc_servo_velocity.c"
+            )
 
 set(includes "include")
 
@@ -24,7 +26,6 @@ list(APPEND srcs    "source/drivers/inverter_3pwm_ledc.c"
                     "source/drivers/rotor_sensor_pcnt.c"
                     "source/drivers/current_sensor_adc.c"
                     "source/drivers/current_sensor_adc_one_shot.c"
-                    "source/rust/esp_foc_ffi.c"
                     "source/osal/os_interface_idf.c")
 
 idf_component_register(SRCS "${srcs}"

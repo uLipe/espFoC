@@ -287,10 +287,18 @@ esp_foc_isensor_t *isensor_adc_oneshot_new(esp_foc_isensor_adc_oneshot_config_t 
     isensor_adc.offsets[3] = 0.0f;
     isensor_adc.callback = NULL;
 
-    esp_foc_low_pass_filter_init(&isensor_adc.current_filters[0], 1.0);
-    esp_foc_low_pass_filter_init(&isensor_adc.current_filters[1], 1.0);
-    esp_foc_low_pass_filter_init(&isensor_adc.current_filters[2], 1.0);
-    esp_foc_low_pass_filter_init(&isensor_adc.current_filters[3], 1.0);
+    esp_foc_low_pass_filter_set_cutoff(&isensor_adc.current_filters[0],
+                            ESP_FOC_PWM_RATE_HZ / (10 * ESP_FOC_LOW_SPEED_DOWNSAMPLING),
+                            ESP_FOC_PWM_RATE_HZ / ESP_FOC_LOW_SPEED_DOWNSAMPLING  );
+    esp_foc_low_pass_filter_set_cutoff(&isensor_adc.current_filters[1],
+                            ESP_FOC_PWM_RATE_HZ / (10 * ESP_FOC_LOW_SPEED_DOWNSAMPLING),
+                            ESP_FOC_PWM_RATE_HZ / ESP_FOC_LOW_SPEED_DOWNSAMPLING  );
+    esp_foc_low_pass_filter_set_cutoff(&isensor_adc.current_filters[2],
+                            ESP_FOC_PWM_RATE_HZ / (10 * ESP_FOC_LOW_SPEED_DOWNSAMPLING),
+                            ESP_FOC_PWM_RATE_HZ / ESP_FOC_LOW_SPEED_DOWNSAMPLING  );
+    esp_foc_low_pass_filter_set_cutoff(&isensor_adc.current_filters[3],
+                            ESP_FOC_PWM_RATE_HZ / (10 * ESP_FOC_LOW_SPEED_DOWNSAMPLING),
+                            ESP_FOC_PWM_RATE_HZ / ESP_FOC_LOW_SPEED_DOWNSAMPLING  );
 
     oneshot_adc_init(&isensor_adc);
     adc_initialized = true;

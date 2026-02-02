@@ -35,16 +35,21 @@ typedef struct {
     float max_output_value;
     float dt;
     float inv_dt;
+    int saturated;
 
 }esp_foc_pid_controller_t;
 
-static inline float esp_foc_saturate(float value, float limit)
+static inline float esp_foc_saturate(esp_foc_pid_controller_t *pid, float value, float limit)
 {
     float result = value;
     if (value > limit) {
         result = limit;
+        pid->saturated = 1;
     } else if (value < -limit) {
         result = -limit;
+        pid->saturated = 1;
+    } else {
+        pid->saturated = 0;
     }
 
     return result;
@@ -62,19 +67,22 @@ static inline float  esp_foc_pid_update(esp_foc_pid_controller_t *self,
 {
     float error = reference - measure;
     float error_diff = (error - self->previous_error) * self->inv_dt;
-    self->accumulated_error += (error * self->dt);
+
+    /* Skip integration if output is saturated already */
+    if(!self->saturated) {
+        self->accumulated_error += (error * self->dt);
+        if(self->accumulated_error > self->integrator_limit) {
+            self->accumulated_error = self->integrator_limit;
+        } else if (self->accumulated_error < -self->integrator_limit) {
+            self->accumulated_error = -self->integrator_limit;
+        }
+    }
 
     self->previous_error = error;
-
-    if(self->accumulated_error > self->integrator_limit) {
-        self->accumulated_error = self->integrator_limit;
-    } else if (self->accumulated_error < -self->integrator_limit) {
-        self->accumulated_error = -self->integrator_limit;
-    }
 
     float mv = (self->kp * error) +
             (self->ki * self->accumulated_error) +
             (self->kd * error_diff);
 
-    return esp_foc_saturate(mv, self->max_output_value);
+    return esp_foc_saturate(self, mv, self->max_output_value);
 }

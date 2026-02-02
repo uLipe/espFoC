@@ -83,8 +83,6 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
         esp_foc_debug_pin_set();
 #endif
-
-#ifndef CONFIG_ESP_FOC_OPEN_LOOP_ONLY
         axis->isensor_driver->fetch_isensors(axis->isensor_driver, &ival);
         axis->i_u = ival.iu_axis_0;
         axis->i_v = ival.iv_axis_0;
@@ -94,23 +92,14 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
          * (it will be used on the next loop step )
          */
         axis->isensor_driver->sample_isensors(axis->isensor_driver);
-#endif
 
         axis->rotor_position = axis->observer->get_angle(axis->observer);
         axis->rotor_elec_angle = axis->rotor_position;
         axis->current_speed = axis->observer->get_speed(axis->observer);
-        esp_foc_position_control_loop(axis);
-        esp_foc_velocity_control_loop(axis);
 
         /* Current control stuff */
         float e_sin = esp_foc_sine(axis->rotor_elec_angle);
         float e_cos = esp_foc_cosine(axis->rotor_elec_angle);
-
-#ifdef CONFIG_ESP_FOC_OPEN_LOOP_ONLY
-        axis->u_d.raw = axis->target_u_d.raw;
-        axis->u_q.raw = axis->target_u_q.raw;
-
-#else
 
         esp_foc_get_dq_currents(e_sin,
                         e_cos,
@@ -123,7 +112,7 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
                         &axis->i_d.raw);
 
         esp_foc_current_control_loop(axis);
-#endif
+
 
         esp_foc_modulate_dq_voltage(e_sin,
                         e_cos,
@@ -157,14 +146,14 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
 
         axis->open_loop_observer->update(axis->open_loop_observer, &in);
 
-#ifndef CONFIG_ESP_FOC_OPEN_LOOP_ONLY
         if(axis->isensor_driver != NULL) {
             int not_conv = axis->current_observer->update(axis->current_observer, &in);
             if(!not_conv) {
-                axis->observer = axis->current_observer;
+                // axis->observer = axis->current_observer;
             }
         }
-#endif
+
+        esp_foc_send_notification(axis->regulator_ev);
 
 #ifdef CONFIG_ESP_FOC_SCOPE
         esp_foc_get_control_data(axis, &control_data);
@@ -175,4 +164,9 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
         esp_foc_debug_pin_clear();
 #endif
     }
+}
+
+void do_current_mode_sensorless_outer_loop(void *arg)
+{
+
 }

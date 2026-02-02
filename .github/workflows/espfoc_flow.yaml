@@ -50,27 +50,11 @@ jobs:
       run: |
         ./idf/install.sh
         . ./idf/export.sh
-        pushd examples/simple_velocity
+        pushd examples/axis_standalone
         idf.py set-target esp32
         idf.py build
         popd
-        pushd examples/simple_servo
-        idf.py set-target esp32
-        idf.py build
-        popd
-        pushd examples/speed_control
-        idf.py set-target esp32
-        idf.py build
-        popd
-        pushd examples/simple_velocity
-        idf.py set-target esp32s3
-        idf.py build
-        popd
-        pushd examples/simple_servo
-        idf.py set-target esp32s3
-        idf.py build
-        popd
-        pushd examples/speed_control
+        pushd examples/axis_standalone
         idf.py set-target esp32s3
         idf.py build
         popd
