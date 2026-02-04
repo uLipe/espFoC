@@ -46,10 +46,19 @@ typedef struct {
     float currents[4];
     float offsets[4];
     esp_foc_isensor_t interface;
+
     int number_of_channels;
     int number_of_conversions;
     isensor_callback_t callback;
     void *user_data;
+
+    bool enable_analog_encoder;
+    float analog_encoder_ppr;
+    float encoder_accumulated;
+    float encoder_previous;
+    uint16_t encoder_zero_offset;
+    esp_foc_rotor_sensor_t encoder_interface;
+
 }isensor_adc_t;
 
 #define ISENSOR_HWREG(x)    (*((volatile uint32_t *)(x)))
@@ -87,7 +96,7 @@ static void isensor_adc_isr(void *arg)
     if(adc_oneshot_ll_get_event(event)) {
 
         isensor->raw_reads[isensor->number_of_conversions] =
-            adc_oneshot_ll_get_raw_result(isensor->hal.unit);
+            adc_oneshot_ll_get_raw_result(isensor->units[isensor->number_of_conversions]);
 
         isensor->number_of_conversions++;
         if(isensor->number_of_conversions == isensor->number_of_channels) {
@@ -185,17 +194,23 @@ static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
     esp_foc_critical_enter();
     obj->currents[0] = (float)obj->raw_reads[0] * adc_to_volts;
     obj->currents[1] = (float)obj->raw_reads[1] * adc_to_volts;
-    obj->currents[2] = (float)obj->raw_reads[2] * adc_to_volts;
-    obj->currents[3] = (float)obj->raw_reads[3] * adc_to_volts;
+
+    if(!obj->enable_analog_encoder) {
+        obj->currents[2] = (float)obj->raw_reads[2] * adc_to_volts;
+        obj->currents[3] = (float)obj->raw_reads[3] * adc_to_volts;
+    }
+
     esp_foc_critical_leave();
 
     values->iu_axis_0 = esp_foc_low_pass_filter_update(&obj->current_filters[0], (obj->currents[0] - obj->offsets[0]) * isensor_adc.adc_to_current_scale);
     values->iv_axis_0 = esp_foc_low_pass_filter_update(&obj->current_filters[1], (obj->currents[1] - obj->offsets[1]) * isensor_adc.adc_to_current_scale);
     values->iw_axis_0 = -(values->iu_axis_0 +  values->iv_axis_0);
-    values->iu_axis_1 = esp_foc_low_pass_filter_update(&obj->current_filters[2], (obj->currents[2] - obj->offsets[2]) * isensor_adc.adc_to_current_scale);
-    values->iv_axis_1 = esp_foc_low_pass_filter_update(&obj->current_filters[3], (obj->currents[3] - obj->offsets[3]) * isensor_adc.adc_to_current_scale);
-    values->iw_axis_1 = -(values->iu_axis_1 +  values->iv_axis_1);
 
+    if(!obj->enable_analog_encoder) {
+        values->iu_axis_1 = esp_foc_low_pass_filter_update(&obj->current_filters[2], (obj->currents[2] - obj->offsets[2]) * isensor_adc.adc_to_current_scale);
+        values->iv_axis_1 = esp_foc_low_pass_filter_update(&obj->current_filters[3], (obj->currents[3] - obj->offsets[3]) * isensor_adc.adc_to_current_scale);
+        values->iw_axis_1 = -(values->iu_axis_1 +  values->iv_axis_1);
+    }
 }
 
 static void sample_isensors(esp_foc_isensor_t *self)
@@ -224,8 +239,6 @@ static void calibrate_isensors (esp_foc_isensor_t *self, int calibration_rounds)
 
         obj->offsets[0] += ((float)obj->raw_reads[0] * adc_to_volts);
         obj->offsets[1] += ((float)obj->raw_reads[1] * adc_to_volts);
-        obj->offsets[2] += ((float)obj->raw_reads[2] * adc_to_volts);
-        obj->offsets[3] += ((float)obj->raw_reads[3] * adc_to_volts);
     }
 
     obj->offsets[0] /= calibration_rounds;
@@ -258,9 +271,67 @@ static void set_callback(esp_foc_isensor_t *self, isensor_callback_t cb, void *a
     esp_foc_critical_leave();
 }
 
-
-esp_foc_isensor_t *isensor_adc_oneshot_new(esp_foc_isensor_adc_oneshot_config_t *config)
+static float read_accumulated_counts (esp_foc_rotor_sensor_t *self)
 {
+    isensor_adc_t *obj =
+        __containerof(self,isensor_adc_t, encoder_interface);
+
+    return obj->encoder_accumulated + obj->encoder_previous;
+}
+
+static void set_to_zero(esp_foc_rotor_sensor_t *self)
+{
+    isensor_adc_t *obj =
+        __containerof(self,isensor_adc_t, encoder_interface);
+
+    sample_isensors(&obj->interface);
+    esp_foc_sleep_ms(10);
+    obj->encoder_zero_offset = obj->raw_reads[2];
+    obj->encoder_previous = (float)obj->encoder_zero_offset;
+
+    ESP_LOGI(TAG, "Setting %d [ticks] as offset.", obj->encoder_zero_offset);
+}
+
+static float get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
+{
+   isensor_adc_t *obj =
+        __containerof(self,isensor_adc_t, encoder_interface);
+
+    return obj->analog_encoder_ppr;
+}
+
+static float read_counts(esp_foc_rotor_sensor_t *self)
+{
+   isensor_adc_t *obj =
+        __containerof(self,isensor_adc_t, encoder_interface);
+
+    uint16_t raw = obj->raw_reads[2];
+    float delta = (float)raw - obj->encoder_previous;
+
+    if(fabs(delta) >= 0.95 * obj->analog_encoder_ppr) {
+
+        obj->encoder_accumulated = (delta < 0.0f) ?
+            obj->encoder_accumulated + obj->analog_encoder_ppr :
+                obj->encoder_accumulated - obj->analog_encoder_ppr;
+
+    }
+
+    obj->encoder_previous = (float)raw;
+    return(float)((raw - obj->encoder_zero_offset) & (uint32_t)(obj->analog_encoder_ppr - 1));
+}
+
+esp_foc_isensor_t *isensor_adc_oneshot_new(esp_foc_isensor_adc_oneshot_config_t *config,
+                                        esp_foc_rotor_sensor_t **optional_encoder)
+{
+    if(config->enable_analog_encoder && config->number_of_channels != 3) {
+        ESP_LOGE(TAG, "share analog chgannel for encoder requires exact three channels!");
+        return NULL;
+    }
+
+    if (config->enable_analog_encoder && optional_encoder == NULL) {
+        ESP_LOGE(TAG, "Optional analog channel for encoder activated but no storage provided, aborting");
+        return NULL;
+    }
 
     if(adc_initialized == true) {
         return &isensor_adc.interface;
@@ -273,6 +344,16 @@ esp_foc_isensor_t *isensor_adc_oneshot_new(esp_foc_isensor_adc_oneshot_config_t 
     isensor_adc.interface.calibrate_isensors = calibrate_isensors;
     isensor_adc.interface.set_isensor_callback = set_callback;
     isensor_adc.number_of_channels = config->number_of_channels;
+
+    isensor_adc.encoder_interface.get_counts_per_revolution = get_counts_per_revolution;
+    isensor_adc.encoder_interface.read_counts = read_counts;
+    isensor_adc.encoder_interface.set_to_zero = set_to_zero;
+    isensor_adc.encoder_interface.read_accumulated_counts = read_accumulated_counts;
+    isensor_adc.encoder_accumulated = 0.0f;
+    isensor_adc.encoder_previous = 0.0f;
+    isensor_adc.encoder_zero_offset = 0;
+    isensor_adc.enable_analog_encoder = config->enable_analog_encoder;
+    isensor_adc.analog_encoder_ppr = config->analog_encoder_ppr;
     isensor_adc.channels[0] = config->axis_channels[0];
     isensor_adc.channels[1] = config->axis_channels[1];
     isensor_adc.channels[2] = config->axis_channels[2];
@@ -302,6 +383,10 @@ esp_foc_isensor_t *isensor_adc_oneshot_new(esp_foc_isensor_adc_oneshot_config_t 
 
     oneshot_adc_init(&isensor_adc);
     adc_initialized = true;
+
+    if(config->enable_analog_encoder && optional_encoder) {
+        *optional_encoder = &isensor_adc.encoder_interface;
+    }
 
     return &isensor_adc.interface;
 }
