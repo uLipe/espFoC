@@ -128,7 +128,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->torque_controller[0].max_output_value = axis->max_voltage/*settings.torque_control_settings[0].max_output_value*/;
 
     esp_foc_pid_reset(&axis->torque_controller[0]);
-    esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[0], 0.5f * axis->torque_controller[0].inv_dt,
+    esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[0], 0.3f * axis->torque_controller[0].inv_dt,
                                         axis->torque_controller[0].inv_dt);
 
     axis->torque_controller[1].dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING;
@@ -141,7 +141,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->torque_controller[1].integrator_limit = axis->max_voltage * 10.0f;
     axis->torque_controller[1].max_output_value = axis->max_voltage /* settings.torque_control_settings[1].max_output_value */;
     esp_foc_pid_reset(&axis->torque_controller[1]);
-    esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[1], 0.5f * axis->torque_controller[1].inv_dt,
+    esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[1], 0.3f * axis->torque_controller[1].inv_dt,
                                         axis->torque_controller[1].inv_dt);
 
     axis->motor_pole_pairs = (float)settings.motor_pole_pairs;
@@ -162,7 +162,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
         axis->open_loop_observer = simu_observer_new(settings.motor_unit,
             (esp_foc_simu_observer_settings_t) {
-                .alpha = 10.0;
+                .alpha = 10.0,
                 .dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING
             }
         );
@@ -184,7 +184,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
             .dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING
         });
 
-        axis->skip_torque_control = 1;
         axis->high_speed_loop_cb = do_current_mode_sensorless_high_speed_loop;
         axis->low_speed_loop_cb = do_current_mode_sensorless_low_speed_loop;
         axis->outer_loop_cb = do_foc_outer_loop;
@@ -272,6 +271,9 @@ esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis)
     /* Start the scope if it has not been yet: */
     esp_foc_scope_initalize();
 #endif
+    if(axis->rotor_sensor_driver == NULL) {
+        axis->rotor_aligned = ESP_FOC_ERR_ROTOR_STARTUP;
+    }
 
     esp_foc_create_runner(axis->outer_loop_cb, axis, 2);
     esp_foc_create_runner(axis->low_speed_loop_cb, axis, 1);

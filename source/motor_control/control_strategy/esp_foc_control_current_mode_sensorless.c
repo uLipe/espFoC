@@ -45,6 +45,14 @@ static void inverter_isr(void *data)
     }
 }
 
+static void handle_motor_startup(esp_foc_axis_t *axis)
+{
+    float i_mag = sqrtf(axis->i_alpha.raw*axis->i_alpha.raw + axis->i_beta.raw*axis->i_beta.raw);
+    float err = ESP_FOC_MAX_STARTUP_IQ - i_mag;
+    axis->u_q.raw  += ESP_FOC_STARTUP_IQ_GAIN * err;
+    axis->u_q.raw  = esp_foc_clamp(axis->u_q.raw , 0, ESP_FOC_MAX_STARTUP_VQ_FACTOR * axis->max_voltage);
+}
+
 void do_current_mode_sensorless_high_speed_loop(void *arg)
 {
     /* Samples already buffered nothing to do here */
@@ -111,7 +119,12 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
                         &axis->i_q.raw,
                         &axis->i_d.raw);
 
-        esp_foc_current_control_loop(axis);
+
+        if(axis->rotor_aligned == ESP_FOC_ERR_ROTOR_STARTUP) {
+            handle_motor_startup(axis);
+        } else {
+            esp_foc_current_control_loop(axis);
+        }
 
         esp_foc_modulate_dq_voltage(e_sin,
                         e_cos,
@@ -163,9 +176,4 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
         esp_foc_debug_pin_clear();
 #endif
     }
-}
-
-void do_current_mode_sensorless_outer_loop(void *arg)
-{
-
 }

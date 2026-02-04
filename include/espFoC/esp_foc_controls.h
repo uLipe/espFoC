@@ -30,6 +30,10 @@
 #define ESP_FOC_ISENSOR_CALIBRATION_ROUNDS 100
 #define ESP_FOC_PLL_BANDWIDTH_HZ 200.0f
 #define ESP_FOC_PLL_ZETA 0.707f
+#define ESP_FOC_MAX_STARTUP_IQ  1.0f
+#define ESP_FOC_MAX_STARTUP_VQ_FACTOR  0.3f //30% Vbus
+#define ESP_FOC_STARTUP_IQ_GAIN  0.1f
+
 
 static inline void esp_foc_current_control_loop(esp_foc_axis_t *axis)
 {
