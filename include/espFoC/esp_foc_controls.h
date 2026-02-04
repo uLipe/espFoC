@@ -26,9 +26,9 @@
 
 #define ESP_FOC_ESTIMATORS_DOWNSAMPLING    4
 #define ESP_FOC_LOW_SPEED_DOWNSAMPLING     10
-#define ESP_FOC_PWM_RATE_HZ                20000
+#define ESP_FOC_PWM_RATE_HZ                50000
 #define ESP_FOC_ISENSOR_CALIBRATION_ROUNDS 100
-#define ESP_FOC_PLL_BANDWIDTH_HZ 50.0f
+#define ESP_FOC_PLL_BANDWIDTH_HZ 200.0f
 #define ESP_FOC_PLL_ZETA 0.707f
 
 static inline void esp_foc_current_control_loop(esp_foc_axis_t *axis)
