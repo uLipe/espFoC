@@ -57,7 +57,6 @@ typedef void (*esp_foc_motor_regulation_callback_t) (esp_foc_axis_t *axis, esp_f
 
 #include "espFoC/esp_foc_axis.h"
 #include "espFoC/esp_foc_controls.h"
-#include "espFoC/esp_foc_servo.h"
 
 typedef enum {
     ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
@@ -116,3 +115,6 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_set_regulation_callback(esp_foc_axis_t *axis, esp_foc_motor_regulation_callback_t callback);
 esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_data_t *control_data);
+
+#include "espFoC/esp_foc_servo_speed.h"
+#include "espFoC/esp_foc_servo_position.h"
