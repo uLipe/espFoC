@@ -92,10 +92,10 @@ static void esp_foc_scope_daemon_thread(void *arg)
         // control_data->i_d = axis->i_d;
 
 
-        sprintf(out_buf, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
+        sprintf(out_buf, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
             next_sample->dt.raw,
-            next_sample->u_alpha.raw,
-            next_sample->u_beta.raw,
+            next_sample->out_d.raw,
+            next_sample->out_q.raw,
             next_sample->i_alpha.raw,
             next_sample->i_beta.raw,
             next_sample->i_d.raw,
@@ -107,7 +107,11 @@ static void esp_foc_scope_daemon_thread(void *arg)
             next_sample->target_speed.raw,
             next_sample->i_u.raw,
             next_sample->i_v.raw,
-            next_sample->i_w.raw
+            next_sample->i_w.raw,
+            next_sample->u.raw,
+            next_sample->v.raw,
+            next_sample->w.raw
+
         );
 
         rd_buff_index++;
