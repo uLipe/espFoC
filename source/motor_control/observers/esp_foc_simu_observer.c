@@ -30,18 +30,12 @@
 #include "esp_log.h"
 #include "espFoC/observer/esp_foc_simu_observer.h"
 
-#define SIMUL_FLUX_LINKAGE 0.015f // Lambda_m (Weber)
-#define SIMUL_INERTIA 0.00024f // J (kg⋅m²)
-#define SIMUL_FRICTION 0.001f // B (Viscous friction)
 
 typedef struct {
-    float r;
-    float l;
     float angle;
     float omega;
-    float estim_iq;
+    float alpha;
     float dt;
-    float pp;
     esp_foc_observer_t interface;
 }esp_foc_simul_observer_t;
 
@@ -52,12 +46,7 @@ static int simu_observer_update(esp_foc_observer_t *self, esp_foc_observer_input
 {
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
 
-    float d_iq = ((in->u_dq[1] - obj->r * obj->estim_iq - SIMUL_FLUX_LINKAGE * obj->omega) / obj->l);
-    obj->estim_iq +=  d_iq * obj->dt;
-    float torque = 1.5f * obj->pp * SIMUL_FLUX_LINKAGE * obj->estim_iq;
-    float acceleration = (torque - (SIMUL_FRICTION * obj->omega)) / SIMUL_INERTIA;
-
-    obj->omega += acceleration * obj->dt;
+    obj->omega += obj->alpha * obj->dt;
     obj->angle += obj->omega * obj->dt;
     obj->angle = esp_foc_normalize_angle(obj->angle);
 
@@ -81,7 +70,6 @@ static void simu_observer_reset(esp_foc_observer_t *self, float offset)
     (void)offset;
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
     obj->angle = 0.0f;
-    obj->estim_iq = 0.0f;
     obj->omega = 0.0f;
 }
 
@@ -97,13 +85,8 @@ esp_foc_observer_t *simu_observer_new(int unit, esp_foc_simu_observer_settings_t
         return NULL;
     }
 
-    if(settings.phase_resistance <= 0.0f) {
-        ESP_LOGE(TAG, "Invalid phase resistance !");
-        return NULL;
-    }
-
-    if(settings.phase_inductance <= 0.0f) {
-        ESP_LOGE(TAG, "Invalid phase Inductance !");
+    if(settings.alpha <= 0.0f) {
+        ESP_LOGE(TAG, "Invalid acceleration !");
         return NULL;
     }
 
@@ -112,13 +95,10 @@ esp_foc_observer_t *simu_observer_new(int unit, esp_foc_simu_observer_settings_t
     simu_observers[unit].interface.get_speed = simu_observer_get_speed;
     simu_observers[unit].interface.get_speed = simu_observer_get_speed;
     simu_observers[unit].interface.reset = simu_observer_reset;
-    simu_observers[unit].r = settings.phase_resistance;
-    simu_observers[unit].l = settings.phase_inductance;
     simu_observers[unit].dt = settings.dt;
-    simu_observers[unit].pp = settings.pole_pairs;
     simu_observers[unit].omega = 0.0f;
     simu_observers[unit].angle = 0.0f;
-    simu_observers[unit].estim_iq = 0.0f;
+    simu_observers[unit].alpha = settings.alpha;
 
     ESP_LOGI(TAG, "Base rate of the observer: %f", 1.0f / settings.dt);
 

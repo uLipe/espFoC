@@ -157,11 +157,11 @@ esp_foc_observer_t *pll_observer_new(int unit, esp_foc_pll_observer_settings_t s
     est->ki = settings.pll_ki;
     est->r = settings.phase_resistance;
     est->l = settings.phase_inductance;
-    est->dt = settings.dt * 2.0f;
+    est->dt = settings.dt;
     est->inv_dt = (1.0f / est->dt);
     esp_foc_low_pass_filter_set_cutoff(&est->current_filters[0], 0.2f * est->inv_dt, est->inv_dt);
     esp_foc_low_pass_filter_set_cutoff(&est->current_filters[1], 0.2f * est->inv_dt, est->inv_dt);
-    est->converging_count = (int)( PLL_OBSERVER_CONVERGE_WAIT_TIME / settings.dt);
+    est->converging_count = (int)( 20 / settings.dt);
 
     ESP_LOGI(TAG, "Observer sample time %f s", est->dt);
 

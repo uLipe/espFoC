@@ -27,9 +27,7 @@
 #include <espFoC/esp_foc.h>
 
 typedef struct {
-    float phase_resistance;
-    float phase_inductance;
-    float pole_pairs;
+    float alpha;
     float dt;
 } esp_foc_simu_observer_settings_t;
 

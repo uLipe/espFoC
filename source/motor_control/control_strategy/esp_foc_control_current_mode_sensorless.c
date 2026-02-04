@@ -113,7 +113,6 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
 
         esp_foc_current_control_loop(axis);
 
-
         esp_foc_modulate_dq_voltage(e_sin,
                         e_cos,
                         axis->u_d.raw,
@@ -149,7 +148,7 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
         if(axis->isensor_driver != NULL) {
             int not_conv = axis->current_observer->update(axis->current_observer, &in);
             if(!not_conv) {
-                // axis->observer = axis->current_observer;
+                axis->observer = axis->current_observer;
             }
         }
 

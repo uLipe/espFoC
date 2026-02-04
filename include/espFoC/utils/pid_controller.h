@@ -65,11 +65,20 @@ static inline float  esp_foc_pid_update(esp_foc_pid_controller_t *self,
                                         float reference,
                                         float measure)
 {
+
     float error = reference - measure;
     float error_diff = (error - self->previous_error) * self->inv_dt;
+    float mv_raw = (self->kp * error) +
+        (self->ki * self->accumulated_error) +
+        (self->kd * error_diff);
+    float mv = esp_foc_saturate(self, mv_raw, self->max_output_value) ;
 
-    /* Skip integration if output is saturated already */
-    if(!self->saturated) {
+    float du = mv_raw - mv;
+    bool sat = (du != 0.0f);
+    bool push_out = sat && ((du * error) > 0.0f);
+
+    /* Avoid to integrate if the outpur is satured but the error still drivers in the wrong direction */
+    if(!push_out) {
         self->accumulated_error += (error * self->dt);
         if(self->accumulated_error > self->integrator_limit) {
             self->accumulated_error = self->integrator_limit;
@@ -80,9 +89,6 @@ static inline float  esp_foc_pid_update(esp_foc_pid_controller_t *self,
 
     self->previous_error = error;
 
-    float mv = (self->kp * error) +
-            (self->ki * self->accumulated_error) +
-            (self->kd * error_diff);
 
-    return esp_foc_saturate(self, mv, self->max_output_value);
+    return mv;
 }
