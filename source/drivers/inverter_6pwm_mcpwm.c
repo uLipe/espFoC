@@ -36,6 +36,7 @@
 
 typedef struct {
     int enable_gpio;
+    int enable_inverted;
 
     mcpwm_timer_handle_t timer;
     mcpwm_oper_handle_t operators[3];
@@ -158,7 +159,7 @@ static void inverter_enable(esp_foc_inverter_t *self)
 {
     esp_foc_mcpwm6_inverter_t *obj = __containerof(self, esp_foc_mcpwm6_inverter_t, interface);
     if (obj->enable_gpio >= 0) {
-        gpio_set_level(obj->enable_gpio, true);
+        gpio_set_level(obj->enable_gpio, obj->enable_inverted ? false : true);
     }
 }
 
@@ -166,7 +167,7 @@ static void inverter_disable(esp_foc_inverter_t *self)
 {
     esp_foc_mcpwm6_inverter_t *obj = __containerof(self, esp_foc_mcpwm6_inverter_t, interface);
     if (obj->enable_gpio >= 0) {
-        gpio_set_level(obj->enable_gpio, false);
+        gpio_set_level(obj->enable_gpio, obj->enable_inverted ? true : false);
     }
 }
 
@@ -184,6 +185,13 @@ esp_foc_inverter_t *inverter_6pwm_mpcwm_new(int gpio_u_high, int gpio_u_low,
 
     esp_foc_mcpwm6_inverter_t *obj = &mcpwm6s[port];
     memset(obj, 0, sizeof(*obj));
+
+    if(gpio_enable < 0) {
+        gpio_enable = -gpio_enable;
+        obj->enable_inverted = 1;
+    } else {
+        obj->enable_inverted = 0;
+    }
 
     obj->enable_gpio = gpio_enable;
     obj->dc_link_voltage = dc_link_voltage;
@@ -209,7 +217,7 @@ esp_foc_inverter_t *inverter_6pwm_mpcwm_new(int gpio_u_high, int gpio_u_low,
             .intr_type = GPIO_INTR_DISABLE,
         };
         gpio_config(&io_conf);
-        gpio_set_level(obj->enable_gpio, false);
+        gpio_set_level(obj->enable_gpio, obj->enable_inverted ? true : false);
     }
 
     /* Create MCPWM timer/operator/comparator resources in selected group (port). */
