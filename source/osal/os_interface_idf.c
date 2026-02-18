@@ -39,9 +39,9 @@ static int debug_pin_internal = -1;
 int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority)
 {
     /* Allows cretion of low-priority tasks */
-    int cpu_num = 1 ;
+    int cpu_num = 1;
     if(priority < 0) {
-        priority = (configMAX_PRIORITIES - 1);
+        priority = (configMAX_PRIORITIES - 8);
         cpu_num = PRO_CPU_NUM;
     }
 
