@@ -49,17 +49,11 @@ static void inverter_isr(void *data)
 
 static void handle_motor_startup(esp_foc_axis_t *axis)
 {
-    float i_mag = sqrtf(axis->i_alpha.raw*axis->i_alpha.raw + axis->i_beta.raw*axis->i_beta.raw);
-    float err = ESP_FOC_MAX_STARTUP_IQ - i_mag;
-    axis->u_q.raw  += ESP_FOC_STARTUP_IQ_GAIN * err;
-
     /*Clamp the ramp generator if the integral is pushing the command formward to avoid stalling*/
-    if((axis->u_q.raw >= ESP_FOC_MAX_STARTUP_VQ_FACTOR * axis->max_voltage) || (axis->u_q.raw < 0.0f)) {
-        axis->open_loop_observer->reset(axis->open_loop_observer, 0.0f);
+    if(axis->target_i_q.raw  < ESP_FOC_MAX_STARTUP_IQ) {
+        axis->target_i_q.raw += ESP_FOC_MAX_STARTUP_IQ / 100.0f;
     }
 
-    axis->u_q.raw  = esp_foc_clamp(axis->u_q.raw , 0, ESP_FOC_MAX_STARTUP_VQ_FACTOR * axis->max_voltage);
-    axis->u_d.raw  = 0;
 }
 
 void do_current_mode_sensorless_high_speed_loop(void *arg)
@@ -91,6 +85,9 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
         axis->high_speed_loop_cb,
         axis);
 
+    axis->target_i_q.raw = 0.0f;
+    axis->target_i_d.raw = 0.0f;
+
     while(1) {
         esp_foc_wait_notifier();
 
@@ -107,7 +104,7 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
          */
         axis->isensor_driver->sample_isensors(axis->isensor_driver);
 
-        axis->rotor_position = axis->observer->get_angle(axis->observer);
+        axis->rotor_position = axis->observer->get_angle(axis->observer) * axis->natural_direction;
         axis->rotor_elec_angle = esp_foc_normalize_angle(axis->rotor_position);
         axis->current_speed = axis->observer->get_speed(axis->observer);
 
@@ -127,9 +124,10 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
 
         if(axis->rotor_aligned == ESP_FOC_ERR_ROTOR_STARTUP) {
             handle_motor_startup(axis);
-        } else {
-            esp_foc_current_control_loop(axis);
         }
+
+        esp_foc_current_control_loop(axis);
+
         esp_foc_modulate_dq_voltage(e_sin,
                         e_cos,
                         axis->u_d.raw,
@@ -169,9 +167,9 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
             if(!nc && !swapped) {
                 ESP_DRAM_LOGI(tag, "PLL_LOCKED! \n");
                 axis->current_observer->reset(axis->current_observer, pll_delta);
-                axis->observer = axis->current_observer;
+                // axis->observer = axis->current_observer;
+                // axis->rotor_aligned = ESP_FOC_OK;
                 swapped = true;
-                axis->rotor_aligned = ESP_FOC_OK;
             }
         }
 
