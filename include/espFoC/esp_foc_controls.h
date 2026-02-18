@@ -24,16 +24,16 @@
 
 #pragma once
 
-#define ESP_FOC_ESTIMATORS_DOWNSAMPLING    4
-#define ESP_FOC_LOW_SPEED_DOWNSAMPLING     10
-#define ESP_FOC_PWM_RATE_HZ                50000
-#define ESP_FOC_ISENSOR_CALIBRATION_ROUNDS 100
-#define ESP_FOC_PLL_BANDWIDTH_HZ 200.0f
-#define ESP_FOC_PLL_ZETA 0.707f
-#define ESP_FOC_MAX_STARTUP_IQ  1.0f
-#define ESP_FOC_MAX_STARTUP_VQ_FACTOR  0.3f //30% Vbus
-#define ESP_FOC_STARTUP_IQ_GAIN  0.1f
-
+#define ESP_FOC_ESTIMATORS_DOWNSAMPLING     4
+#define ESP_FOC_LOW_SPEED_DOWNSAMPLING      20
+#define ESP_FOC_PWM_RATE_HZ                 50000
+#define ESP_FOC_ISENSOR_CALIBRATION_ROUNDS  100
+#define ESP_FOC_PLL_BANDWIDTH_HZ            100.0f
+#define ESP_FOC_PLL_ZETA                    0.707f
+#define ESP_FOC_MAX_STARTUP_IQ              0.5f //A
+#define ESP_FOC_MAX_STARTUP_VQ_FACTOR       0.3f //30% Vbus
+#define ESP_FOC_STARTUP_IQ_GAIN             0.012f // V/A
+#define ESP_FOC_PLL_MIN_ANGLE_ERROR         (0.25)
 
 static inline void esp_foc_current_control_loop(esp_foc_axis_t *axis)
 {

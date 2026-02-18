@@ -119,29 +119,29 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->skip_torque_control = 0;
     axis->torque_controller[0].dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING;
     axis->torque_controller[0].inv_dt = (1.0f / axis->torque_controller[0].dt);
-    current_control_analog_bandwith = (2.0f * M_PI * (axis->torque_controller[0].inv_dt / 10.0f));
+    current_control_analog_bandwith = (2.0f * M_PI * 200);
 
     axis->torque_controller[0].kp = settings.motor_inductance * current_control_analog_bandwith;
     axis->torque_controller[0].ki = settings.motor_resistance * current_control_analog_bandwith;
     axis->torque_controller[0].kd = 0.0f;
-    axis->torque_controller[0].integrator_limit = axis->max_voltage * 10.0f;
-    axis->torque_controller[0].max_output_value = axis->max_voltage/*settings.torque_control_settings[0].max_output_value*/;
+    axis->torque_controller[0].integrator_limit = axis->max_voltage / axis->torque_controller[0].ki;
+    axis->torque_controller[0].max_output_value = axis->max_voltage * 0.85f; /* Use 85% of maximum available voltage command */;
+    axis->torque_controller[0].min_output_value = -(axis->max_voltage * 0.85f);
 
     esp_foc_pid_reset(&axis->torque_controller[0]);
-    esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[0], 0.3f * axis->torque_controller[0].inv_dt,
+    esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[0], 0.05f * axis->torque_controller[0].inv_dt,
                                         axis->torque_controller[0].inv_dt);
 
     axis->torque_controller[1].dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING;
     axis->torque_controller[1].inv_dt = (1.0f / axis->torque_controller[1].dt);
-    current_control_analog_bandwith = (2.0f * M_PI * (axis->torque_controller[1].inv_dt / 10.0f));
-
     axis->torque_controller[1].kp = settings.motor_inductance * current_control_analog_bandwith;
     axis->torque_controller[1].ki = settings.motor_resistance * current_control_analog_bandwith;
     axis->torque_controller[1].kd = 0.0f;
-    axis->torque_controller[1].integrator_limit = axis->max_voltage * 10.0f;
-    axis->torque_controller[1].max_output_value = axis->max_voltage /* settings.torque_control_settings[1].max_output_value */;
+    axis->torque_controller[1].integrator_limit =  axis->max_voltage / axis->torque_controller[1].ki;
+    axis->torque_controller[1].max_output_value = axis->max_voltage * 0.85f; /* Use 85% of maximum available voltage command */
+    axis->torque_controller[0].min_output_value = -(axis->max_voltage * 0.85f);
     esp_foc_pid_reset(&axis->torque_controller[1]);
-    esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[1], 0.3f * axis->torque_controller[1].inv_dt,
+    esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[1], 0.05f * axis->torque_controller[1].inv_dt,
                                         axis->torque_controller[1].inv_dt);
 
     axis->motor_pole_pairs = (float)settings.motor_pole_pairs;
@@ -162,8 +162,9 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
         axis->open_loop_observer = simu_observer_new(settings.motor_unit,
             (esp_foc_simu_observer_settings_t) {
-                .alpha = 10.0,
-                .dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING
+                .alpha = 6.28f * axis->motor_pole_pairs,
+                .dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING,
+                .pole_pairs = axis->motor_pole_pairs
             }
         );
 
@@ -236,10 +237,9 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
         float current_ticks;
         current_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
         ESP_LOGI(tag, "rotor ticks offset: %f [ticks] for Coil U", current_ticks);
-
         axis->rotor_sensor_driver->set_to_zero(axis->rotor_sensor_driver);
     } else {
-        axis->open_loop_observer->reset(axis->open_loop_observer, 0.0f);
+        axis->open_loop_observer->reset(axis->open_loop_observer, -1.0f);
         axis->current_observer->reset(axis->current_observer, 0.0f);
     }
 
@@ -271,6 +271,7 @@ esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis)
     /* Start the scope if it has not been yet: */
     esp_foc_scope_initalize();
 #endif
+
     if(axis->rotor_sensor_driver == NULL) {
         axis->rotor_aligned = ESP_FOC_ERR_ROTOR_STARTUP;
     }
@@ -298,57 +299,6 @@ esp_foc_err_t esp_foc_set_regulation_callback(esp_foc_axis_t *axis, esp_foc_moto
 
     esp_foc_critical_enter();
     axis->regulator_cb = callback;
-    esp_foc_critical_leave();
-
-    return ESP_FOC_OK;
-}
-
-esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_data_t *control_data)
-{
-    if(axis == NULL) {
-        ESP_LOGE(tag, "invalid axis object!");
-        return ESP_FOC_ERR_INVALID_ARG;
-    }
-
-    if(control_data == NULL) {
-        ESP_LOGE(tag, "invalid control data object!");
-        return ESP_FOC_ERR_INVALID_ARG;
-    }
-
-    esp_foc_critical_enter();
-
-    control_data->u_alpha = axis->u_alpha;
-    control_data->u_beta = axis->u_beta;
-
-    control_data->i_alpha = axis->i_alpha;
-    control_data->i_beta = axis->i_beta;
-
-    control_data->u = axis->u_u;
-    control_data->v = axis->u_v;
-    control_data->w = axis->u_w;
-
-    control_data->out_q = axis->u_q;
-    control_data->out_d = axis->u_d;
-    control_data->dt.raw = axis->dt;
-
-    control_data->speed.raw = axis->current_speed;
-
-    if(axis->rotor_sensor_driver == NULL) {
-        control_data->rotor_position.raw =  axis->open_loop_observer->get_angle(axis->open_loop_observer);
-        control_data->observer_angle.raw = axis->current_observer->get_angle(axis->current_observer);
-    } else {
-        control_data->rotor_position.raw =  axis->rotor_position;
-        control_data->extrapolated_rotor_position.raw =  axis->extrapolated_rotor_position;
-        control_data->observer_angle.raw = 0.0f;
-    }
-
-    control_data->i_u.raw = axis->i_u;
-    control_data->i_v.raw = axis->i_v;
-    control_data->i_w.raw = axis->i_w;
-
-    control_data->i_q = axis->i_q;
-    control_data->i_d = axis->i_d;
-
     esp_foc_critical_leave();
 
     return ESP_FOC_OK;

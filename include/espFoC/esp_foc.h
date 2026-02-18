@@ -47,6 +47,7 @@ typedef enum {
     ESP_FOC_ERR_ALIGNMENT_IN_PROGRESS = -4,
     ESP_FOC_ERR_TIMESTEP_TOO_SMALL = -5,
     ESP_FOC_ERR_ROTOR_STARTUP = -6,
+    ESP_FOC_ERR_ROTOR_STARTUP_PI = -7,
     ESP_FOC_ERR_UNKNOWN = -128
 } esp_foc_err_t;
 
@@ -73,41 +74,6 @@ typedef struct {
     int motor_unit;
 } esp_foc_motor_control_settings_t;
 
-typedef struct {
-    esp_foc_seconds timestamp;
-
-    esp_foc_seconds dt;
-    esp_foc_u_voltage u;
-    esp_foc_v_voltage v;
-    esp_foc_w_voltage w;
-
-    esp_foc_q_voltage out_q;
-    esp_foc_d_voltage out_d;
-
-    esp_foc_u_current i_u;
-    esp_foc_v_current i_v;
-    esp_foc_w_current i_w;
-
-    esp_foc_q_current i_q;
-    esp_foc_d_current i_d;
-
-    esp_foc_alpha_voltage u_alpha;
-    esp_foc_beta_voltage u_beta;
-
-    esp_foc_alpha_current i_alpha;
-    esp_foc_beta_current i_beta;
-
-    esp_foc_radians rotor_position;
-    esp_foc_radians extrapolated_rotor_position;
-    esp_foc_radians position;
-    esp_foc_radians_per_second speed;
-
-    esp_foc_radians target_position;
-    esp_foc_radians_per_second target_speed;
-    esp_foc_radians_per_second observer_angle;
-
-} esp_foc_control_data_t;
-
 #include "espFoC/esp_foc_scope.h"
 
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis, esp_foc_inverter_t *inverter, esp_foc_rotor_sensor_t *rotor,
@@ -115,7 +81,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis, esp_foc_inverter_t *
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_set_regulation_callback(esp_foc_axis_t *axis, esp_foc_motor_regulation_callback_t callback);
-esp_foc_err_t esp_foc_get_control_data(esp_foc_axis_t *axis, esp_foc_control_data_t *control_data);
 
 #include "espFoC/esp_foc_servo_speed.h"
 #include "espFoC/esp_foc_servo_position.h"

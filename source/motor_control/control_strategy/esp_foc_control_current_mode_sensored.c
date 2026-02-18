@@ -63,10 +63,6 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
     uint64_t current_timestamp = 0;
     bool no_isensor = (axis->isensor_driver == NULL) ? true : false;
 
-#ifdef CONFIG_ESP_FOC_SCOPE
-    esp_foc_control_data_t control_data;
-#endif
-
     axis->low_speed_ev = esp_foc_get_event_handle();
     axis->downsampling_low_speed = ESP_FOC_LOW_SPEED_DOWNSAMPLING;
 
@@ -159,8 +155,7 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
         esp_foc_send_notification(axis->regulator_ev);
 
 #ifdef CONFIG_ESP_FOC_SCOPE
-        esp_foc_get_control_data(axis, &control_data);
-        esp_foc_scope_data_push(&control_data);
+        esp_foc_scope_data_push();
 #endif
 
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
