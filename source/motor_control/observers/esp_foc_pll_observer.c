@@ -30,13 +30,18 @@
 #include "esp_log.h"
 #include "espFoC/observer/esp_foc_pll_observer.h"
 
-#define PLL_OBSERVER_CONVERGE_WAIT_TIME  5.0f
+#define PLL_OBSERVER_CONVERGE_WAIT_TIME     1.0f
+#define PLL_LOCK_VAR                        0.2f
+#define PLL_INTEGRATOR_FREEZE_TIME          0.5f
+#define PLL_MAG2_MIN                        0.5f
 
 typedef struct {
     float theta_est;
     float omega_est;
     float theta_error;
     esp_foc_lp_filter_t current_filters[2];
+    esp_foc_lp_filter_t theta_filter;
+    float e_mag2;
     float e_alpha;
     float e_beta;
     float i_alpha_prev;
@@ -49,6 +54,8 @@ typedef struct {
     float dt;
     float inv_dt;
     int converging_count;
+    int integrator_freeze_time;
+    float prev_err;
     esp_foc_observer_t interface;
 } angle_estimator_pll_t;
 
@@ -59,9 +66,6 @@ static int pll_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
 
-    in->i_alpha_beta[0] = esp_foc_low_pass_filter_update(&est->current_filters[0], in->i_alpha_beta[0]);
-    in->i_alpha_beta[1] = esp_foc_low_pass_filter_update(&est->current_filters[1], in->i_alpha_beta[1]);
-
     /* Estimate the back EMF alpha/beta voltages using motor parameters plus the current observed */
     float di_alpha_dt = (in->i_alpha_beta[0] - est->i_alpha_prev) * est->inv_dt;
     float di_beta_dt = (in->i_alpha_beta[1] - est->i_beta_prev)  * est->inv_dt;
@@ -69,27 +73,44 @@ static int pll_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs
     est->i_alpha_prev = in->i_alpha_beta[0];
     est->i_beta_prev = in->i_alpha_beta[1];
 
-    est->e_alpha = in->u_alpha_beta[0] - est->r * in->i_alpha_beta[0] - est->l * di_alpha_dt;
-    est->e_beta = in->u_alpha_beta[1] - est->r * in->i_alpha_beta[1]- est->l * di_beta_dt;
+    est->e_alpha = esp_foc_low_pass_filter_update(&est->current_filters[0],
+                        in->u_alpha_beta[0] - est->r * in->i_alpha_beta[0] - est->l * di_alpha_dt);
+
+    est->e_beta = esp_foc_low_pass_filter_update(&est->current_filters[1],
+                        in->u_alpha_beta[1] - est->r * in->i_alpha_beta[1]- est->l * di_beta_dt);
 
     /* Do the phase detector by cross producting the local NCO with the alphabeta EMF vector*/
     float mix = (est->e_alpha * -esp_foc_sine(est->theta_est)) +
                 (est->e_beta * esp_foc_cosine(est->theta_est));
 
-    /* Now normalize the resulting vector to keep the gain constant over the estimation speed */
-    est->theta_error = mix * (esp_foc_rsqrt_fast(est->e_alpha * est->e_alpha + est->e_beta * est->e_beta + 0.001f));
+    est->e_mag2 = est->e_alpha * est->e_alpha + est->e_beta * est->e_beta;
 
-    /* Run the PLL PI control stage to drive the observer to the correct value.*/
-    est->integral += est->theta_error * est->dt;
-    est->omega_est = (est->kp * est->theta_error) + (est->ki * est->integral);
+    if(est->e_mag2 < PLL_MAG2_MIN) {
+        est->theta_error = 0.0f;
+        est->integral *= 0.9999f;
+    } else {
+        /* Now normalize the resulting vector to keep the gain constant over the estimation speed */
+        est->theta_error = mix * (esp_foc_rsqrt_fast(est->e_mag2 + 0.0001f));
+        est->integral += (est->theta_error * est->dt * est->ki);
+    }
+
+    est->theta_error = (esp_foc_low_pass_filter_update(&est->theta_filter, est->theta_error));
+    est->omega_est = (est->kp * est->theta_error) + (est->integral);
     est->theta_est += est->omega_est * est->dt;
-
     est->theta_est = esp_foc_normalize_angle(est->theta_est);
 
-    /* TODO: replace this with the PLL phase detector current error */
-    if(est->converging_count) {
+    if((fabsf(est->theta_error - est->prev_err) <= PLL_LOCK_VAR) && (est->e_mag2 > PLL_MAG2_MIN)) {
         est->converging_count--;
+    } else  {
+        est->converging_count = (int)( PLL_OBSERVER_CONVERGE_WAIT_TIME / est->dt);
     }
+
+    est->prev_err = est->theta_error;
+
+    if(est->integrator_freeze_time) {
+        est->integrator_freeze_time--;
+    }
+
 
     return est->converging_count;
 }
@@ -109,7 +130,9 @@ static float pll_observer_get_speed(esp_foc_observer_t *self)
 static void pll_observer_reset(esp_foc_observer_t *self, float offset)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
-    est->theta_est = offset;
+    est->integral = est->omega_est / est->ki;
+    est->theta_est = esp_foc_normalize_angle(est->theta_est + offset);
+    est->integrator_freeze_time = (PLL_INTEGRATOR_FREEZE_TIME / est->dt);
 }
 
 esp_foc_observer_t *pll_observer_new(int unit, esp_foc_pll_observer_settings_t settings)
@@ -159,9 +182,10 @@ esp_foc_observer_t *pll_observer_new(int unit, esp_foc_pll_observer_settings_t s
     est->l = settings.phase_inductance;
     est->dt = settings.dt;
     est->inv_dt = (1.0f / est->dt);
-    esp_foc_low_pass_filter_set_cutoff(&est->current_filters[0], 0.2f * est->inv_dt, est->inv_dt);
-    esp_foc_low_pass_filter_set_cutoff(&est->current_filters[1], 0.2f * est->inv_dt, est->inv_dt);
-    est->converging_count = (int)( 20 / settings.dt);
+    esp_foc_low_pass_filter_set_cutoff(&est->current_filters[0], 0.05f * est->inv_dt, est->inv_dt);
+    esp_foc_low_pass_filter_set_cutoff(&est->current_filters[1], 0.05f * est->inv_dt, est->inv_dt);
+    esp_foc_low_pass_filter_set_cutoff(&est->theta_filter, ESP_FOC_PLL_BANDWIDTH_HZ, est->inv_dt);
+    est->converging_count = (int)( PLL_OBSERVER_CONVERGE_WAIT_TIME / settings.dt);
 
     ESP_LOGI(TAG, "Observer sample time %f s", est->dt);
 

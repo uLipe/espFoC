@@ -30,11 +30,11 @@
 #include "esp_log.h"
 #include "espFoC/observer/esp_foc_simu_observer.h"
 
-
 typedef struct {
     float angle;
     float omega;
     float alpha;
+    float pole_pairs;
     float dt;
     esp_foc_observer_t interface;
 }esp_foc_simul_observer_t;
@@ -50,7 +50,7 @@ static int simu_observer_update(esp_foc_observer_t *self, esp_foc_observer_input
     obj->angle += obj->omega * obj->dt;
     obj->angle = esp_foc_normalize_angle(obj->angle);
 
-    return 0;
+    return obj->angle * obj->pole_pairs;
 }
 
 static float simu_observer_get_angle(esp_foc_observer_t *self)
@@ -67,10 +67,13 @@ static float simu_observer_get_speed(esp_foc_observer_t *self)
 
 static void simu_observer_reset(esp_foc_observer_t *self, float offset)
 {
-    (void)offset;
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
-    obj->angle = 0.0f;
-    obj->omega = 0.0f;
+    if(offset < 0.0f) {
+        obj->angle = 0.0f;
+        obj->omega = 0.0f;
+    } else {
+        obj->alpha = offset;
+    }
 }
 
 esp_foc_observer_t *simu_observer_new(int unit, esp_foc_simu_observer_settings_t settings)
@@ -99,6 +102,7 @@ esp_foc_observer_t *simu_observer_new(int unit, esp_foc_simu_observer_settings_t
     simu_observers[unit].omega = 0.0f;
     simu_observers[unit].angle = 0.0f;
     simu_observers[unit].alpha = settings.alpha;
+    simu_observers[unit].pole_pairs = settings.pole_pairs;
 
     ESP_LOGI(TAG, "Base rate of the observer: %f", 1.0f / settings.dt);
 
