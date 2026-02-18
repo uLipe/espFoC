@@ -27,9 +27,10 @@
 #include <espFoC/esp_foc.h>
 
 typedef struct {
-    float alpha;
-    float dt;
+    float phase_resistance;
+    float phase_inductance;
     float pole_pairs;
+    float dt;
 } esp_foc_simu_observer_settings_t;
 
 esp_foc_observer_t *simu_observer_new(int unit, esp_foc_simu_observer_settings_t settings);

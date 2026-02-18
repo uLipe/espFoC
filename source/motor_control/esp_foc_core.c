@@ -115,21 +115,20 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         axis->isensor_driver->calibrate_isensors(axis->isensor_driver,
             ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
     }
-
+    current_control_analog_bandwith = (2.0f * M_PI * 30.0f);
     axis->skip_torque_control = 0;
+
     axis->torque_controller[0].dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING;
     axis->torque_controller[0].inv_dt = (1.0f / axis->torque_controller[0].dt);
-    current_control_analog_bandwith = (2.0f * M_PI * 200);
-
     axis->torque_controller[0].kp = settings.motor_inductance * current_control_analog_bandwith;
     axis->torque_controller[0].ki = settings.motor_resistance * current_control_analog_bandwith;
     axis->torque_controller[0].kd = 0.0f;
     axis->torque_controller[0].integrator_limit = axis->max_voltage / axis->torque_controller[0].ki;
-    axis->torque_controller[0].max_output_value = axis->max_voltage * 0.85f; /* Use 85% of maximum available voltage command */;
-    axis->torque_controller[0].min_output_value = -(axis->max_voltage * 0.85f);
+    axis->torque_controller[0].max_output_value = axis->max_voltage; /* Use 85% of maximum available voltage command */;
+    axis->torque_controller[0].min_output_value = -(axis->max_voltage);
 
     esp_foc_pid_reset(&axis->torque_controller[0]);
-    esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[0], 0.05f * axis->torque_controller[0].inv_dt,
+    esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[0], 0.1f * axis->torque_controller[0].inv_dt,
                                         axis->torque_controller[0].inv_dt);
 
     axis->torque_controller[1].dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING;
@@ -137,11 +136,11 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->torque_controller[1].kp = settings.motor_inductance * current_control_analog_bandwith;
     axis->torque_controller[1].ki = settings.motor_resistance * current_control_analog_bandwith;
     axis->torque_controller[1].kd = 0.0f;
-    axis->torque_controller[1].integrator_limit =  axis->max_voltage / axis->torque_controller[1].ki;
-    axis->torque_controller[1].max_output_value = axis->max_voltage * 0.85f; /* Use 85% of maximum available voltage command */
-    axis->torque_controller[0].min_output_value = -(axis->max_voltage * 0.85f);
+    axis->torque_controller[1].integrator_limit =  (axis->max_voltage * 0.15f) / axis->torque_controller[1].ki;
+    axis->torque_controller[1].max_output_value = axis->max_voltage * 0.15f; /* Use 20% of maximum available voltage command */
+    axis->torque_controller[1].min_output_value = -(axis->max_voltage * 0.15f);
     esp_foc_pid_reset(&axis->torque_controller[1]);
-    esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[1], 0.05f * axis->torque_controller[1].inv_dt,
+    esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[1], 0.1f * axis->torque_controller[1].inv_dt,
                                         axis->torque_controller[1].inv_dt);
 
     axis->motor_pole_pairs = (float)settings.motor_pole_pairs;
@@ -162,9 +161,10 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
         axis->open_loop_observer = simu_observer_new(settings.motor_unit,
             (esp_foc_simu_observer_settings_t) {
-                .alpha = 6.28f * axis->motor_pole_pairs,
+                .phase_resistance = settings.motor_resistance,
+                .phase_inductance = settings.motor_inductance,
+                .pole_pairs = axis->motor_pole_pairs,
                 .dt = axis->dt * ESP_FOC_LOW_SPEED_DOWNSAMPLING,
-                .pole_pairs = axis->motor_pole_pairs
             }
         );
 
