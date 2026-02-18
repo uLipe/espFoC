@@ -29,6 +29,7 @@
 typedef struct {
     float alpha;
     float dt;
+    float pole_pairs;
 } esp_foc_simu_observer_settings_t;
 
 esp_foc_observer_t *simu_observer_new(int unit, esp_foc_simu_observer_settings_t settings);
