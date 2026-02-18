@@ -40,7 +40,6 @@
 static const char *TAG = "ESP_FOC_ISENSOR";
 
 typedef struct {
-    esp_foc_lp_filter_t current_filters[4];
     adc_channel_t channels[4];
     adc_unit_t units[4];
     adc_continuous_handle_t handle;
@@ -81,7 +80,9 @@ static adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
 
 DRAM_ATTR static isensor_adc_t isensor_adc;
 static bool adc_initialized = false;
-static const float adc_to_volts = ((3.9f)/ 4096.0f);
+static const float adc_effective_range = 2048.0f;
+static const float adc_to_volts = ((3.1f)/ 4096.0f);
+static float raw_floats[4];
 
 static bool isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
 {
@@ -136,20 +137,31 @@ static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
     isensor_adc_t *obj =
         __containerof(self, isensor_adc_t, interface);
 
+    /* Used to capture data for scope usage */
+    raw_floats[0] = (float)obj->raw_reads[0];
+    raw_floats[1] = (float)obj->raw_reads[1];
+    raw_floats[2] = (float)obj->raw_reads[2];
+    raw_floats[3] = (float)obj->raw_reads[3];
+
     esp_foc_critical_enter();
-    obj->currents[0] = (float)obj->raw_reads[0] * adc_to_volts;
-    obj->currents[1] = (float)obj->raw_reads[1] * adc_to_volts;
-    obj->currents[2] = (float)obj->raw_reads[2] * adc_to_volts;
-    obj->currents[3] = (float)obj->raw_reads[3] * adc_to_volts;
+    obj->currents[0] = (float)obj->raw_reads[0];
+    obj->currents[1] = (float)obj->raw_reads[1];
+    obj->currents[2] = (float)obj->raw_reads[2];
+    obj->currents[3] = (float)obj->raw_reads[3];
     esp_foc_critical_leave();
 
-    values->iu_axis_0 = esp_foc_low_pass_filter_update(&obj->current_filters[0], (obj->currents[0] - obj->offsets[0]) * isensor_adc.adc_to_current_scale);
-    values->iv_axis_0 = esp_foc_low_pass_filter_update(&obj->current_filters[1], (obj->currents[1] - obj->offsets[1]) * isensor_adc.adc_to_current_scale);
-    values->iw_axis_0 = -(values->iu_axis_0 +  values->iv_axis_0);
-    values->iu_axis_1 = esp_foc_low_pass_filter_update(&obj->current_filters[2], (obj->currents[2] - obj->offsets[2]) * isensor_adc.adc_to_current_scale);
-    values->iv_axis_1 = esp_foc_low_pass_filter_update(&obj->current_filters[3], (obj->currents[3] - obj->offsets[3]) * isensor_adc.adc_to_current_scale);
-    values->iw_axis_1 = -(values->iu_axis_1 +  values->iv_axis_1);
+    values->iu_axis_0 = (esp_foc_clamp(obj->currents[0] - obj->offsets[0], -adc_effective_range, adc_effective_range)  *
+                        isensor_adc.adc_to_current_scale);
+    values->iv_axis_0 = (esp_foc_clamp(obj->currents[1] - obj->offsets[1], -adc_effective_range, adc_effective_range) *
+                        isensor_adc.adc_to_current_scale);
+    values->iw_axis_0 = -(values->iu_axis_0 + values->iv_axis_0);
 
+    values->iu_axis_1 = (esp_foc_clamp(obj->currents[2] - obj->offsets[2], -adc_effective_range, adc_effective_range) *
+                        isensor_adc.adc_to_current_scale);
+    values->iv_axis_1 = (esp_foc_clamp(obj->currents[3] - obj->offsets[3], -adc_effective_range, adc_effective_range) *
+                        isensor_adc.adc_to_current_scale);
+
+    values->iw_axis_1 = -(values->iu_axis_1 +  values->iv_axis_1);
 }
 
 static void sample_isensors(esp_foc_isensor_t *self)
@@ -175,10 +187,10 @@ static void calibrate_isensors (esp_foc_isensor_t *self, int calibration_rounds)
         self->sample_isensors(self);
         esp_foc_sleep_ms(10);
 
-        obj->offsets[0] += ((float)obj->raw_reads[0] * adc_to_volts);
-        obj->offsets[1] += ((float)obj->raw_reads[1] * adc_to_volts);
-        obj->offsets[2] += ((float)obj->raw_reads[2] * adc_to_volts);
-        obj->offsets[3] += ((float)obj->raw_reads[3] * adc_to_volts);
+        obj->offsets[0] += ((float)obj->raw_reads[0]);
+        obj->offsets[1] += ((float)obj->raw_reads[1]);
+        obj->offsets[2] += ((float)obj->raw_reads[2]);
+        obj->offsets[3] += ((float)obj->raw_reads[3]);
     }
 
     obj->offsets[0] /= calibration_rounds;
@@ -219,7 +231,7 @@ esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
         return &isensor_adc.interface;
     }
 
-    isensor_adc.adc_to_current_scale = (1.0f / (config->amp_gain * config->shunt_resistance));
+    isensor_adc.adc_to_current_scale = adc_to_volts * (1.0f / (config->amp_gain * config->shunt_resistance));
 
     isensor_adc.interface.fetch_isensors = fetch_isensors;
     isensor_adc.interface.sample_isensors = sample_isensors;
@@ -239,19 +251,6 @@ esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
     isensor_adc.offsets[2] = 0.0f;
     isensor_adc.offsets[3] = 0.0f;
     isensor_adc.callback = NULL;
-
-    esp_foc_low_pass_filter_set_cutoff(&isensor_adc.current_filters[0],
-                            ESP_FOC_PWM_RATE_HZ / (10 * ESP_FOC_LOW_SPEED_DOWNSAMPLING),
-                            ESP_FOC_PWM_RATE_HZ / ESP_FOC_LOW_SPEED_DOWNSAMPLING  );
-    esp_foc_low_pass_filter_set_cutoff(&isensor_adc.current_filters[1],
-                            ESP_FOC_PWM_RATE_HZ / (10 * ESP_FOC_LOW_SPEED_DOWNSAMPLING),
-                            ESP_FOC_PWM_RATE_HZ / ESP_FOC_LOW_SPEED_DOWNSAMPLING  );
-    esp_foc_low_pass_filter_set_cutoff(&isensor_adc.current_filters[2],
-                            ESP_FOC_PWM_RATE_HZ / (10 * ESP_FOC_LOW_SPEED_DOWNSAMPLING),
-                            ESP_FOC_PWM_RATE_HZ / ESP_FOC_LOW_SPEED_DOWNSAMPLING  );
-    esp_foc_low_pass_filter_set_cutoff(&isensor_adc.current_filters[3],
-                            ESP_FOC_PWM_RATE_HZ / (10 * ESP_FOC_LOW_SPEED_DOWNSAMPLING),
-                            ESP_FOC_PWM_RATE_HZ / ESP_FOC_LOW_SPEED_DOWNSAMPLING  );
 
     continuous_adc_init(&isensor_adc);
     adc_initialized = true;
