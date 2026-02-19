@@ -50,11 +50,31 @@ jobs:
       run: |
         ./idf/install.sh
         . ./idf/export.sh
-        pushd examples/axis_standalone
-        idf.py set-target esp32
+        pushd examples/axis_sensored
+        idf.py set-target esp32s3
+        idf.py build
+        idf.py set-target esp32p4
         idf.py build
         popd
-        pushd examples/axis_standalone
+        pushd examples/axis_standalone_sensorless
+        idf.py set-target esp32s3
+        idf.py build
+        idf.py set-target esp32p4
+        idf.py build
+        popd
+        pushd examples/test_drivers/test_current_sense
+        idf.py set-target esp32s3
+        idf.py build
+        popd
+        pushd examples/test_drivers/test_encoder
+        idf.py set-target esp32s3
+        idf.py build
+        popd
+        pushd examples/test_drivers/test_inverter
+        idf.py set-target esp32s3
+        idf.py build
+        popd
+        pushd examples/test_drivers/test_voltage_path
         idf.py set-target esp32s3
         idf.py build
         popd
