@@ -160,5 +160,7 @@ esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
         i2c_bus_configured = true;
     }
 
+    ESP_LOGI(tag, "Bus-check: %d", read_angle_sensor( rotor_sensors[port].i2c_port));
+
     return &rotor_sensors[port].interface;
 }

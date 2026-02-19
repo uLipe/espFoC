@@ -61,10 +61,7 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
     float elec_delta;
     float theta_timestamp = 0.0f;
     uint64_t current_timestamp = 0;
-
-#ifdef CONFIG_ESP_FOC_SCOPE
-    esp_foc_control_data_t control_data;
-#endif
+    bool no_isensor = (axis->isensor_driver == NULL) ? true : false;
 
     axis->low_speed_ev = esp_foc_get_event_handle();
     axis->downsampling_low_speed = ESP_FOC_LOW_SPEED_DOWNSAMPLING;
@@ -83,9 +80,11 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
         inverter_isr,
         axis);
 
-    axis->isensor_driver->set_isensor_callback(axis->isensor_driver,
-        axis->high_speed_loop_cb,
-        &current_timestamp);
+    if(!no_isensor) {
+        axis->isensor_driver->set_isensor_callback(axis->isensor_driver,
+            axis->high_speed_loop_cb,
+            &current_timestamp);
+    }
 
     while(1) {
         esp_foc_wait_notifier();
@@ -93,14 +92,16 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
        esp_foc_debug_pin_set();
 #endif
-        /* The ADC readings are already buffered while the Angle sensor is being read */
-        axis->isensor_driver->fetch_isensors(axis->isensor_driver, &ival);
-        axis->i_u = ival.iu_axis_0;
-        axis->i_v = ival.iv_axis_0;
-        axis->i_w = ival.iw_axis_0;
+        if(!no_isensor) {
+            /* The ADC readings are already buffered while the Angle sensor is being read */
+            axis->isensor_driver->fetch_isensors(axis->isensor_driver, &ival);
+            axis->i_u = ival.iu_axis_0;
+            axis->i_v = ival.iv_axis_0;
+            axis->i_w = ival.iw_axis_0;
 
-        /* After picking the previous sample start the new one immediately (it will be used on the next loop step )*/
-        axis->isensor_driver->sample_isensors(axis->isensor_driver);
+            /* After picking the previous sample start the new one immediately (it will be used on the next loop step )*/
+            axis->isensor_driver->sample_isensors(axis->isensor_driver);
+        }
 
         axis->rotor_position = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver) *
                                 axis->shaft_ticks_to_radians_ratio * axis->natural_direction;
@@ -116,26 +117,22 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
         float e_cos = esp_foc_cosine(axis->rotor_elec_angle);
 
         raw_speed = (axis->rotor_position - axis->rotor_position_prev) * low_speed_inv_dt;
-
-        esp_foc_critical_enter();
         axis->current_speed = esp_foc_low_pass_filter_update(&axis->velocity_filter, raw_speed);
         axis->rotor_position_prev = axis->rotor_position;
-        esp_foc_critical_leave();
 
-        esp_foc_position_control_loop(axis);
-        esp_foc_velocity_control_loop(axis);
+        if(!no_isensor) {
+            esp_foc_get_dq_currents(e_sin,
+                e_cos,
+                axis->i_u,
+                axis->i_v,
+                axis->i_w,
+                &axis->i_alpha.raw,
+                &axis->i_beta.raw,
+                &axis->i_q.raw,
+                &axis->i_d.raw);
 
-        esp_foc_get_dq_currents(e_sin,
-            e_cos,
-            axis->i_u,
-            axis->i_v,
-            axis->i_w,
-            &axis->i_alpha.raw,
-            &axis->i_beta.raw,
-            &axis->i_q.raw,
-            &axis->i_d.raw);
-
-        esp_foc_current_control_loop(axis);
+            esp_foc_current_control_loop(axis);
+        }
 
         esp_foc_modulate_dq_voltage(e_sin,
                         e_cos,
@@ -155,9 +152,10 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
                                             axis->u_v.raw,
                                             axis->u_w.raw);
 
+        esp_foc_send_notification(axis->regulator_ev);
+
 #ifdef CONFIG_ESP_FOC_SCOPE
-        esp_foc_get_control_data(axis, &control_data);
-        esp_foc_scope_data_push(&control_data);
+        esp_foc_scope_data_push();
 #endif
 
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING

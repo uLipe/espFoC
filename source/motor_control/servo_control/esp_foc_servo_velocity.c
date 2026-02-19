@@ -22,21 +22,4 @@
  * SOFTWARE.
  */
 
-#pragma once
-
 #include "espFoC/esp_foc.h"
-#include "hal/adc_hal.h"
-#include "esp_err.h"
-
-typedef struct {
-    adc_channel_t axis_channels[4];
-    adc_unit_t units[4];
-    float amp_gain;
-    float shunt_resistance;
-    int number_of_channels;
-    bool enable_analog_encoder;
-    int analog_encoder_ppr;
-}esp_foc_isensor_adc_oneshot_config_t;
-
-esp_foc_isensor_t *isensor_adc_oneshot_new(esp_foc_isensor_adc_oneshot_config_t *config,
-                                        esp_foc_rotor_sensor_t **optional_encoder);

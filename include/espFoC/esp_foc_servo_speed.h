@@ -24,19 +24,27 @@
 
 #pragma once
 
-#include "espFoC/esp_foc.h"
-#include "hal/adc_hal.h"
-#include "esp_err.h"
+typedef struct esp_foc_servo_speed_ctl_s esp_foc_servo_speed_ctl_t;
+typedef void (*esp_foc_servo_speed_regulation_callback_t) (esp_foc_servo_speed_ctl_t *controller, float current_rate);
+
+struct esp_foc_servo_speed_ctl_s {
+    float target_speed_rpm;
+    float current_speed_rpm;
+    float current_speed_ticks_per_sec;
+    esp_foc_pid_controller_t control_law;
+    esp_foc_axis_t target_motor;
+    esp_foc_servo_speed_regulation_callback_t regulator_cb;
+};
 
 typedef struct {
-    adc_channel_t axis_channels[4];
-    adc_unit_t units[4];
-    float amp_gain;
-    float shunt_resistance;
-    int number_of_channels;
-    bool enable_analog_encoder;
-    int analog_encoder_ppr;
-}esp_foc_isensor_adc_oneshot_config_t;
+    esp_foc_motor_control_settings_t motor_config;
+    esp_foc_isensor_t *isensor;
+    esp_foc_rotor_sensor_t *rotorsensor;
+    esp_foc_inverter_t *inverter;
+}esp_foc_servo_speed_config_t;
 
-esp_foc_isensor_t *isensor_adc_oneshot_new(esp_foc_isensor_adc_oneshot_config_t *config,
-                                        esp_foc_rotor_sensor_t **optional_encoder);
+esp_foc_err_t esp_foc_servo_speed_init(esp_foc_servo_speed_ctl_t *servo, esp_foc_servo_speed_config_t *config);
+esp_foc_err_t esp_foc_servo_speed_run(esp_foc_servo_speed_ctl_t *servo);
+esp_foc_err_t esp_foc_servo_speed_set_regulation_callback(esp_foc_servo_speed_ctl_t *servo,
+                                                        esp_foc_servo_speed_regulation_callback_t cb);
+

@@ -21,10 +21,14 @@ menu "espFoC Settings"
         bool "Enable scope data sending"
         default n
 
+    config ESP_FOC_SCOPE_NUM_CHANNELS
+        int "Maximum allowed channels"
+        default 8
+
     config ESP_FOC_SCOPE_BUFFER_SIZE
         int "Size of scope buffer in frames"
-        default 256 if !SPIRAM
-        default 280 if SPIRAM
+        default 4096 if ESP_FOC_SCOPE_NUM_CHANNELS = 8
+        default 1024
 
     choice
         prompt "Select espFoC modulation type"

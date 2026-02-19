@@ -36,6 +36,7 @@
 
 typedef struct {
     int enable_gpio;
+    int enable_inverted;
 
     mcpwm_timer_handle_t timer;
     mcpwm_oper_handle_t operators[3];
@@ -57,7 +58,7 @@ typedef struct {
 #define MCPWM_RESOLUTION_HZ   160000000
 #define MCPWM_PERIOD_TOP      (MCPWM_RESOLUTION_HZ / MCPWM_RATE_HZ)
 #define MCPWM_PERIOD_TOP_HALF (MCPWM_PERIOD_TOP / 2)
-#define MCPWM_DEADTIME_US     1
+#define MCPWM_DEADTIME_NS     20
 
 static esp_foc_mcpwm6_inverter_t mcpwm6s[CONFIG_NOOF_AXIS];
 
@@ -81,11 +82,11 @@ static mcpwm_comparator_config_t compare_config = {
 
 static const char *TAG = "INVERTER_MCPWM6";
 
-static inline uint32_t deadtime_us_to_ticks(uint32_t us)
+static inline uint32_t deadtime_ns_to_ticks(uint32_t ns)
 {
     /* resolution_hz is in Hz -> ticks per second */
     /* ticks = us * resolution_hz / 1_000_000 */
-    return (uint32_t)(((uint64_t)us * (uint64_t)MCPWM_RESOLUTION_HZ) / 1000000ULL);
+    return (uint32_t)(((uint64_t)ns * (uint64_t)MCPWM_RESOLUTION_HZ) / 1000000000ULL);
 }
 
 static bool inverter_isr(mcpwm_timer_handle_t timer,
@@ -158,7 +159,7 @@ static void inverter_enable(esp_foc_inverter_t *self)
 {
     esp_foc_mcpwm6_inverter_t *obj = __containerof(self, esp_foc_mcpwm6_inverter_t, interface);
     if (obj->enable_gpio >= 0) {
-        gpio_set_level(obj->enable_gpio, true);
+        gpio_set_level(obj->enable_gpio, obj->enable_inverted ? false : true);
     }
 }
 
@@ -166,7 +167,7 @@ static void inverter_disable(esp_foc_inverter_t *self)
 {
     esp_foc_mcpwm6_inverter_t *obj = __containerof(self, esp_foc_mcpwm6_inverter_t, interface);
     if (obj->enable_gpio >= 0) {
-        gpio_set_level(obj->enable_gpio, false);
+        gpio_set_level(obj->enable_gpio, obj->enable_inverted ? true : false);
     }
 }
 
@@ -184,6 +185,13 @@ esp_foc_inverter_t *inverter_6pwm_mpcwm_new(int gpio_u_high, int gpio_u_low,
 
     esp_foc_mcpwm6_inverter_t *obj = &mcpwm6s[port];
     memset(obj, 0, sizeof(*obj));
+
+    if(gpio_enable < 0) {
+        gpio_enable = -gpio_enable;
+        obj->enable_inverted = 1;
+    } else {
+        obj->enable_inverted = 0;
+    }
 
     obj->enable_gpio = gpio_enable;
     obj->dc_link_voltage = dc_link_voltage;
@@ -209,7 +217,7 @@ esp_foc_inverter_t *inverter_6pwm_mpcwm_new(int gpio_u_high, int gpio_u_low,
             .intr_type = GPIO_INTR_DISABLE,
         };
         gpio_config(&io_conf);
-        gpio_set_level(obj->enable_gpio, false);
+        gpio_set_level(obj->enable_gpio, obj->enable_inverted ? true : false);
     }
 
     /* Create MCPWM timer/operator/comparator resources in selected group (port). */
@@ -269,7 +277,7 @@ esp_foc_inverter_t *inverter_6pwm_mpcwm_new(int gpio_u_high, int gpio_u_low,
     /* Dead-time insertion (conservative: 1us).
      * IMPORTANT: This assumes gen_high/gen_low are complementary pairs.
      */
-    const uint32_t dt_ticks = deadtime_us_to_ticks(MCPWM_DEADTIME_US);
+    const uint32_t dt_ticks = deadtime_ns_to_ticks(MCPWM_DEADTIME_NS);
     mcpwm_dead_time_config_t dt_cfg = {
         .posedge_delay_ticks = dt_ticks,
         .negedge_delay_ticks = 0,

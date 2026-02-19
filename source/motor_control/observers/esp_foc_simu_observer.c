@@ -30,9 +30,9 @@
 #include "esp_log.h"
 #include "espFoC/observer/esp_foc_simu_observer.h"
 
-#define SIMUL_FLUX_LINKAGE 0.015f // Lambda_m (Weber)
-#define SIMUL_INERTIA 0.00024f // J (kg⋅m²)
-#define SIMUL_FRICTION 0.001f // B (Viscous friction)
+#define SIMUL_FLUX_LINKAGE      0.015f // Lambda_m (Weber)
+#define SIMUL_INERTIA           0.00024f // J (kg⋅m²)
+#define SIMUL_FRICTION          0.001f // B (Viscous friction)
 
 typedef struct {
     float r;
@@ -83,6 +83,7 @@ static void simu_observer_reset(esp_foc_observer_t *self, float offset)
     obj->angle = 0.0f;
     obj->estim_iq = 0.0f;
     obj->omega = 0.0f;
+    obj->estim_iq = 0.0f;
 }
 
 esp_foc_observer_t *simu_observer_new(int unit, esp_foc_simu_observer_settings_t settings)

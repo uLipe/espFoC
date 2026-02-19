@@ -29,8 +29,18 @@
 #include "espFoC/esp_foc.h"
 #include "esp_log.h"
 
+const char *TAG = "ESP_FOC_SCOPE";
+
+struct scope_frame {
+    float data[CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS];
+};
+
+static uint32_t used_channels = 0;
+static float *scope_channels[CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS];
+static esp_foc_event_handle_t scope_ev;
+
 static bool scope_enable = false;
-static esp_foc_control_data_t scope_buffer[2][CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE];
+static struct scope_frame scope_buffer[2][CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE];
 static bool ping_pong_switch = false;
 static uint32_t rd_buff_index = 0;
 static uint32_t wr_buff_index = 0;
@@ -52,74 +62,38 @@ __attribute__((weak)) void esp_foc_send_buffer_callback(const uint8_t *buffer, i
 
 static void esp_foc_scope_daemon_thread(void *arg)
 {
+    int idx = 0;
     char out_buf[512] = {0,};
-    esp_foc_control_data_t *next_sample;
+    struct scope_frame *next_sample;
     memset(&scope_buffer, 0, sizeof(scope_buffer));
+    scope_ev = esp_foc_get_event_handle();
+    esp_foc_wait_notifier();
 
     while(1) {
 
-        next_sample = &scope_buffer[ping_pong_switch][rd_buff_index];
-
-            // control_data->u_alpha = axis->u_alpha;
-        // control_data->u_beta = axis->u_beta;
-
-        // control_data->i_alpha = axis->i_alpha;
-        // control_data->i_beta = axis->i_beta;
-
-        // control_data->u = axis->u_u;
-        // control_data->v = axis->u_v;
-        // control_data->w = axis->u_w;
-
-        // control_data->out_q = axis->u_q;
-        // control_data->out_d = axis->u_d;
-        // control_data->dt.raw = axis->dt;
-
-        // control_data->speed.raw = axis->current_speed;
-        // control_data->target_position.raw = axis->target_position;
-        // control_data->target_speed.raw = axis->target_speed;
-
-        // control_data->rotor_position.raw =  axis->open_loop_observer->get_angle(axis->open_loop_observer);
-        // control_data->observer_angle.raw = axis->current_observer->get_angle(axis->current_observer);
-        // control_data->rotor_position.raw =  axis->rotor_position;
-        // control_data->extrapolated_rotor_position.raw =  axis->extrapolated_rotor_position;
-        // control_data->observer_angle.raw = 0.0f;
-
-        // control_data->i_u.raw = axis->i_u;
-        // control_data->i_v.raw = axis->i_v;
-        // control_data->i_w.raw = axis->i_w;
-
-        // control_data->i_q = axis->i_q;
-        // control_data->i_d = axis->i_d;
-
-
-        sprintf(out_buf, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
-            next_sample->dt.raw,
-            next_sample->u_alpha.raw,
-            next_sample->u_beta.raw,
-            next_sample->i_alpha.raw,
-            next_sample->i_beta.raw,
-            next_sample->i_d.raw,
-            next_sample->i_q.raw,
-            next_sample->observer_angle.raw,
-            next_sample->rotor_position.raw,
-            next_sample->target_position.raw,
-            next_sample->speed.raw,
-            next_sample->target_speed.raw,
-            next_sample->i_u.raw,
-            next_sample->i_v.raw,
-            next_sample->i_w.raw
-        );
-
-        rd_buff_index++;
         if(rd_buff_index >= CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE) {
-            esp_foc_critical_enter();
-            rd_buff_index = 0;
-            wr_buff_index = 0;
-            ping_pong_switch ^= 1;
-            esp_foc_critical_leave();
+            esp_foc_wait_notifier();
         }
 
-        esp_foc_send_buffer_callback((const uint8_t *)out_buf, strlen(out_buf) + 1);
+        idx = 0;
+        next_sample = &scope_buffer[ping_pong_switch][rd_buff_index];
+        if(used_channels != 0) {
+            for(int i = 0; i < CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS; i++) {
+                if(used_channels & (1 << i)) {
+                    idx += sprintf(&out_buf[idx],"%f,",next_sample->data[i]);
+                }
+            }
+            out_buf[idx-1] = '\n';
+            out_buf[idx] = 0;
+        } else {
+            /* send at least one channel */
+            idx += sprintf(&out_buf[idx],"%f,",next_sample->data[0]);
+            out_buf[idx-1] = '\n';
+            out_buf[idx] = 0;
+        }
+
+        esp_foc_send_buffer_callback((const uint8_t *)out_buf, idx);
+        rd_buff_index++;
     }
 }
 
@@ -133,19 +107,48 @@ void esp_foc_scope_initalize(void)
     }
 }
 
-void esp_foc_scope_data_push(esp_foc_control_data_t *control_data)
+void esp_foc_scope_data_push(void)
 {
-    if(!control_data || wr_buff_index >= CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE) {
+    if(!scope_enable) {
+        ESP_LOGW(TAG, "ESP FOC scope is not ready yet, skipping...");
         return;
     }
 
-    esp_foc_critical_enter();
-
-    memcpy(&scope_buffer[!ping_pong_switch][wr_buff_index],
-        control_data,
-        sizeof(*control_data));
+    struct scope_frame *next_sample = &scope_buffer[!ping_pong_switch][wr_buff_index];
+    for(int i = 0; i < CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS; i++) {
+        if(used_channels & (1 << i)) {
+            next_sample->data[i] = *scope_channels[i];
+        } else {
+            next_sample->data[i] = 0.0f;
+        }
+    }
 
     wr_buff_index++;
+    if(wr_buff_index >= CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE) {
+        rd_buff_index = 0;
+        wr_buff_index = 0;
+        ping_pong_switch ^= 1;
+        esp_foc_send_notification(scope_ev);
+    }
+}
 
+int esp_foc_scope_add_channel(const float *data_to_wire, int channel_number)
+{
+    if(used_channels & (1 << channel_number)) {
+        ESP_LOGE(TAG, "Channel already used, select another! ");
+        return -1;
+    }
+
+    if(channel_number > (CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS - 1)) {
+        ESP_LOGE(TAG, "Invalid channel!");
+        return -1;
+    }
+
+    esp_foc_critical_enter();
+    used_channels |= (1 << channel_number);
+    scope_channels[channel_number] = (float *)data_to_wire;
     esp_foc_critical_leave();
+
+    ESP_LOGI(TAG, "Wire data %p is attached to channel %d", data_to_wire, channel_number);
+    return 0;
 }

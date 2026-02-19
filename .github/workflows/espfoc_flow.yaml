@@ -44,33 +44,37 @@ jobs:
         repository: espressif/esp-idf
         path: idf
         submodules: recursive
-        ref: release/v5.4
+        ref: release/v5.5
 
     - name: Build Samples
       run: |
         ./idf/install.sh
         . ./idf/export.sh
-        pushd examples/simple_velocity
-        idf.py set-target esp32
+        pushd examples/axis_sensored
+        idf.py set-target esp32s3
+        idf.py build
+        idf.py set-target esp32p4
         idf.py build
         popd
-        pushd examples/simple_servo
-        idf.py set-target esp32
+        pushd examples/axis_sensorless
+        idf.py set-target esp32s3
+        idf.py build
+        idf.py set-target esp32p4
         idf.py build
         popd
-        pushd examples/speed_control
-        idf.py set-target esp32
-        idf.py build
-        popd
-        pushd examples/simple_velocity
+        pushd examples/test_drivers/test_current_sense
         idf.py set-target esp32s3
         idf.py build
         popd
-        pushd examples/simple_servo
+        pushd examples/test_drivers/test_encoder
         idf.py set-target esp32s3
         idf.py build
         popd
-        pushd examples/speed_control
+        pushd examples/test_drivers/test_inverter
+        idf.py set-target esp32s3
+        idf.py build
+        popd
+        pushd examples/test_drivers/test_voltage_path
         idf.py set-target esp32s3
         idf.py build
         popd

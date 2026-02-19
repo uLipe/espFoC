@@ -24,11 +24,15 @@
 
 #pragma once
 
-typedef struct esp_foc_axis_s esp_foc_axis_t;
 typedef void (*esp_foc_high_speed_loop_callback_t)(void *arg);
 typedef void (*esp_foc_low_speed_loop_callback_t)(void *arg);
+typedef void (*esp_foc_outer_loop_callback_t)(void *arg);
 
 struct esp_foc_axis_s {
+    float i_u;
+    float i_v;
+    float i_w;
+
     esp_foc_q_current target_i_q;
     esp_foc_d_current target_i_d;
 
@@ -41,39 +45,27 @@ struct esp_foc_axis_s {
     esp_foc_q_voltage u_q;
     esp_foc_d_voltage u_d;
 
+    esp_foc_alpha_current i_alpha;
+    esp_foc_beta_current i_beta;
     esp_foc_alpha_voltage u_alpha;
     esp_foc_beta_voltage u_beta;
-
     esp_foc_u_voltage u_u;
     esp_foc_v_voltage u_v;
     esp_foc_w_voltage u_w;
 
-    esp_foc_alpha_current i_alpha;
-    esp_foc_beta_current i_beta;
-
-    bool is_sensorless_mode;
-
-    float i_u;
-    float i_v;
-    float i_w;
-
     float dt;
     float inv_dt;
 
-    float target_speed;
     float current_speed;
     float shaft_ticks_to_radians_ratio;
-    float target_position;
     float extrapolated_rotor_position;
+    float rotor_shaft_ticks;
     float rotor_position;
     float rotor_position_prev;
-    float rotor_shaft_ticks;
     float rotor_elec_angle;
 
-    int downsampling_speed;
-    int downsampling_position;
     int downsampling_low_speed;
-    int enable_torque_control;
+    int skip_torque_control;
 
     float dc_link_voltage;
     float biased_dc_link_voltage;
@@ -85,9 +77,7 @@ struct esp_foc_axis_s {
     float current_offsets[3];
 
     esp_foc_err_t rotor_aligned;
-    esp_foc_pid_controller_t velocity_controller;
     esp_foc_pid_controller_t torque_controller[2];
-    esp_foc_pid_controller_t position_controller;
     esp_foc_lp_filter_t velocity_filter;
     esp_foc_lp_filter_t current_filters[2];
 
@@ -100,6 +90,10 @@ struct esp_foc_axis_s {
     esp_foc_observer_t *current_observer;
 
     esp_foc_event_handle_t  low_speed_ev;
+    esp_foc_event_handle_t  regulator_ev;
+
     esp_foc_high_speed_loop_callback_t high_speed_loop_cb;
     esp_foc_low_speed_loop_callback_t low_speed_loop_cb;
+    esp_foc_outer_loop_callback_t  outer_loop_cb;
+    esp_foc_motor_regulation_callback_t regulator_cb;
 };

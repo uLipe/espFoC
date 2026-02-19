@@ -26,28 +26,34 @@
 
 typedef struct {
     float kp;
-    float ki; /** ki = kp ( 1 / n * Ts) */
-    float kd; /** kd = kp * n * Ts */
+    float ki;
+    float kd;
 
     float integrator_limit;
     float accumulated_error;
     float previous_error;
     float max_output_value;
+    float min_output_value;
     float dt;
     float inv_dt;
 
 }esp_foc_pid_controller_t;
 
-static inline float esp_foc_saturate(float value, float limit)
+static inline void esp_foc_design_current_pi_discrete(float R, float L, float Fs, float fc, float *kp, float *ki)
 {
-    float result = value;
-    if (value > limit) {
-        result = limit;
-    } else if (value < -limit) {
-        result = -limit;
-    }
+    float Ts = 1.0f / Fs;
+    float a = expf(-(R / L) * Ts);
+    float b = (1.0f - a) / R;
 
-    return result;
+    // Desired closed-loop pole from bandwidth
+    float p = expf(-2.0f * (float)M_PI * fc * Ts);
+
+    // Gain for C(z)=K(1-a z^-1)/(1-z^-1)
+    float K = ((1.0f / p) - 1.0f) / b;
+
+    // Convert to incremental PI form
+    *kp = K * a;
+    *ki = K * (1.0f - a) / Ts;
 }
 
 static inline void esp_foc_pid_reset(esp_foc_pid_controller_t *self)
@@ -60,21 +66,18 @@ static inline float  esp_foc_pid_update(esp_foc_pid_controller_t *self,
                                         float reference,
                                         float measure)
 {
+
     float error = reference - measure;
     float error_diff = (error - self->previous_error) * self->inv_dt;
-    self->accumulated_error += (error * self->dt);
+    float mv = (self->kp * error) +
+        (self->accumulated_error) +
+        (self->kd * error_diff);
+    mv = esp_foc_clamp(mv, self->min_output_value, self->max_output_value) ;
 
+    /* Avoid to integrate if the output was saturated but the error still drivers in the wrong direction */
+    self->accumulated_error += (error * self->dt * self->ki);
+    self->accumulated_error = esp_foc_clamp(self->accumulated_error, -self->integrator_limit, self->integrator_limit);
     self->previous_error = error;
 
-    if(self->accumulated_error > self->integrator_limit) {
-        self->accumulated_error = self->integrator_limit;
-    } else if (self->accumulated_error < -self->integrator_limit) {
-        self->accumulated_error = -self->integrator_limit;
-    }
-
-    float mv = (self->kp * error) +
-            (self->ki * self->accumulated_error) +
-            (self->kd * error_diff);
-
-    return esp_foc_saturate(mv, self->max_output_value);
+    return mv;
 }
