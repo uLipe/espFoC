@@ -44,7 +44,7 @@ jobs:
         repository: espressif/esp-idf
         path: idf
         submodules: recursive
-        ref: release/v5.4
+        ref: release/v5.5
 
     - name: Build Samples
       run: |
@@ -56,7 +56,7 @@ jobs:
         idf.py set-target esp32p4
         idf.py build
         popd
-        pushd examples/axis_standalone_sensorless
+        pushd examples/axis_sensorless
         idf.py set-target esp32s3
         idf.py build
         idf.py set-target esp32p4

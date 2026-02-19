@@ -136,9 +136,9 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->torque_controller[1].kp = settings.motor_inductance * current_control_analog_bandwith;
     axis->torque_controller[1].ki = settings.motor_resistance * current_control_analog_bandwith;
     axis->torque_controller[1].kd = 0.0f;
-    axis->torque_controller[1].integrator_limit =  (axis->max_voltage * 0.2f) / axis->torque_controller[1].ki;
-    axis->torque_controller[1].max_output_value = axis->max_voltage * 0.2f; /* Use 20% of maximum available voltage command */
-    axis->torque_controller[1].min_output_value = -(axis->max_voltage * 0.2f);
+    axis->torque_controller[1].integrator_limit =  (axis->max_voltage * 0.1f) / axis->torque_controller[1].ki;
+    axis->torque_controller[1].max_output_value = axis->max_voltage * 0.1f; /* Use 20% of maximum available voltage command */
+    axis->torque_controller[1].min_output_value = -(axis->max_voltage * 0.1f);
     esp_foc_pid_reset(&axis->torque_controller[1]);
     esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[1], 0.1f * axis->torque_controller[1].inv_dt,
                                         axis->torque_controller[1].inv_dt);
@@ -219,8 +219,8 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
                                         0.0f,
                                         0.0f);
 
-    e_sin = esp_foc_sine(esp_foc_normalize_angle(-M_PI/2));
-    e_cos = esp_foc_cosine(esp_foc_normalize_angle(-M_PI/2));
+    e_sin = esp_foc_sine(esp_foc_normalize_angle(0.0f));
+    e_cos = esp_foc_cosine(esp_foc_normalize_angle(0.0f));
 
     axis->inverter_driver->enable(axis->inverter_driver);
     esp_foc_sleep_ms(500);
