@@ -180,13 +180,13 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
         if(axis->isensor_driver != NULL) {
             bool nc = (axis->current_observer->update(axis->current_observer, &in) != 0) ? true : false;
             if(!nc && !swapped) {
-                ESP_DRAM_LOGI(tag, "PLL has been locked!");
+                ESP_LOGI(tag, "PLL has been locked!");
                 alpha_blend = 0.0f;
                 swapped = true;
                 axis->observer = axis->current_observer;
 
             } else if((fabsf(axis->target_i_q.raw) < ESP_FOC_MAX_STARTUP_IQ && axis->rotor_aligned == ESP_FOC_OK)) {
-                ESP_DRAM_LOGI(tag, "PLL has been lost, restarting!");
+                ESP_LOGW(tag, "PLL has been lost, restarting!");
                 swapped = false;
                 axis->rotor_aligned = ESP_FOC_ERR_ROTOR_STARTUP;
                 axis->target_i_q.raw = 0.0f;
