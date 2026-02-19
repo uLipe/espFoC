@@ -130,7 +130,7 @@ static float pll_observer_get_speed(esp_foc_observer_t *self)
 static void pll_observer_reset(esp_foc_observer_t *self, float offset)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
-    est->integral = est->omega_est / est->ki;
+    est->integral = 0;
     est->theta_est = esp_foc_normalize_angle(est->theta_est + offset);
     est->integrator_freeze_time = (PLL_INTEGRATOR_FREEZE_TIME / est->dt);
 }

@@ -50,10 +50,17 @@ static void inverter_isr(void *data)
 static void handle_motor_startup(esp_foc_axis_t *axis)
 {
     /*Clamp the ramp generator if the integral is pushing the command formward to avoid stalling*/
-    if(axis->target_i_q.raw  < ESP_FOC_MAX_STARTUP_IQ) {
-        axis->target_i_q.raw += ESP_FOC_MAX_STARTUP_IQ / 100.0f;
-    }
+    float startup_iq = (axis->target_i_q.raw < 0) ? -ESP_FOC_MAX_STARTUP_IQ : ESP_FOC_MAX_STARTUP_IQ;
 
+    axis->u_q.raw =  esp_foc_pid_update( &axis->torque_controller[0],
+                                        startup_iq,
+                                        esp_foc_low_pass_filter_update(
+                                            &axis->current_filters[0], axis->i_q.raw));
+
+    axis->u_d.raw = esp_foc_pid_update( &axis->torque_controller[1],
+                                        0.0f,
+                                        esp_foc_low_pass_filter_update(
+                                            &axis->current_filters[1], axis->i_d.raw));
 }
 
 void do_current_mode_sensorless_high_speed_loop(void *arg)
@@ -66,6 +73,9 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
     isensor_values_t ival;
     bool swapped = false;
+    float ol_obs;
+    float pll_obs;
+    float alpha_blend = 0;
 
     axis->low_speed_ev = esp_foc_get_event_handle();
     axis->downsampling_low_speed = ESP_FOC_LOW_SPEED_DOWNSAMPLING;
@@ -104,7 +114,15 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
          */
         axis->isensor_driver->sample_isensors(axis->isensor_driver);
 
-        axis->rotor_position = axis->observer->get_angle(axis->observer) * axis->natural_direction;
+        ol_obs = axis->open_loop_observer->get_angle(axis->open_loop_observer);
+        pll_obs = axis->current_observer->get_angle(axis->current_observer);
+
+        if((axis->target_i_q.raw >= 0)) {
+            axis->rotor_position = (alpha_blend * (pll_obs + M_PI/2)) + ((1 - alpha_blend) * ol_obs) * axis->natural_direction;
+        } else {
+            axis->rotor_position = (alpha_blend * (pll_obs - M_PI/2)) + ((1 - alpha_blend) * ol_obs) * axis->natural_direction;
+        }
+
         axis->rotor_elec_angle = esp_foc_normalize_angle(axis->rotor_position);
         axis->current_speed = axis->observer->get_speed(axis->observer);
 
@@ -124,14 +142,14 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
 
         if(axis->rotor_aligned == ESP_FOC_ERR_ROTOR_STARTUP) {
             handle_motor_startup(axis);
+        } else {
+            esp_foc_current_control_loop(axis);
         }
-
-        esp_foc_current_control_loop(axis);
 
         esp_foc_modulate_dq_voltage(e_sin,
                         e_cos,
-                        axis->u_d.raw,
-                        axis->u_q.raw,
+                        -axis->u_d.raw,
+                        -axis->u_q.raw,
                         &axis->u_alpha.raw,
                         &axis->u_beta.raw,
                         &axis->u_u.raw,
@@ -158,25 +176,35 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
             .i_alpha_beta[1] = axis->i_beta.raw,
         };
 
-        float pll_theta = axis->current_observer->get_angle(axis->current_observer);
-        pll_delta = esp_foc_normalize_angle(pll_theta - axis->rotor_position);
-
         axis->open_loop_observer->update(axis->open_loop_observer, &in);
         if(axis->isensor_driver != NULL) {
             bool nc = (axis->current_observer->update(axis->current_observer, &in) != 0) ? true : false;
             if(!nc && !swapped) {
-                ESP_DRAM_LOGI(tag, "PLL_LOCKED! \n");
-                axis->current_observer->reset(axis->current_observer, pll_delta);
-                // axis->observer = axis->current_observer;
-                // axis->rotor_aligned = ESP_FOC_OK;
+                ESP_DRAM_LOGI(tag, "PLL has been locked!");
+                alpha_blend = 0.0f;
                 swapped = true;
+                axis->observer = axis->current_observer;
+
+            } else if((fabsf(axis->target_i_q.raw) < ESP_FOC_MAX_STARTUP_IQ && axis->rotor_aligned == ESP_FOC_OK)) {
+                ESP_DRAM_LOGI(tag, "PLL has been lost, restarting!");
+                swapped = false;
+                axis->rotor_aligned = ESP_FOC_ERR_ROTOR_STARTUP;
+                axis->target_i_q.raw = 0.0f;
+                axis->target_i_d.raw = 0.0f;
+                axis->observer = axis->open_loop_observer;
+            }
+        }
+
+        if(swapped) {
+            alpha_blend += 0.1f;
+            alpha_blend = esp_foc_clamp(alpha_blend, 0.0f, 1.0f);
+            if(fabs(alpha_blend) > 0.99f) {
+                axis->rotor_aligned = ESP_FOC_OK;
             }
         }
 
         /* Allow stexternal regulator only after the startup waz completed*/
-        if(axis->rotor_aligned == ESP_FOC_OK) {
-            esp_foc_send_notification(axis->regulator_ev);
-        }
+        esp_foc_send_notification(axis->regulator_ev);
 
 #ifdef CONFIG_ESP_FOC_SCOPE
         esp_foc_scope_data_push();
