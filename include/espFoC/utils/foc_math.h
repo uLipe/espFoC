@@ -105,10 +105,8 @@ static inline void esp_foc_clarke_transform (float v_uvw[3],
                                             float * v_aplha,
                                             float *v_beta)
 {
-    *v_aplha = ESP_FOC_CLARKE_K1 * v_uvw[0] -
-        ESP_FOC_CLARKE_K2 * (v_uvw[1] - v_uvw[2]);
-
-    *v_beta = ESP_FOC_CLARKE_K3  * (v_uvw[1] - v_uvw[2]);
+    *v_aplha = v_uvw[0];
+    *v_beta = (v_uvw[0] + 2.0f * v_uvw[1]) * ESP_FOC_CLARKE_K3;
 }
 
 static inline void esp_foc_park_transform (float sin,
