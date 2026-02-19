@@ -44,7 +44,8 @@ typedef struct {
     adc_unit_t units[4];
     adc_continuous_handle_t handle;
     float adc_to_current_scale;
-    uint32_t raw_reads[4];
+    uint32_t raw_reads[4][ESP_FOC_LOW_SPEED_DOWNSAMPLING];
+    int sample_avg_idx;
     float currents[4];
     float offsets[4];
     esp_foc_isensor_t interface;
@@ -84,6 +85,16 @@ static const float adc_effective_range = 2048.0f;
 static const float adc_to_volts = ((3.1f)/ 4096.0f);
 static float raw_floats[4];
 
+static inline float avg_calc(uint32_t *raws)
+{
+    uint32_t avg = 0;
+    for(int i = 0; i < ESP_FOC_LOW_SPEED_DOWNSAMPLING; i++) {
+        avg += raws[i];
+    }
+
+    return (float)(avg/ESP_FOC_LOW_SPEED_DOWNSAMPLING);
+}
+
 static bool isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
 {
     adc_hal_digi_enable(false);
@@ -93,8 +104,12 @@ static bool isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_
     adc_digi_output_data_t *p = (adc_digi_output_data_t *)edata->conv_frame_buffer;
 
     for(int i = 0; i < isensor->number_of_channels; i++) {
-        isensor->raw_reads[i] = ADC_GET_DATA(p);
+        isensor->raw_reads[i][isensor->sample_avg_idx] = ADC_GET_DATA(p);
         p++;
+    }
+
+    if(isensor->sample_avg_idx >= ESP_FOC_LOW_SPEED_DOWNSAMPLING) {
+        isensor->sample_avg_idx = 0;
     }
 
     if(isensor->callback != NULL) {
@@ -138,16 +153,16 @@ static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
         __containerof(self, isensor_adc_t, interface);
 
     /* Used to capture data for scope usage */
-    raw_floats[0] = (float)obj->raw_reads[0];
-    raw_floats[1] = (float)obj->raw_reads[1];
-    raw_floats[2] = (float)obj->raw_reads[2];
-    raw_floats[3] = (float)obj->raw_reads[3];
+    raw_floats[0] = avg_calc(&obj->raw_reads[0][0]);
+    raw_floats[1] = avg_calc(&obj->raw_reads[1][0]);
+    raw_floats[2] = avg_calc(&obj->raw_reads[2][0]);
+    raw_floats[3] = avg_calc(&obj->raw_reads[3][0]);
 
     esp_foc_critical_enter();
-    obj->currents[0] = (float)obj->raw_reads[0];
-    obj->currents[1] = (float)obj->raw_reads[1];
-    obj->currents[2] = (float)obj->raw_reads[2];
-    obj->currents[3] = (float)obj->raw_reads[3];
+    obj->currents[0] = raw_floats[0];
+    obj->currents[1] = raw_floats[1];
+    obj->currents[2] = raw_floats[2];
+    obj->currents[3] = raw_floats[3];
     esp_foc_critical_leave();
 
     values->iu_axis_0 = (esp_foc_clamp(obj->currents[0] - obj->offsets[0], -adc_effective_range, adc_effective_range)  *
@@ -187,10 +202,10 @@ static void calibrate_isensors (esp_foc_isensor_t *self, int calibration_rounds)
         self->sample_isensors(self);
         esp_foc_sleep_ms(10);
 
-        obj->offsets[0] += ((float)obj->raw_reads[0]);
-        obj->offsets[1] += ((float)obj->raw_reads[1]);
-        obj->offsets[2] += ((float)obj->raw_reads[2]);
-        obj->offsets[3] += ((float)obj->raw_reads[3]);
+        obj->offsets[0] += ((float)obj->raw_reads[0][0]);
+        obj->offsets[1] += ((float)obj->raw_reads[1][0]);
+        obj->offsets[2] += ((float)obj->raw_reads[2][0]);
+        obj->offsets[3] += ((float)obj->raw_reads[3][0]);
     }
 
     obj->offsets[0] /= calibration_rounds;

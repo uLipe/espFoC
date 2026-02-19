@@ -41,7 +41,8 @@ typedef struct {
     adc_unit_t units[4];
     adc_oneshot_hal_ctx_t hal;
     float adc_to_current_scale;
-    uint32_t raw_reads[4];
+    uint32_t raw_reads[4][ESP_FOC_LOW_SPEED_DOWNSAMPLING];
+    int sample_avg_idx;
     float currents[4];
     float offsets[4];
     esp_foc_isensor_t interface;
@@ -85,6 +86,16 @@ static adc_oneshot_hal_cfg_t hal_cfg = {
 
 static void oneshot_adc_start_sample(isensor_adc_t *isensor, adc_channel_t channel, adc_unit_t unit);
 
+static inline float avg_calc(uint32_t *raws)
+{
+    uint32_t avg = 0;
+    for(int i = 0; i < ESP_FOC_LOW_SPEED_DOWNSAMPLING; i++) {
+        avg += raws[i];
+    }
+
+    return (float)(avg/ESP_FOC_LOW_SPEED_DOWNSAMPLING);
+}
+
 static void isensor_adc_isr(void *arg)
 {
     isensor_adc_t * isensor = (isensor_adc_t *)arg;
@@ -96,7 +107,7 @@ static void isensor_adc_isr(void *arg)
 
     if(adc_oneshot_ll_get_event(event)) {
 
-        isensor->raw_reads[isensor->number_of_conversions] =
+        isensor->raw_reads[isensor->number_of_conversions][isensor->sample_avg_idx] =
             adc_oneshot_ll_get_raw_result(isensor->units[isensor->number_of_conversions]);
 
         isensor->number_of_conversions++;
@@ -104,7 +115,10 @@ static void isensor_adc_isr(void *arg)
             isensor->number_of_conversions = 0;
             adc_oneshot_ll_clear_event(event);
             adc_oneshot_ll_disable_all_unit();
-
+            isensor->sample_avg_idx++;
+            if(isensor->sample_avg_idx >= ESP_FOC_LOW_SPEED_DOWNSAMPLING) {
+                isensor->sample_avg_idx = 0;
+            }
             if(isensor->callback) {
                 isensor->callback(isensor->user_data);
             }
@@ -193,18 +207,18 @@ static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
         __containerof(self, isensor_adc_t, interface);
 
     /* Used to capture data for scope usage */
-    raw_floats[0] = (float)obj->raw_reads[0];
-    raw_floats[1] = (float)obj->raw_reads[1];
-    raw_floats[2] = (float)obj->raw_reads[2];
-    raw_floats[3] = (float)obj->raw_reads[3];
+    raw_floats[0] = avg_calc(&obj->raw_reads[0][0]);
+    raw_floats[1] = avg_calc(&obj->raw_reads[1][0]);
+    raw_floats[2] = avg_calc(&obj->raw_reads[2][0]);
+    raw_floats[3] = avg_calc(&obj->raw_reads[3][0]);
 
     esp_foc_critical_enter();
-    obj->currents[0] = (float)obj->raw_reads[0];
-    obj->currents[1] = (float)obj->raw_reads[1];
+    obj->currents[0] = raw_floats[0];
+    obj->currents[1] = raw_floats[1];
 
     if(!obj->enable_analog_encoder) {
-        obj->currents[2] = (float)obj->raw_reads[2];
-        obj->currents[3] = (float)obj->raw_reads[3];
+        obj->currents[2] = raw_floats[2];
+        obj->currents[3] = raw_floats[3];
     }
 
     esp_foc_critical_leave();
@@ -249,10 +263,10 @@ static void calibrate_isensors (esp_foc_isensor_t *self, int calibration_rounds)
         self->sample_isensors(self);
         esp_foc_sleep_ms(10);
 
-        obj->offsets[0] += ((float)obj->raw_reads[0]);
-        obj->offsets[1] += ((float)obj->raw_reads[1]);
-        obj->offsets[2] += ((float)obj->raw_reads[2]);
-        obj->offsets[3] += ((float)obj->raw_reads[3]);
+        obj->offsets[0] += ((float)obj->raw_reads[0][0]);
+        obj->offsets[1] += ((float)obj->raw_reads[1][0]);
+        obj->offsets[2] += ((float)obj->raw_reads[2][0]);
+        obj->offsets[3] += ((float)obj->raw_reads[3][0]);
     }
 
     obj->offsets[0] /= calibration_rounds;
@@ -300,7 +314,7 @@ static void set_to_zero(esp_foc_rotor_sensor_t *self)
 
     sample_isensors(&obj->interface);
     esp_foc_sleep_ms(10);
-    obj->encoder_zero_offset = obj->raw_reads[2];
+    obj->encoder_zero_offset = obj->raw_reads[2][0];
     obj->encoder_previous = (float)obj->encoder_zero_offset;
 
     ESP_LOGI(TAG, "Setting %d [ticks] as offset.", obj->encoder_zero_offset);
@@ -319,7 +333,7 @@ static float read_counts(esp_foc_rotor_sensor_t *self)
    isensor_adc_t *obj =
         __containerof(self,isensor_adc_t, encoder_interface);
 
-    uint16_t raw = obj->raw_reads[2];
+    uint16_t raw = obj->raw_reads[2][0];
     float delta = (float)raw - obj->encoder_previous;
 
     if(fabs(delta) >= 0.95 * obj->analog_encoder_ppr) {
