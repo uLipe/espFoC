@@ -39,23 +39,6 @@ typedef struct {
 
 }esp_foc_pid_controller_t;
 
-static inline void esp_foc_design_current_pi_discrete(float R, float L, float Fs, float fc, float *kp, float *ki)
-{
-    float Ts = 1.0f / Fs;
-    float a = expf(-(R / L) * Ts);
-    float b = (1.0f - a) / R;
-
-    // Desired closed-loop pole from bandwidth
-    float p = expf(-2.0f * (float)M_PI * fc * Ts);
-
-    // Gain for C(z)=K(1-a z^-1)/(1-z^-1)
-    float K = ((1.0f / p) - 1.0f) / b;
-
-    // Convert to incremental PI form
-    *kp = K * a;
-    *ki = K * (1.0f - a) / Ts;
-}
-
 static inline void esp_foc_pid_reset(esp_foc_pid_controller_t *self)
 {
     self->accumulated_error = 0.0f;
@@ -74,7 +57,6 @@ static inline float  esp_foc_pid_update(esp_foc_pid_controller_t *self,
         (self->kd * error_diff);
     mv = esp_foc_clamp(mv, self->min_output_value, self->max_output_value) ;
 
-    /* Avoid to integrate if the output was saturated but the error still drivers in the wrong direction */
     self->accumulated_error += (error * self->dt * self->ki);
     self->accumulated_error = esp_foc_clamp(self->accumulated_error, -self->integrator_limit, self->integrator_limit);
     self->previous_error = error;

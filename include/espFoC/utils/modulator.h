@@ -40,25 +40,11 @@ static inline void esp_foc_modulate_dq_voltage (float sin,
     float dq_frame[2] = {v_d, v_q};
     float ab_frame[2];
 
-#ifdef CONFIG_ESP_FOC_USE_SINE_PWM
-    float a,b,c;
-    esp_foc_limit_voltage(&dq_frame[0], &dq_frame[1], vmax);
-    esp_foc_inverse_park_transform(sin, cos, dq_frame, &ab_frame[0], &ab_frame[1]);
-    esp_foc_inverse_clarke_transform(ab_frame, &a, &b, &c);
-    *v_u = 0.5f + (a * normalization_scale);
-    *v_v = 0.5f + (b * normalization_scale);
-    *v_w = 0.5f + (c * normalization_scale);
-    *v_alpha = ab_frame[0];
-    *v_beta = ab_frame[1];
-#elif defined(CONFIG_ESP_FOC_USE_SPACE_VECTOR_PWM)
     esp_foc_limit_voltage(&dq_frame[0], &dq_frame[1], vmax);
     esp_foc_inverse_park_transform(sin, cos, dq_frame, &ab_frame[0], &ab_frame[1]);
     esp_foc_svm_set(ab_frame[0], ab_frame[1], normalization_scale ,v_u, v_v, v_w);
     *v_alpha = ab_frame[0];
     *v_beta = ab_frame[1];
-#else
-    #error "Modulation not supported!"
-#endif
 }
 
 static inline void esp_foc_get_dq_currents(float sin,
