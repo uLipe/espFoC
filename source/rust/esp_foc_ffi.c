@@ -73,9 +73,10 @@ espfoc_inverter_handle_t espfoc_inverter_6pwm_mcpwm_new(int gpio_u_high, int gpi
                                                             dc_link_voltage, port);
 }
 
-espfoc_rotor_handle_t espfoc_rotor_sensor_as5600_new(int i2c_port, uint8_t i2c_address)
+espfoc_rotor_handle_t espfoc_rotor_sensor_as5600_new(int pin_sda, int pin_scl,
+                                                    int port);
 {
-    return (espfoc_rotor_handle_t)rotor_sensor_as5600_new(i2c_port, i2c_address);
+    return (espfoc_rotor_handle_t)rotor_sensor_as5600_new(pin_sda, pin_scl, port);
 }
 
 espfoc_isensor_handle_t espfoc_isensor_adc_new(const espfoc_isensor_adc_config_t *config)
