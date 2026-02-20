@@ -24,13 +24,24 @@
 
 #pragma once
 
+#include "espFoC/utils/pid_controller.h"
 typedef struct esp_foc_servo_speed_ctl_s esp_foc_servo_speed_ctl_t;
-typedef void (*esp_foc_servo_speed_regulation_callback_t) (esp_foc_servo_speed_ctl_t *controller, float current_rate);
+typedef void (*esp_foc_servo_speed_regulation_callback_t) (esp_foc_servo_speed_ctl_t *controller,
+                                                        float *speed_setpoint,
+                                                        float current_speed,
+                                                        float dt,
+                                                        float inv_dt,
+                                                        float *feedforward_value,
+                                                        esp_foc_pid_controller_t *pid);
 
 struct esp_foc_servo_speed_ctl_s {
-    float target_speed_rpm;
-    float current_speed_rpm;
+    float target_speed_rads;
+    float current_speed_rads;
     float current_speed_ticks_per_sec;
+    float feedforward;
+    int   downsampling;
+    float dt;
+    float inv_dt;
     esp_foc_pid_controller_t control_law;
     esp_foc_axis_t target_motor;
     esp_foc_servo_speed_regulation_callback_t regulator_cb;

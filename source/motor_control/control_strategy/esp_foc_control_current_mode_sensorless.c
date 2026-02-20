@@ -51,6 +51,7 @@ static void handle_motor_startup(esp_foc_axis_t *axis)
 {
     /*Clamp the ramp generator if the integral is pushing the command formward to avoid stalling*/
     float startup_iq = (axis->target_i_q.raw < 0) ? -ESP_FOC_MAX_STARTUP_IQ : ESP_FOC_MAX_STARTUP_IQ;
+    if(fabsf(axis->target_i_q.raw) < 0.01f) startup_iq = 0.0f;
 
     axis->u_q.raw =  esp_foc_pid_update( &axis->torque_controller[0],
                                         startup_iq,
@@ -203,7 +204,7 @@ void do_current_mode_sensorless_low_speed_loop(void *arg)
             }
         }
 
-        /* Allow stexternal regulator only after the startup waz completed*/
+        /* Allow stexternal regulator only after the startup was completed*/
         esp_foc_send_notification(axis->regulator_ev);
 
 #ifdef CONFIG_ESP_FOC_SCOPE
