@@ -1,0 +1,2 @@
+# Disable task watchdog so unity_run_menu() (waiting for serial input) does not trigger it
+CONFIG_ESP_TASK_WDT_EN=n
