@@ -1,8 +1,9 @@
 dependencies:
   idf: '>=5.0'
-description: ESP32 FoC Motor controller
-repository: git://github.com/uLipe/espFoC.git
-version: 1.5.1
+description: "Field Oriented Control (FOC) library for PMSM/BLDC motors on ESP32. Motor driving and torque loop; velocity/position loops are implemented by the application via regulation callback."
+version: "2.0.0"
+repository: "https://github.com/uLipe/espFoC.git"
+url: "https://github.com/uLipe/espFoC"
 targets:
   - esp32
   - esp32s3
@@ -12,6 +13,9 @@ tags:
   - motor
   - robotics
   - mechatronics
+  - foc
+  - bldc
+  - pmsm
 license: "MIT"
 maintainers:
   - Felipe Neves <ryukokki.felipe@gmail.com>

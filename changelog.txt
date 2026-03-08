@@ -1,0 +1,61 @@
+# espFoC Changelog (from 2.0.0)
+
+This file is used to generate GitHub releases. All versions from 2.0.0 onward are listed here.
+
+---
+
+## 2.0.0
+
+### BREAKING CHANGES (major)
+
+- **Servo API removed:** Built-in position and velocity control are no longer part of the library. `esp_foc_set_target_position` and `esp_foc_set_target_speed` (and related servo APIs) have been removed.
+- **Motor control is now fully callback-driven:** The application must implement the regulation loop by setting Id/Iq references and Ud/Uq feedforward in the `esp_foc_motor_regulation_callback_t`. Axis state (e.g. `rotor_position`, `current_speed`, currents) is read from the axis struct for use in custom velocity/position or torque logic.
+- **Sine PWM modulation removed:** Space vector PWM (SVPWM) is now the default and only modulation method.
+- **Examples layout changed:** The old examples from the 1.5.x API were removed for simplification and due to the breaking API changes in 2.0. Example projects are now organized under `examples/axis_sensored`, `examples/axis_sensorless`, and `examples/test_drivers` (inverter, voltage path, current sense). Use `axis_sensored` as the main reference for building and flashing.
+
+### Features
+
+- Callback-based regulation API: user-defined callback runs in the outer loop and sets `target_i_d`, `target_i_q`, `target_u_d`, `target_u_q`.
+- Current-mode FOC sensored: Id/Iq closed loop with rotor sensor (e.g. encoder, AS5600) and ADC shunt current sensing.
+- Current-mode FOC sensorless (experimental): Id/Iq closed loop with observer-based rotor estimation; open-loop startup with 1st-order current regulator and output clamp.
+- Observer: Kalman filter-based angle estimator for sensorless mode.
+- Observer: PMSM model-based observer (detailed model).
+- Observer: PLL observer refactored to use vector phase detector; lock detector based on error variance.
+- Observer: Simulated observer restored and used for open-loop/sensorless startup; filter on I-alpha/beta before Back-EMF estimator.
+- 6-PWM MCPWM inverter driver: complementary outputs, hardware dead-time; enable pin can be invertible (negative GPIO value).
+- 3-PWM MCPWM inverter driver (LEDC-based also available).
+- ADC one-shot current sensor driver: interrupt-based, optional analog encoder channel borrowing.
+- AS5048 magnetic encoder driver (SPI).
+- AS5600: bus check read at init for quick validation.
+- Scope utility: refactored to allow custom transmission bus; CSV format; extra channels for SVPWM output and Vq/Vd command; user-placed measurements.
+- Slow-mode FOC: voltage and current control run at a multiple of PWM rate, outside ISR, in high-priority task; ADC and angle sampled in sync.
+- Voltage normalization pipeline refactored for best use of DC bus (sine or SVPWM).
+- PID: anti-windup simplified; discretization for current PI.
+- Low-pass filters configurable by cutoff frequency (current and observer).
+- Debug pin moved to OSAL; build and include path reorganized (motor_control, observers, osal).
+- Rust FFI layer (experimental; can be disabled).
+- Examples: `axis_sensored` (main sensored current-mode demo), `axis_sensorless`, and `test_drivers` (inverter, voltage path, current sense bring-up).
+
+### Bug fixes
+
+- Rust FFI: rotor sensor parameter fixed.
+- ADC one-shot: interrupt handling fixed when conversion done (enable and flag clear registers).
+- 6-PWM MCPWM: dead-time insertion and waveform polarity corrected; dead-time calculation improved, default reduced to limit PWM distortion.
+- Sensorless: observer integration time fixed (phase drift).
+- Sensorless: avoid sampling currents in true open-loop mode.
+- Observer: normalized angle result assigned correctly.
+- Core: observer downsampling factor fixed.
+- 3-PWM MCPWM: remove IRAM_ATTR to fix build (IRAM via linker instead).
+- Simulated observer: torque formula corrected.
+- Current control: pipeline and coefficient calculation order fixed; low-pass filter cutoff set via dedicated function.
+- Voltage mode slow: compiler warning fixed.
+- Drivers: FPU operations removed from ISR.
+- Control: sensorless startup and log (esp_log) usage adjusted.
+
+### Other
+
+- CI: IDF version bumped to 5.5.
+- Docs: README updated for 2.0.0 (architecture, control modes, quick start ^2.0.0, example path axis_sensored); documentation and demo GIF updated.
+- Dependencies: idf >= 5.0; targets esp32, esp32s3, esp32p4.
+
+---
