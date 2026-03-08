@@ -78,3 +78,7 @@ jobs:
         idf.py set-target esp32s3
         idf.py build
         popd
+        pushd examples/unit_test_runner
+        idf.py set-target esp32s3
+        idf.py -D TEST_COMPONENTS=espFoC build
+        popd
