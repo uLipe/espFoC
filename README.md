@@ -19,12 +19,11 @@ The project focuses on:
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 - Voltage-mode FOC (open-loop and sensored)
 - Current-mode FOC (Id / Iq) using ADC shunt sensing plus rotor sensor
 - Current-mode FOC (Id / Iq) using ADC shunt in sensorless mode (experimental)
-- Speed and position control loops
 - Modular driver architecture:
   - Inverters (3-PWM, 6-PWM MCPWM)
   - Rotor sensors (encoders, observers, open-loop)
@@ -35,7 +34,7 @@ The project focuses on:
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### 1. Install via ESP-IDF (recommended)
 
@@ -70,7 +69,7 @@ idf.py build flash monitor
 
 ---
 
-## 🧠 Architectural Overview
+## Architectural Overview
 
 ![Wiring](/doc/images/wiring.png)
 
@@ -92,12 +91,15 @@ esp_foc_axis
 +-- inverter (PWM generation)
 +-- rotor sensor (position / speed)
 +-- current sensor (Id / Iq)
-+-- control strategy (voltage / current / speed / position)
++-- control strategy (voltage / current)
 
 ```
 
 This design allows mixing and matching hardware blocks without
-changing the control core.
+changing the control core, please notice, espFoC currently focusing
+on driving the motor and its torque loop, the servo control is up to
+the user. This strategy was adopted because it allows the user to select
+the best control method for motor velocity and position.
 
 ---
 
@@ -118,17 +120,11 @@ changing the control core.
 - Requires current sensor, a encoder is required for position control
 - Enables:
   - torque control
-  - robust speed control
-  - position control
-
-### Speed & Position Control
-- Implemented as outer control loops
-- Executed deterministically inside espFoC
-- Applications only provide setpoints
+  - Very useful where thrust / effort control is required e.g.: EV Vehicles, Drones.
 
 ---
 
-## 🔌 Inverter Drivers
+## Inverter Drivers
 
 ### 3-PWM Inverters
 - LEDC based
@@ -151,7 +147,7 @@ configured conservatively by default.
 
 ---
 
-## 📐 Rotor Sensors
+## Rotor Sensors
 
 Supported rotor sensing methods include:
 - Open-loop (no sensor)
@@ -164,7 +160,7 @@ without modifying the control logic.
 
 ---
 
-## ⚡ Current Sensing
+## Current Sensing
 
 espFoC supports **ADC shunt current sensing**:
 - dual or three-shunt configurations
@@ -175,7 +171,7 @@ espFoC supports **ADC shunt current sensing**:
 
 ---
 
-## ⏱️ Real-Time Design
+## Real-Time Design
 
 espFoC is designed around **hardware-driven timing**:
 
@@ -186,7 +182,7 @@ espFoC is designed around **hardware-driven timing**:
 
 ---
 
-## 🧪 Examples
+## Examples
 
 The repository includes multiple examples demonstrating:
 - Sensored mode
@@ -197,7 +193,7 @@ Examples are located in the `examples/` directory.
 
 ---
 
-## 🚀 Sample Code
+## Sample Code
 
 Below is a minimal example showing how to initialize and run espFoC and drive the
 target motor in **sensored voltage mode** using:
@@ -364,13 +360,13 @@ void app_main(void)
 
 ---
 
-## 🚧 Project Status
+## Project Status
 
 espFoC is experimental and personal project  so it is subject to breaking..
 
 ---
 
-## 📜 License
+## License
 
 espFoC is released under the **MIT License**.
 
@@ -378,7 +374,7 @@ See `LICENSE` for details.
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Issues, feature requests, and pull requests are welcome.
 

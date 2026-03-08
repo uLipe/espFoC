@@ -8,8 +8,6 @@ set(srcs    "source/motor_control/esp_foc_core.c"
             "source/motor_control/observers/esp_foc_pmsm_model_observer.c"
             "source/motor_control/observers/esp_foc_kf_observer.c"
             "source/motor_control/observers/esp_foc_simu_observer.c"
-            "source/motor_control/servo_control/esp_foc_servo_position.c"
-            "source/motor_control/servo_control/esp_foc_servo_velocity.c"
             )
 
 set(includes "include")
