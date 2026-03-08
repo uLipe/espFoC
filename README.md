@@ -172,6 +172,7 @@ The repository includes multiple examples demonstrating:
 - Sensored mode
 - Sensorless mode
 - Inverter and sensor bring-up
+- **unit_test_runner**: app that runs the Unity unit tests (for CI or local validation). Build with `idf.py -D TEST_COMPONENTS=espFoC build` from `examples/unit_test_runner`.
 
 Examples are located in the `examples/` directory.
 
