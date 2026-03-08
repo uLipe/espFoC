@@ -1,46 +1,41 @@
 # espFoC
 ### Field Oriented Control (FOC) library for PMSM / BLDC motors on ESP32
 
-
 ![Build](https://github.com/uLipe/espFoC/workflows/Build/badge.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ![alt text](doc/images/espfoc_demo.gif)
 
-espFoC is a **modular, real-time oriented Field Oriented Control (FOC) library**
-designed for **PMSM and BLDC motors**, targeting the **ESP32 family** using
-**ESP-IDF**.
+espFoC is a **modular, real-time Field Oriented Control (FOC) library** for **PMSM and BLDC motors** on the **ESP32 family** using **ESP-IDF**. It provides motor driving and the full FOC signal chain: inverter control, current sensing, rotor feedback (sensor or observer), and torque (Id/Iq) regulation. Velocity and position loops are not included; you implement them in the regulation callback using the axis state (e.g. `axis->current_speed`, `axis->rotor_position`).
 
 The project focuses on:
 - deterministic timing
-- clean separation between control logic and hardware drivers
+- clear separation between control logic and hardware drivers
 - extensibility (inverters, sensors, control strategies)
-- real hardware usage (not simulations)
+- real hardware usage (not simulation)
 
 ---
 
 ## Key Features
 
 - Voltage-mode FOC (open-loop and sensored)
-- Current-mode FOC (Id / Iq) using ADC shunt sensing plus rotor sensor
-- Current-mode FOC (Id / Iq) using ADC shunt in sensorless mode (experimental)
-- Modular driver architecture:
+- Current-mode FOC (Id/Iq) with ADC shunt sensing and rotor sensor (sensored) or observer (sensorless, experimental)
+- Modular driver set:
   - Inverters (3-PWM, 6-PWM MCPWM)
-  - Rotor sensors (encoders, observers, open-loop)
+  - Rotor sensors (encoders, observers; optional for open-loop)
   - Current sensors (ADC shunt)
-- Hardware-synchronized PWM loop
-- Dead-time insertion using MCPWM hardware
-- Designed for **ESP-IDF v5+**
+- Hardware-synchronized PWM loop and MCPWM dead-time insertion
+- **ESP-IDF v5+**
 
 ---
 
-##  Quick Start
+## Quick Start
 
 ### 1. Install via ESP-IDF (recommended)
 
 ```bash
-idf.py add-dependency "ulipe/espfoc^1.5.1"
-````
+idf.py add-dependency "ulipe/espfoc^2.0.0"
+```
 
 Then:
 
@@ -52,7 +47,7 @@ idf.py build flash monitor
 
 ---
 
-## 📦 Manual Component Integration
+## Manual Component Integration
 
 Alternatively, clone this repository and add it to your project:
 
@@ -63,7 +58,7 @@ set(EXTRA_COMPONENT_DIRS "path/to/espFoC")
 Build an example:
 
 ```bash
-cd examples/current_control
+cd examples/axis_sensored
 idf.py build flash monitor
 ```
 
@@ -95,32 +90,21 @@ esp_foc_axis
 
 ```
 
-This design allows mixing and matching hardware blocks without
-changing the control core, please notice, espFoC currently focusing
-on driving the motor and its torque loop, the servo control is up to
-the user. This strategy was adopted because it allows the user to select
-the best control method for motor velocity and position.
+This design allows mixing and matching hardware blocks without changing the control core. espFoC is limited to motor driving and the torque (current) loop; velocity and position control are left to the application via the regulation callback.
 
 ---
 
-## ⚙️ Control Modes
+## Control Modes
 
 ### Voltage Mode
-- Direct control of Ud / Uq
-- Supports:
-  - open-loop operation
-  - sensored operation
-- Commonly used for:
-  - motor bring-up
-  - observer initialization
-  - simple control applications
+- Direct control of Ud/Uq
+- Supports open-loop and sensored operation
+- Typical use: motor bring-up, observer tuning, simple drives
 
 ### Current Mode
-- Closed-loop Id / Iq control
-- Requires current sensor, a encoder is required for position control
-- Enables:
-  - torque control
-  - Very useful where thrust / effort control is required e.g.: EV Vehicles, Drones.
+- Closed-loop Id/Iq control
+- Requires a current sensor; sensored mode also requires a rotor sensor (encoder or equivalent)
+- Enables torque control (e.g. thrust or effort in EVs, drones, tools)
 
 ---
 
@@ -142,7 +126,7 @@ the best control method for motor velocity and position.
 Dead-time is handled **in hardware** using the MCPWM peripheral and is
 configured conservatively by default.
 
-> ⚠️ Dead-time configuration assumes complementary outputs and appropriate
+> Dead-time configuration assumes complementary outputs and appropriate
 > external power stage protection.
 
 ---
@@ -195,12 +179,11 @@ Examples are located in the `examples/` directory.
 
 ## Sample Code
 
-Below is a minimal example showing how to initialize and run espFoC and drive the
-target motor in **sensored voltage mode** using:
+Below is a minimal example that initializes espFoC and runs the motor in **sensored current mode** with:
 
 - MCPWM inverter
-- rotor sensor
-- optional current sensor
+- rotor sensor (e.g. AS5600)
+- current sensor (ADC shunt)
 
 ```c
 #include "esp_log.h"
@@ -338,7 +321,7 @@ void app_main(void)
 }
 ```
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```
   espFoC/
@@ -362,7 +345,7 @@ void app_main(void)
 
 ## Project Status
 
-espFoC is experimental and personal project  so it is subject to breaking..
+espFoC is a personal project. The 2.x API focuses on motor driving and FOC only; velocity and position loops are not part of the library. Future releases may introduce breaking changes.
 
 ---
 
