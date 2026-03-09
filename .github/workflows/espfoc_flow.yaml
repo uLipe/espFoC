@@ -78,7 +78,67 @@ jobs:
         idf.py set-target esp32s3
         idf.py build
         popd
-        pushd examples/unit_test_runner
+
+  unit_tests:
+    name: Unit tests (build and run on QEMU)
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.8'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          bison ccache flex gcc git gperf libffi-dev libncurses-dev libssl-dev make wget
+
+    - name: Checkout ESP-IDF
+      uses: actions/checkout@v4
+      with:
+        repository: espressif/esp-idf
+        path: idf
+        submodules: recursive
+        ref: release/v5.5
+
+    - name: Install ESP-IDF and pytest-embedded
+      run: |
+        ./idf/install.sh --enable-ci
+        . ./idf/export.sh
+
+    - name: Install QEMU for ESP32
+      run: |
+        . ./idf/export.sh
+        python $IDF_PATH/tools/idf_tools.py install qemu-xtensa
+
+    - name: Build unit test runner (esp32 for QEMU)
+      run: |
+        . ./idf/export.sh
+        cd examples/unit_test_runner
+        idf.py set-target esp32
+        idf.py -D TEST_COMPONENTS=espFoC build
+
+    - name: Run unit tests on QEMU
+      env:
+        IDF_PATH: ${{ github.workspace }}/idf
+      run: |
+        . ./idf/export.sh
+        pip install pexpect
+        cd examples/unit_test_runner
+        python run_unit_tests_qemu.py
+
+    # Optional: run on real device on self-hosted runner (ESPPORT set).
+    - name: Run unit tests on device
+      env:
+        IDF_PATH: ${{ github.workspace }}/idf
+      run: |
+        . ./idf/export.sh
+        cd examples/unit_test_runner
         idf.py set-target esp32s3
         idf.py -D TEST_COMPONENTS=espFoC build
-        popd
+        pytest pytest_espfoc_unittest.py -m generic -v
+      continue-on-error: true
