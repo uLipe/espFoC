@@ -1,10 +1,13 @@
 # espFoC unit tests
 
-Unity-based unit tests for the espFoC component. They cover logic that does not depend on hardware:
+Unity-based unit tests for the espFoC component. They cover logic that does not depend on hardware and flow with mock drivers.
 
 - **test_foc_math.c**: Clarke/Park transforms, normalize angle, clamp, limit voltage, rsqrt, sine/cosine
 - **test_pid.c**: PID controller (proportional, clamping, reset, integral)
 - **test_lp_filter.c**: Low-pass EMA filter (init, alpha clamp, step response, cutoff)
+- **mock_drivers.c/h**: Mock implementations of inverter, rotor sensor, and current sensor interfaces (record calls, configurable return values)
+- **test_driver_mocks.c**: Driver API tests using mocks (set_voltages/get_dc_link/enable/disable, read_counts/set_to_zero, fetch/calibrate)
+- **test_axis_flow.c**: Axis flow with mocks — initialize_axis, align_axis, set_regulation_callback, run; verifies regulator callback runs and set_voltages receives FOC output
 
 ## Building and running
 

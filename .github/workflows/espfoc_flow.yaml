@@ -95,7 +95,8 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          bison ccache flex gcc git gperf libffi-dev libncurses-dev libssl-dev make wget
+          bison ccache flex gcc git gperf libffi-dev libncurses-dev libssl-dev make wget \
+          libgcrypt20 libglib2.0-0 libpixman-1-0 libsdl2-2.0-0 libslirp0
 
     - name: Checkout ESP-IDF
       uses: actions/checkout@v4
