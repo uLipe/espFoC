@@ -4,13 +4,14 @@ set(srcs    "source/motor_control/esp_foc_core.c"
             "source/motor_control/esp_foc_scope.c"
             "source/motor_control/esp_foc_consts.c"
             "source/motor_control/esp_foc_sine_cosine.c"
+            "source/motor_control/esp_foc_iq31.c"
             "source/motor_control/observers/esp_foc_pll_observer.c"
             "source/motor_control/observers/esp_foc_pmsm_model_observer.c"
             "source/motor_control/observers/esp_foc_kf_observer.c"
             "source/motor_control/observers/esp_foc_simu_observer.c"
             )
 
-set(includes "include")
+set(includes "include" "source/motor_control")
 
 if(ESP_PLATFORM)
 

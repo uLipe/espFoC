@@ -3,6 +3,7 @@
 Unity-based unit tests for the espFoC component. They cover logic that does not depend on hardware and flow with mock drivers.
 
 - **test_foc_math.c**: Clarke/Park transforms, normalize angle, clamp, limit voltage, rsqrt, sine/cosine
+- **test_iq31.c**: Fixed-point IQ31 helpers — conversion (overflow/underflow/invalid), mul/add/sub, clamp, abs, rsqrt, sin/cos LUT, waveform generation, Clarke/Park transforms, SVPWM-style duties. Run with espFoC built (optionally with `CONFIG_ESP_FOC_USE_FIXED_POINT` for future FP path).
 - **test_pid.c**: PID controller (proportional, clamping, reset, integral)
 - **test_lp_filter.c**: Low-pass EMA filter (init, alpha clamp, step response, cutoff)
 - **mock_drivers.c/h**: Mock implementations of inverter, rotor sensor, and current sensor interfaces (record calls, configurable return values)
