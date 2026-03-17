@@ -322,6 +322,12 @@ void app_main(void)
 }
 ```
 
+## Development
+
+- **Fixed-point refactor (IQ31):** No branch `refactor/fixed_point` há um plano para reescrever o núcleo FOC em ponto fixo mantendo a API em float. Ver [doc/REFACTOR_FIXED_POINT_ANALYSIS.md](doc/REFACTOR_FIXED_POINT_ANALYSIS.md).
+
+---
+
 ## Repository Structure
 
 ```
