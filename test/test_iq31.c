@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <unity.h>
 #include "espFoC/utils/esp_foc_iq31.h"
+#include "espFoC/utils/foc_math_iq31.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846

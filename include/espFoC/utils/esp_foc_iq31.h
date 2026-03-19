@@ -180,54 +180,7 @@ static inline iq31_t iq31_mul_q230(iq31_t a, iq31_t b_q230)
 iq31_t iq31_sin(iq31_t angle_q31);
 iq31_t iq31_cos(iq31_t angle_q31);
 
-/* --- Clarke/Park transforms (all in/out Q1.31). For FOC waveform and transform tests. --- */
-
-/** Clarke: u,v,w (3-phase, sum assumed 0) -> alpha, beta. alpha=u, beta=(u+2*v)*K3. */
-static inline void iq31_clarke(iq31_t u, iq31_t v, iq31_t w,
-                               iq31_t *alpha, iq31_t *beta)
-{
-    (void)w;
-    iq31_t sum_u2v = iq31_add(iq31_add(u, v), v);
-    *alpha = u;
-    *beta  = iq31_mul(sum_u2v, IQ31_K3_CLARKE);
-}
-
-/** Park: alpha, beta and sin, cos of angle -> d, q */
-static inline void iq31_park(iq31_t sin_t, iq31_t cos_t, iq31_t alpha, iq31_t beta,
-                            iq31_t *d, iq31_t *q)
-{
-    *d = iq31_add(iq31_mul(alpha, cos_t), iq31_mul(beta, sin_t));
-    *q = iq31_sub(iq31_mul(beta, cos_t), iq31_mul(alpha, sin_t));
-}
-
-/** Inverse Park: d, q and sin, cos -> alpha, beta */
-static inline void iq31_inverse_park(iq31_t sin_t, iq31_t cos_t, iq31_t d, iq31_t q,
-                                    iq31_t *alpha, iq31_t *beta)
-{
-    *alpha = iq31_sub(iq31_mul(d, cos_t), iq31_mul(q, sin_t));
-    *beta  = iq31_add(iq31_mul(d, sin_t), iq31_mul(q, cos_t));
-}
-
-/** Inverse Clarke: alpha, beta -> u, v, w (sum = 0). v = (sqrt3/2)*beta - alpha/2, w = -u - v. */
-static inline void iq31_inverse_clarke(iq31_t alpha, iq31_t beta,
-                                      iq31_t *u, iq31_t *v, iq31_t *w)
-{
-    *u = alpha;
-    *v = iq31_sub(iq31_mul(beta, IQ31_SQRT3_OVER_2), iq31_mul(alpha, IQ31_HALF));
-    *w = iq31_sub(iq31_sub(0, alpha), *v);
-}
-
-/** Normalize angle to [0, 2*pi) in Q1.31: angle_q31 in [0, IQ31_ONE]; 2*pi (IQ31_ONE) wraps to 0 */
-static inline iq31_t iq31_normalize_angle(iq31_t angle_q31)
-{
-    uint32_t u = (uint32_t)angle_q31 & 0x7FFFFFFFU;
-    uint32_t period = (uint32_t)IQ31_ONE + 1u;
-    u = u % period;
-    if (u == (uint32_t)IQ31_ONE) {
-        return 0;  /* 2*pi -> 0 */
-    }
-    return (iq31_t)u;
-}
+/* Clarke/Park, normalize_angle, limit_voltage: see foc_math_iq31.h */
 
 #ifdef __cplusplus
 }
