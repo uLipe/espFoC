@@ -1,1 +1,0 @@
-Command: cmake -G Ninja -DPYTHON_DEPS_CHECKED=1 -DPYTHON=/home/ulipe/.espressif/python_env/idf5.5_py3.10_env/bin/python -DESP_PLATFORM=1 -DIDF_TARGET=esp32 -DCCACHE_ENABLE=0 /home/ulipe/fun/esp_foc_ws/components/espFoC/examples/unit_test_runner
