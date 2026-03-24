@@ -25,6 +25,11 @@
 #include <sys/cdefs.h>
 #include <stdbool.h>
 #include <sdkconfig.h>
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+#include <math.h>
+#include "espFoC/utils/esp_foc_iq31.h"
+#include "espFoC/driver_iq31_local.h"
+#endif
 #include "espFoC/current_sensor_adc.h"
 #include "hal/adc_hal.h"
 #include "esp_log.h"
@@ -44,6 +49,9 @@ typedef struct {
     adc_unit_t units[4];
     adc_continuous_handle_t handle;
     float adc_to_current_scale;
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+    iq31_t adc_to_current_scale_iq31;
+#endif
     uint32_t raw_reads[4][ESP_FOC_LOW_SPEED_DOWNSAMPLING];
     int sample_avg_idx;
     float currents[4];
@@ -94,6 +102,17 @@ static inline float avg_calc(uint32_t *raws)
 
     return (float)(avg/ESP_FOC_LOW_SPEED_DOWNSAMPLING);
 }
+
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+static int32_t avg_calc_int(uint32_t *raws)
+{
+    uint32_t sum = 0;
+    for (int i = 0; i < ESP_FOC_LOW_SPEED_DOWNSAMPLING; i++) {
+        sum += raws[i];
+    }
+    return (int32_t)(sum / (uint32_t)ESP_FOC_LOW_SPEED_DOWNSAMPLING);
+}
+#endif
 
 static bool isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
 {
@@ -179,6 +198,52 @@ static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
     values->iw_axis_1 = -(values->iu_axis_1 +  values->iv_axis_1);
 }
 
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+static void fetch_isensors_iq31(esp_foc_isensor_t *self, isensor_values_iq31_t *values)
+{
+    isensor_adc_t *obj = __containerof(self, isensor_adc_t, interface);
+    const int32_t adc_rng = 2048;
+
+    int32_t av0 = avg_calc_int(&obj->raw_reads[0][0]);
+    int32_t av1 = avg_calc_int(&obj->raw_reads[1][0]);
+    int32_t av2 = avg_calc_int(&obj->raw_reads[2][0]);
+    int32_t av3 = avg_calc_int(&obj->raw_reads[3][0]);
+
+    esp_foc_critical_enter();
+    obj->currents[0] = (float)av0;
+    obj->currents[1] = (float)av1;
+    obj->currents[2] = (float)av2;
+    obj->currents[3] = (float)av3;
+    esp_foc_critical_leave();
+
+    int32_t d0 = av0 - (int32_t)lroundf(obj->offsets[0]);
+    int32_t d1 = av1 - (int32_t)lroundf(obj->offsets[1]);
+    int32_t d2 = av2 - (int32_t)lroundf(obj->offsets[2]);
+    int32_t d3 = av3 - (int32_t)lroundf(obj->offsets[3]);
+
+    d0 = esp_foc_clamp_int32(d0, -adc_rng, adc_rng);
+    d1 = esp_foc_clamp_int32(d1, -adc_rng, adc_rng);
+    d2 = esp_foc_clamp_int32(d2, -adc_rng, adc_rng);
+    d3 = esp_foc_clamp_int32(d3, -adc_rng, adc_rng);
+
+    iq31_t iu0 = iq31_mul(esp_foc_iq31_from_adc_diff_clamped(d0, adc_rng), obj->adc_to_current_scale_iq31);
+    iq31_t iv0 = iq31_mul(esp_foc_iq31_from_adc_diff_clamped(d1, adc_rng), obj->adc_to_current_scale_iq31);
+    iq31_t iu1 = iq31_mul(esp_foc_iq31_from_adc_diff_clamped(d2, adc_rng), obj->adc_to_current_scale_iq31);
+    iq31_t iv1 = iq31_mul(esp_foc_iq31_from_adc_diff_clamped(d3, adc_rng), obj->adc_to_current_scale_iq31);
+
+    iq31_t zero = 0;
+    iq31_t iw0 = iq31_sub(zero, iq31_add(iu0, iv0));
+    iq31_t iw1 = iq31_sub(zero, iq31_add(iu1, iv1));
+
+    values->iu_axis_0 = iu0;
+    values->iv_axis_0 = iv0;
+    values->iw_axis_0 = iw0;
+    values->iu_axis_1 = iu1;
+    values->iv_axis_1 = iv1;
+    values->iw_axis_1 = iw1;
+}
+#endif
+
 static void sample_isensors(esp_foc_isensor_t *self)
 {
     adc_hal_digi_connect(true);
@@ -247,11 +312,17 @@ esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
     }
 
     isensor_adc.adc_to_current_scale = adc_to_volts * (1.0f / (config->amp_gain * config->shunt_resistance));
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+    isensor_adc.adc_to_current_scale_iq31 = iq31_from_float(2048.0f * isensor_adc.adc_to_current_scale);
+#endif
 
     isensor_adc.interface.fetch_isensors = fetch_isensors;
     isensor_adc.interface.sample_isensors = sample_isensors;
     isensor_adc.interface.calibrate_isensors = calibrate_isensors;
     isensor_adc.interface.set_isensor_callback = set_callback;
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+    isensor_adc.interface.fetch_isensors_iq31 = fetch_isensors_iq31;
+#endif
     isensor_adc.number_of_channels = config->number_of_channels;
     isensor_adc.channels[0] = config->axis_channels[0];
     isensor_adc.channels[1] = config->axis_channels[1];

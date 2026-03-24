@@ -24,6 +24,9 @@
 
 #include <sys/cdefs.h>
 #include <sdkconfig.h>
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+#include "espFoC/driver_iq31_local.h"
+#endif
 #include "espFoC/inverter_3pwm_ledc.h"
 #include "hal/ledc_hal.h"
 #include "driver/gpio.h"
@@ -88,6 +91,21 @@ static void ledc_update(esp_foc_ledc_inverter *obj, ledc_channel_t channel, floa
     ledc_ll_set_duty_start(obj->hw, LEDC_LOW_SPEED_MODE, channel, true);
 }
 
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+static void ledc_update_duty_u32(esp_foc_ledc_inverter *obj, ledc_channel_t channel, uint32_t duty)
+{
+    ledc_ll_set_hpoint(obj->hw, LEDC_LOW_SPEED_MODE, channel, 0);
+    ledc_ll_set_duty_int_part(obj->hw, LEDC_LOW_SPEED_MODE, channel, duty);
+    ledc_ll_set_duty_direction(obj->hw, LEDC_LOW_SPEED_MODE, channel, LEDC_DUTY_DIR_INCREASE);
+    ledc_ll_set_duty_num(obj->hw, LEDC_LOW_SPEED_MODE, channel, 1);
+    ledc_ll_set_duty_cycle(obj->hw, LEDC_LOW_SPEED_MODE, channel, 1);
+    ledc_ll_set_duty_scale(obj->hw, LEDC_LOW_SPEED_MODE, channel, 0);
+    ledc_ll_ls_channel_update(obj->hw, LEDC_LOW_SPEED_MODE, channel);
+    ledc_ll_set_sig_out_en(obj->hw, LEDC_LOW_SPEED_MODE, channel, true);
+    ledc_ll_set_duty_start(obj->hw, LEDC_LOW_SPEED_MODE, channel, true);
+}
+#endif
+
 
 static float get_dc_link_voltage (esp_foc_inverter_t *self)
 {
@@ -114,12 +132,29 @@ static void set_voltages(esp_foc_inverter_t *self,
     ledc_update(obj, obj->ledc_channel[2], obj->voltage_to_duty_ratio * v_w);
 }
 
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+static void set_voltages_iq31(esp_foc_inverter_t *self, iq31_t v_u, iq31_t v_v, iq31_t v_w)
+{
+    esp_foc_ledc_inverter *obj =
+        __containerof(self, esp_foc_ledc_inverter, interface);
+
+    uint32_t scale = (uint32_t)LEDC_RESOLUTION_STEPS;
+    uint32_t du = esp_foc_iq31_duty_ticks(v_u, scale);
+    uint32_t dv = esp_foc_iq31_duty_ticks(v_v, scale);
+    uint32_t dw = esp_foc_iq31_duty_ticks(v_w, scale);
+
+    ledc_update_duty_u32(obj, obj->ledc_channel[0], du);
+    ledc_update_duty_u32(obj, obj->ledc_channel[1], dv);
+    ledc_update_duty_u32(obj, obj->ledc_channel[2], dw);
+}
+#endif
+
 static void set_inverter_callback(esp_foc_inverter_t *self,
                         esp_foc_inverter_callback_t callback,
                         void *argument)
 {
     esp_foc_ledc_inverter *obj =
-    __containerof(self, esp_foc_ledc_inverter, interface);
+        __containerof(self, esp_foc_ledc_inverter, interface);
 
     obj->notifier = callback;
     obj->arg = argument;
@@ -213,6 +248,9 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
     ledc[port].interface.get_inverter_pwm_rate = get_inverter_pwm_rate;
     ledc[port].interface.enable = inverter_enable;
     ledc[port].interface.disable = inverter_disable;
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+    ledc[port].interface.set_voltages_iq31 = set_voltages_iq31;
+#endif
 
     ledc[port].ledc_channel[0] = ch_u;
     ledc[port].ledc_channel[1] = ch_v;

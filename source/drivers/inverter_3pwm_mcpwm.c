@@ -23,6 +23,10 @@
  */
 
 #include <sys/cdefs.h>
+#include <sdkconfig.h>
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+#include "espFoC/driver_iq31_local.h"
+#endif
 #include "espFoC/inverter_3pwm_mcpwm.h"
 #include "driver/mcpwm_prelude.h"
 #include "driver/gpio.h"
@@ -113,6 +117,23 @@ static void set_voltages(esp_foc_inverter_t *self,
     mcpwm_comparator_set_compare_value(obj->comparators[2], (uint16_t)v_w);
 }
 
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+static void set_voltages_iq31(esp_foc_inverter_t *self, iq31_t v_u, iq31_t v_v, iq31_t v_w)
+{
+    esp_foc_mcpwm_inverter_t *obj =
+        __containerof(self, esp_foc_mcpwm_inverter_t, interface);
+
+    uint32_t ph = (uint32_t)MCPWM_PERIOD_TOP_HALF;
+    uint32_t du = esp_foc_iq31_duty_ticks(v_u, ph);
+    uint32_t dv = esp_foc_iq31_duty_ticks(v_v, ph);
+    uint32_t dw = esp_foc_iq31_duty_ticks(v_w, ph);
+
+    mcpwm_comparator_set_compare_value(obj->comparators[0], (uint16_t)du);
+    mcpwm_comparator_set_compare_value(obj->comparators[1], (uint16_t)dv);
+    mcpwm_comparator_set_compare_value(obj->comparators[2], (uint16_t)dw);
+}
+#endif
+
 static void set_inverter_callback(esp_foc_inverter_t *self,
                         esp_foc_inverter_callback_t callback,
                         void *argument)
@@ -177,6 +198,9 @@ esp_foc_inverter_t *inverter_3pwm_mpcwm_new(int gpio_u, int gpio_v, int gpio_w, 
     mcpwms[port].interface.get_inverter_pwm_rate = get_inverter_pwm_rate;
     mcpwms[port].interface.enable = inverter_enable;
     mcpwms[port].interface.disable = inverter_disable;
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+    mcpwms[port].interface.set_voltages_iq31 = set_voltages_iq31;
+#endif
     mcpwms[port].voltage_to_duty_ratio = MCPWM_PERIOD_TOP_HALF;
     mcpwms[port].notifier = NULL;
 
