@@ -24,6 +24,8 @@
 
 #pragma once
 
+#include "espFoC/utils/space_vector_modulator.h"
+
 static inline void esp_foc_modulate_dq_voltage (float sin,
                                             float cos,
                                             float v_d,

@@ -31,6 +31,9 @@
 #include "espFoC/utils/foc_math.h"
 #include "espFoC/utils/space_vector_modulator.h"
 #include "espFoC/utils/modulator.h"
+#ifdef CONFIG_ESP_FOC_USE_FIXED_POINT
+#include "espFoC/utils/modulator_iq31.h"
+#endif
 #include "espFoC/utils/pid_controller.h"
 #include "espFoC/drivers/inverter_interface.h"
 #include "espFoC/drivers/current_sensor_interface.h"

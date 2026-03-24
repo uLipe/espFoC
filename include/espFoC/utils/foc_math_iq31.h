@@ -32,6 +32,7 @@
 #pragma once
 
 #include "espFoC/utils/esp_foc_iq31.h"
+#include <math.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -93,31 +94,31 @@ static inline iq31_t iq31_normalize_angle(iq31_t angle_q31)
 /**
  * If |(v_d, v_q)| > v_dc, scale both by v_dc/|v| so result lies on the circle.
  * All arguments in Q1.31. No-op if magnitude squared is zero or already <= v_dc.
+ *
+ * Scale uses double hypot/sqrt on int64 components so |v| matches the float
+ * path for all magnitudes (pure iq31_rsqrt_fast chains can saturate or mis-scale).
  */
 static inline void esp_foc_limit_voltage_iq31(iq31_t *v_d, iq31_t *v_q, iq31_t v_dc)
 {
     int64_t vd = (int64_t)*v_d;
     int64_t vq = (int64_t)*v_q;
     uint64_t sum_sq = (uint64_t)(vd * vd) + (uint64_t)(vq * vq);
-    uint32_t mag_sq_u = (uint32_t)(sum_sq >> 31);
-    if (mag_sq_u > 0x7FFFFFFFU) {
-        mag_sq_u = 0x7FFFFFFFU;
-    }
-    iq31_t mag_sq = (iq31_t)mag_sq_u;
+    uint64_t vdc_sq = (uint64_t)((int64_t)v_dc * (int64_t)v_dc);
 
-    int64_t vdc_sq = (int64_t)v_dc * (int64_t)v_dc;
-    uint32_t vdc_sq_u = (uint32_t)(vdc_sq >> 31);
-    if (vdc_sq_u > 0x7FFFFFFFU) {
-        vdc_sq_u = 0x7FFFFFFFU;
+    if (sum_sq <= vdc_sq || sum_sq == 0ULL) {
+        return;
     }
-    iq31_t v_dc_sq = (iq31_t)vdc_sq_u;
 
-    if (mag_sq > v_dc_sq && mag_sq > 0) {
-        iq31_t r = iq31_rsqrt_fast(mag_sq);
-        iq31_t scale = iq31_mul_q230(v_dc, r);
-        *v_d = iq31_mul(*v_d, scale);
-        *v_q = iq31_mul(*v_q, scale);
+    const double inv_scale = 2147483648.0; /* 2^31 */
+    double mag = hypot((double)vd, (double)vq) / inv_scale;
+    double vdc_d = (double)v_dc / inv_scale;
+    double scale_d = vdc_d / mag;
+    if (scale_d > 1.0) {
+        scale_d = 1.0;
     }
+    iq31_t scale = iq31_from_float((float)scale_d);
+    *v_d = iq31_mul(*v_d, scale);
+    *v_q = iq31_mul(*v_q, scale);
 }
 
 /* --- Apply bias: map [-1,1] -> [0,1] (v*0.5 + 0.5) --- */
