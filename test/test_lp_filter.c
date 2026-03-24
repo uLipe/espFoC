@@ -56,3 +56,44 @@ TEST_CASE("esp_foc_lp_filter_set_cutoff: sets alpha from cutoff and fs", "[espFo
     float expected_alpha = wc / (1.0f + wc);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, expected_alpha, f.alpha);
 }
+
+/* First-order step: y[n]=alpha*u+(1-alpha)*y[n-1], u=1, y[0]=0 => y[n]=1-(1-alpha)^n */
+
+TEST_CASE("esp_foc_lp_filter: step response matches discrete model", "[espFoC][lp_filter]")
+{
+    const float alpha = 0.25f;
+    const float beta = 1.0f - alpha;
+    esp_foc_lp_filter_t f;
+    esp_foc_low_pass_filter_init(&f, alpha);
+    float y = 0.0f;
+    const float u = 1.0f;
+    for (int n = 1; n <= 40; n++) {
+        float y_model = alpha * u + beta * y;
+        float y_filt = esp_foc_low_pass_filter_update(&f, u);
+        TEST_ASSERT_FLOAT_WITHIN(1e-5f, y_model, y_filt);
+        y = y_model;
+    }
+    float y_expected = 1.0f - powf(beta, 40.0f);
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, y_expected, y);
+}
+
+TEST_CASE("esp_foc_lp_filter: large input does not produce NaN", "[espFoC][lp_filter]")
+{
+    esp_foc_lp_filter_t f;
+    esp_foc_low_pass_filter_init(&f, 0.3f);
+    float y = esp_foc_low_pass_filter_update(&f, 1.0e6f);
+    TEST_ASSERT_TRUE(y == y && y < 2.0e6f);
+}
+
+TEST_CASE("esp_foc_lp_filter: step down from steady state", "[espFoC][lp_filter]")
+{
+    esp_foc_lp_filter_t f;
+    esp_foc_low_pass_filter_init(&f, 0.5f);
+    for (int i = 0; i < 50; i++) {
+        esp_foc_low_pass_filter_update(&f, 1.0f);
+    }
+    float y = esp_foc_low_pass_filter_update(&f, 0.0f);
+    TEST_ASSERT_TRUE(y < 1.0f && y >= 0.0f);
+    y = esp_foc_low_pass_filter_update(&f, 0.0f);
+    TEST_ASSERT_TRUE(y < 0.6f);
+}

@@ -6,9 +6,11 @@
 #include <unity.h>
 #include "espFoC/utils/foc_math.h"
 #include "espFoC/utils/pid_controller.h"
+#include "espFoC/utils/esp_foc_iq31.h"
 #include "espFoC/utils/pid_controller_iq31.h"
 
 #define TOL 0.02f
+#define TOL_STRICT 0.03f
 
 static void setup_both(esp_foc_pid_controller_t *pf, esp_foc_pid_iq31_t *pi,
                        float kp, float ki, float kd, float dt, float out_min, float out_max, float int_lim)
@@ -106,4 +108,70 @@ TEST_CASE("esp_foc_pid_iq31: integral buildup matches float", "[espFoC][pid_iq31
     }
     assert_iq31_near_float(of, oi);
     TEST_ASSERT_TRUE(iq31_to_float(oi) > 0.3f);
+}
+
+/* --- Behavioral: PI, integrator saturation, output saturation, sign, derivative --- */
+
+TEST_CASE("esp_foc_pid_iq31: PI first step matches float", "[espFoC][pid_iq31]")
+{
+    esp_foc_pid_controller_t pf;
+    esp_foc_pid_iq31_t pi;
+    setup_both(&pf, &pi, 0.5f, 2.0f, 0.0f, 0.01f, -100.0f, 100.0f, 100.0f);
+    float of = esp_foc_pid_update(&pf, 1.0f, 0.0f);
+    iq31_t oi = esp_foc_pid_update_iq31(&pi, IQ31_ONE, 0);
+    assert_iq31_near_float(of, oi);
+    TEST_ASSERT_FLOAT_WITHIN(TOL_STRICT, pf.accumulated_error, pi.accumulated_error);
+}
+
+TEST_CASE("esp_foc_pid_iq31: integrator clamps at limit matches float", "[espFoC][pid_iq31]")
+{
+    esp_foc_pid_controller_t pf;
+    esp_foc_pid_iq31_t pi;
+    const float int_lim = 0.4f;
+    setup_both(&pf, &pi, 0.0f, 30.0f, 0.0f, 0.01f, -100.0f, 100.0f, int_lim);
+    for (int i = 0; i < 400; i++) {
+        esp_foc_pid_update(&pf, 1.0f, 0.0f);
+        esp_foc_pid_update_iq31(&pi, IQ31_ONE, 0);
+    }
+    TEST_ASSERT_FLOAT_WITHIN(TOL_STRICT, int_lim, pf.accumulated_error);
+    TEST_ASSERT_FLOAT_WITHIN(TOL_STRICT, pf.accumulated_error, pi.accumulated_error);
+}
+
+TEST_CASE("esp_foc_pid_iq31: output saturated integrator still bounded matches float", "[espFoC][pid_iq31]")
+{
+    esp_foc_pid_controller_t pf;
+    esp_foc_pid_iq31_t pi;
+    setup_both(&pf, &pi, 0.0f, 15.0f, 0.0f, 0.01f, -0.4f, 0.4f, 8.0f);
+    for (int i = 0; i < 150; i++) {
+        esp_foc_pid_update(&pf, 1.0f, 0.0f);
+        esp_foc_pid_update_iq31(&pi, IQ31_ONE, 0);
+    }
+    TEST_ASSERT_TRUE(pf.accumulated_error <= 8.0f + 0.15f);
+    TEST_ASSERT_TRUE(pf.accumulated_error >= -8.0f - 0.15f);
+    TEST_ASSERT_FLOAT_WITHIN(TOL_STRICT, pf.accumulated_error, pi.accumulated_error);
+    float of = esp_foc_pid_update(&pf, 1.0f, 0.0f);
+    iq31_t oi = esp_foc_pid_update_iq31(&pi, IQ31_ONE, 0);
+    assert_iq31_near_float(of, oi);
+}
+
+TEST_CASE("esp_foc_pid_iq31: negative error matches float", "[espFoC][pid_iq31]")
+{
+    esp_foc_pid_controller_t pf;
+    esp_foc_pid_iq31_t pi;
+    setup_both(&pf, &pi, 1.0f, 0.0f, 0.0f, 0.001f, -100.0f, 100.0f, 10.0f);
+    float of = esp_foc_pid_update(&pf, 0.0f, 0.5f);
+    iq31_t oi = esp_foc_pid_update_iq31(&pi, 0, iq31_from_float(0.5f));
+    assert_iq31_near_float(of, oi);
+}
+
+TEST_CASE("esp_foc_pid_iq31: derivative step matches float", "[espFoC][pid_iq31]")
+{
+    esp_foc_pid_controller_t pf;
+    esp_foc_pid_iq31_t pi;
+    setup_both(&pf, &pi, 0.0f, 0.0f, 0.01f, 0.1f, -1000.0f, 1000.0f, 100.0f);
+    esp_foc_pid_update(&pf, 0.0f, 0.0f);
+    esp_foc_pid_update_iq31(&pi, 0, 0);
+    float of = esp_foc_pid_update(&pf, 1.0f, 0.0f);
+    iq31_t oi = esp_foc_pid_update_iq31(&pi, IQ31_ONE, 0);
+    assert_iq31_near_float(of, oi);
 }
