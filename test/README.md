@@ -11,6 +11,7 @@ Unity-based unit tests for the espFoC component. They cover logic that does not 
 - **test_lp_filter_iq31.c**: EMA in IQ31 (`ema_low_pass_filter_iq31.h`) — init clamp, alpha=0/1, step response, set_cutoff vs float formula
 - **mock_drivers.c/h**: Mock implementations of inverter, rotor sensor, and current sensor interfaces (record calls, configurable return values)
 - **test_driver_mocks.c**: Driver API tests using mocks (set_voltages/get_dc_link/enable/disable, read_counts/set_to_zero, fetch/calibrate)
+- **test_driver_iq31_api.c**: Mock IQ31 API (`set_voltages_iq31`, `fetch_isensors_iq31`, rotor IQ31); `TEST_CASE`s exist only with `CONFIG_ESP_FOC_USE_FIXED_POINT=y` (add to `sdkconfig` or `sdkconfig.defaults` and rebuild).
 - **test_axis_flow.c**: Axis flow with mocks — initialize_axis, align_axis, set_regulation_callback, run; verifies regulator callback runs and set_voltages receives FOC output
 
 ## Building and running

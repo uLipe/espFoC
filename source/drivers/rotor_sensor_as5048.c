@@ -24,6 +24,11 @@
 
 #include <math.h>
 #include <string.h>
+#include <sdkconfig.h>
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+#include "espFoC/utils/esp_foc_iq31.h"
+#include "espFoC/driver_iq31_local.h"
+#endif
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -39,6 +44,10 @@
 #define AS5048_FLAG_EF_MASK        0x4000u  // bit 14 in response frame (PAR | EF | DATA[13:0]) :contentReference[oaicite:5]{index=5}
 #define AS5048_PULSES_PER_REV      16384.0f // 14-bit
 #define AS5048_WRAP_VALUE          (AS5048_PULSES_PER_REV * 0.95f)
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+#define AS5048_CPR_UINT            16384u
+#define AS5048_WRAP_INT            15565u /* ~0.95 * 16384 */
+#endif
 
 #ifndef MIN
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
@@ -50,6 +59,10 @@ typedef struct {
     float accumulated;
     float previous;
     uint16_t zero_offset;
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+    int32_t prev_raw_iq;
+    int64_t accum_i64;
+#endif
 
     spi_device_handle_t dev;
     spi_host_device_t host;
@@ -222,6 +235,52 @@ static float read_counts(esp_foc_rotor_sensor_t *self)
     return (float)((raw - obj->zero_offset) & AS5048_DATA_MASK);
 }
 
+static void set_simulation_count_unused(esp_foc_rotor_sensor_t *self, float increment)
+{
+    (void)self;
+    (void)increment;
+}
+
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+static iq31_t read_counts_iq31(esp_foc_rotor_sensor_t *self)
+{
+    esp_foc_as5048_t *obj = __containerof(self, esp_foc_as5048_t, interface);
+
+    uint16_t raw = read_angle_raw(obj);
+    int32_t delta = (int32_t)raw - obj->prev_raw_iq;
+
+    if (delta >= (int32_t)AS5048_WRAP_INT || delta <= -(int32_t)AS5048_WRAP_INT) {
+        esp_foc_critical_enter();
+        if (delta < 0) {
+            obj->accum_i64 += (int64_t)AS5048_CPR_UINT;
+        } else {
+            obj->accum_i64 -= (int64_t)AS5048_CPR_UINT;
+        }
+        esp_foc_critical_leave();
+    }
+
+    esp_foc_critical_enter();
+    obj->prev_raw_iq = (int32_t)raw;
+    esp_foc_critical_leave();
+
+    uint32_t cm = (uint32_t)((raw - obj->zero_offset) & AS5048_DATA_MASK);
+    return esp_foc_iq31_from_counts_mod(cm, AS5048_CPR_UINT);
+}
+
+static int64_t read_accumulated_counts_i64(esp_foc_rotor_sensor_t *self)
+{
+    esp_foc_as5048_t *obj = __containerof(self, esp_foc_as5048_t, interface);
+    return obj->accum_i64 + (int64_t)obj->prev_raw_iq;
+}
+
+static void set_simulation_count_iq31(esp_foc_rotor_sensor_t *self, iq31_t increment_normalized)
+{
+    esp_foc_as5048_t *obj = __containerof(self, esp_foc_as5048_t, interface);
+    int64_t dt = ((int64_t)increment_normalized * (int64_t)AS5048_CPR_UINT) >> 31;
+    obj->accum_i64 += dt;
+}
+#endif
+
 esp_foc_rotor_sensor_t *rotor_sensor_as5048_new(int pin_mosi,
                                                 int pin_miso,
                                                 int pin_sclk,
@@ -240,10 +299,20 @@ esp_foc_rotor_sensor_t *rotor_sensor_as5048_new(int pin_mosi,
     rotor_sensors[port].interface.read_counts = read_counts;
     rotor_sensors[port].interface.set_to_zero = set_to_zero;
     rotor_sensors[port].interface.read_accumulated_counts = read_accumulated_counts;
+    rotor_sensors[port].interface.set_simulation_count = set_simulation_count_unused;
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+    rotor_sensors[port].interface.read_counts_iq31 = read_counts_iq31;
+    rotor_sensors[port].interface.read_accumulated_counts_i64 = read_accumulated_counts_i64;
+    rotor_sensors[port].interface.set_simulation_count_iq31 = set_simulation_count_iq31;
+#endif
 
     rotor_sensors[port].zero_offset = 0;
     rotor_sensors[port].previous = 0;
     rotor_sensors[port].accumulated = 0;
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+    rotor_sensors[port].prev_raw_iq = 0;
+    rotor_sensors[port].accum_i64 = 0;
+#endif
     rotor_sensors[port].dev = NULL;
     rotor_sensors[port].host = spi_host;
 

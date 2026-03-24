@@ -1,4 +1,9 @@
 #include <math.h>
+#include <sdkconfig.h>
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+#include "espFoC/utils/esp_foc_iq31.h"
+#include "espFoC/driver_iq31_local.h"
+#endif
 #include "espFoC/rotor_sensor_pcnt.h"
 #include "driver/pulse_cnt.h"
 #include "esp_err.h"
@@ -12,6 +17,10 @@ typedef struct {
     float accumulated;
     float previous;
     float pulses_per_revolution;
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+    int64_t accum_i64;
+    uint32_t ppr_u32;
+#endif
     uint32_t pcnt_unit;
     esp_foc_rotor_sensor_t interface;
 }esp_foc_pcnt_t;
@@ -28,8 +37,14 @@ static void pcnt_overflow_handler(void *arg)
 
     if (status & PCNT_EVT_H_LIM) {
         obj->accumulated += obj->pulses_per_revolution;
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+        obj->accum_i64 += (int64_t)obj->ppr_u32;
+#endif
     } else if (status & PCNT_EVT_L_LIM) {
         obj->accumulated -= obj->pulses_per_revolution;
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+        obj->accum_i64 -= (int64_t)obj->ppr_u32;
+#endif
     }
 }
 
@@ -71,6 +86,45 @@ static float read_counts(esp_foc_rotor_sensor_t *self)
     return(fabs(obj->previous));
 }
 
+static void set_simulation_count_unused(esp_foc_rotor_sensor_t *self, float increment)
+{
+    (void)self;
+    (void)increment;
+}
+
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+static iq31_t read_counts_iq31(esp_foc_rotor_sensor_t *self)
+{
+    int16_t raw_count;
+    esp_foc_pcnt_t *obj = __containerof(self, esp_foc_pcnt_t, interface);
+
+    pcnt_get_counter_value(obj->pcnt_unit, &raw_count);
+    obj->previous = (float)raw_count;
+
+    int32_t rc = (int32_t)raw_count;
+    uint32_t absv = (uint32_t)(rc < 0 ? -rc : rc);
+    return esp_foc_iq31_from_counts_mod(absv, obj->ppr_u32 ? obj->ppr_u32 : 1u);
+}
+
+static int64_t read_accumulated_counts_i64(esp_foc_rotor_sensor_t *self)
+{
+    int16_t raw_count;
+    esp_foc_pcnt_t *obj = __containerof(self, esp_foc_pcnt_t, interface);
+
+    pcnt_get_counter_value(obj->pcnt_unit, &raw_count);
+    int32_t rc = (int32_t)raw_count;
+    uint32_t absv = (uint32_t)(rc < 0 ? -rc : rc);
+    return obj->accum_i64 + (int64_t)absv;
+}
+
+static void set_simulation_count_iq31(esp_foc_rotor_sensor_t *self, iq31_t increment_normalized)
+{
+    esp_foc_pcnt_t *obj = __containerof(self, esp_foc_pcnt_t, interface);
+    int64_t dt = ((int64_t)increment_normalized * (int64_t)obj->ppr_u32) >> 31;
+    obj->accum_i64 += dt;
+}
+#endif
+
 esp_foc_rotor_sensor_t *rotor_sensor_pcnt_new(int pin_a,
                                             int pin_b,
                                             int port,
@@ -84,9 +138,19 @@ esp_foc_rotor_sensor_t *rotor_sensor_pcnt_new(int pin_a,
     rotor_sensors[port].interface.read_counts = read_counts;
     rotor_sensors[port].interface.set_to_zero = set_to_zero;
     rotor_sensors[port].interface.read_accumulated_counts = read_accumulated_counts;
+    rotor_sensors[port].interface.set_simulation_count = set_simulation_count_unused;
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+    rotor_sensors[port].interface.read_counts_iq31 = read_counts_iq31;
+    rotor_sensors[port].interface.read_accumulated_counts_i64 = read_accumulated_counts_i64;
+    rotor_sensors[port].interface.set_simulation_count_iq31 = set_simulation_count_iq31;
+#endif
     rotor_sensors[port].previous = 0;
     rotor_sensors[port].accumulated = 0;
     rotor_sensors[port].pulses_per_revolution = (float)pulses_per_revolution;
+#if CONFIG_ESP_FOC_USE_FIXED_POINT
+    rotor_sensors[port].accum_i64 = 0;
+    rotor_sensors[port].ppr_u32 = (uint32_t)(int32_t)pulses_per_revolution;
+#endif
     rotor_sensors[port].pcnt_unit = port;
 
     if(!pcnt_configured) {

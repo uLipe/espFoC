@@ -24,6 +24,12 @@
 
 #pragma once
 
+#include <sdkconfig.h>
+
+#ifdef CONFIG_ESP_FOC_USE_FIXED_POINT
+#include "espFoC/utils/esp_foc_iq31.h"
+#endif
+
 typedef void (*esp_foc_inverter_callback_t) (void *argument);
 
 typedef struct esp_foc_inverter_s esp_foc_inverter_t;
@@ -41,4 +47,14 @@ struct esp_foc_inverter_s {
     float (*get_inverter_pwm_rate)(esp_foc_inverter_t *self);
     void (*enable)(esp_foc_inverter_t *self);
     void (*disable)(esp_foc_inverter_t *self);
+#ifdef CONFIG_ESP_FOC_USE_FIXED_POINT
+    /**
+     * Normalized phase voltages (same convention as float set_voltages), Q1.31.
+     * Driver converts to comparator duty without float on the hot path.
+     */
+    void (*set_voltages_iq31)(esp_foc_inverter_t *self,
+                              iq31_t v_u,
+                              iq31_t v_v,
+                              iq31_t v_w);
+#endif
 };
