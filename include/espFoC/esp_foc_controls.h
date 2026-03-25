@@ -62,6 +62,10 @@ static inline void esp_foc_current_control_loop(esp_foc_axis_t *axis)
 /* current mode sensored core controllers */
 void do_current_mode_sensored_high_speed_loop(void *arg);
 void do_current_mode_sensored_low_speed_loop(void *arg);
+#ifdef CONFIG_ESP_FOC_USE_FIXED_POINT
+void do_current_mode_sensored_high_speed_loop_iq31(void *arg);
+void do_current_mode_sensored_low_speed_loop_iq31(void *arg);
+#endif
 
 /* current mode sensorless core controllers */
 void do_current_mode_sensorless_high_speed_loop(void *arg);
