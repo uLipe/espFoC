@@ -84,3 +84,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis, esp_foc_inverter_t *
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_set_regulation_callback(esp_foc_axis_t *axis, esp_foc_motor_regulation_callback_t callback);
+
+#ifdef CONFIG_ESP_FOC_USE_FIXED_POINT
+#include "espFoC/esp_foc_iq31_api.h"
+#endif

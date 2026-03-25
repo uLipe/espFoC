@@ -62,6 +62,13 @@ cd examples/axis_sensored
 idf.py build flash monitor
 ```
 
+Fixed-point (IQ31) sensored quick start — same drivers and wiring intent as `axis_sensored`, with `CONFIG_ESP_FOC_USE_FIXED_POINT=y` in `sdkconfig.defaults`:
+
+```bash
+cd examples/axis_sensored_iq31
+idf.py build flash monitor
+```
+
 ---
 
 ## Architectural Overview
@@ -336,6 +343,7 @@ void app_main(void)
   │   └── images
   ├── examples   # Examples with examples projects and bring-up code
   │   ├── axis_sensored
+  │   ├── axis_sensored_iq31
   │   ├── axis_sensorless
   │   └── test_drivers
   ├── include   # Public API header files

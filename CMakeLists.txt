@@ -1,5 +1,7 @@
 set(srcs    "source/motor_control/esp_foc_core.c"
+            "source/motor_control/esp_foc_core_iq31.c"
             "source/motor_control/control_strategy/esp_foc_control_current_mode_sensored.c"
+            "source/motor_control/control_strategy/esp_foc_control_current_mode_sensored_iq31.c"
             "source/motor_control/control_strategy/esp_foc_control_current_mode_sensorless.c"
             "source/motor_control/esp_foc_scope.c"
             "source/motor_control/esp_foc_consts.c"
