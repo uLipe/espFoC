@@ -1,13 +1,12 @@
 /*
- * Unit tests for espFoC axis flow with mock drivers.
- * Initialize axis, align rotor; verify mock driver call sequences and results.
- * Uses real OS (sleep); tests run on target/QEMU.
+ * Unit tests for espFoC axis flow with mock drivers (IQ31 pipeline).
  */
 #include <string.h>
 #include <unity.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "espFoC/esp_foc.h"
+#include "espFoC/utils/esp_foc_q16.h"
 #include "mock_drivers.h"
 
 #define FLOAT_TOL 1e-4f
@@ -20,14 +19,14 @@ static esp_foc_motor_control_settings_t settings;
 static void setup_sensored_mocks(void)
 {
     memset(&axis, 0, sizeof(axis));
-    mock_inverter_init(&mock_inv, 24.0f, 20000.0f);
+    mock_inverter_init(&mock_inv, 1.0f, 20000.0f);
     mock_rotor_sensor_init(&mock_rotor, 4096.0f);
     mock_rotor.counts = 0.0f;
     settings.natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW;
     settings.motor_pole_pairs = 7;
-    settings.motor_resistance = 1.0f;
-    settings.motor_inductance = 0.001f;
-    settings.motor_inertia = 0.0001f;
+    settings.motor_resistance = q16_from_float(1.0f);
+    settings.motor_inductance = q16_from_float(0.001f);
+    settings.motor_inertia = q16_from_float(0.0001f);
     settings.motor_unit = 0;
 }
 
@@ -44,12 +43,12 @@ TEST_CASE("axis init: inverter and rotor mocks called", "[espFoC][axis_flow]")
 
     TEST_ASSERT_EQUAL(ESP_FOC_OK, err);
     TEST_ASSERT_TRUE(mock_inv.set_voltages_count >= 1);
-    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 0.0f, mock_inv.last_v_u);
-    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 0.0f, mock_inv.last_v_v);
-    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 0.0f, mock_inv.last_v_w);
-    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 24.0f, axis.dc_link_voltage);
-    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 20000.0f, axis.inv_dt);
-    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, (2.0f * 3.14159265f) / 4096.0f, axis.shaft_ticks_to_radians_ratio);
+    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 0.0f, q16_to_float(mock_inv.last_v_u));
+    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 0.0f, q16_to_float(mock_inv.last_v_v));
+    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 0.0f, q16_to_float(mock_inv.last_v_w));
+    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 1.0f, q16_to_float(axis.dc_link_voltage));
+    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 20000.0f, q16_to_float(axis.inv_dt));
+    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, (2.0f * 3.14159265f) / 4096.0f, q16_to_float(axis.shaft_ticks_to_radians_ratio));
 }
 
 TEST_CASE("axis align: enable and set_voltages sequence", "[espFoC][axis_flow]")
@@ -98,8 +97,11 @@ TEST_CASE("axis align: already aligned returns error", "[espFoC][axis_flow]")
 }
 
 static int axis_test_regulator_called;
-static void axis_test_regulator_cb(esp_foc_axis_t *ax, esp_foc_d_current *id_ref, esp_foc_q_current *iq_ref,
-                                   esp_foc_d_voltage *ud_ff, esp_foc_q_voltage *uq_ff)
+static void axis_test_regulator_cb(esp_foc_axis_t *ax,
+                                   esp_foc_d_current_iq31_t *id_ref,
+                                   esp_foc_q_current_iq31_t *iq_ref,
+                                   esp_foc_d_voltage_iq31_t *ud_ff,
+                                   esp_foc_q_voltage_iq31_t *uq_ff)
 {
     (void)ax;
     (void)id_ref;
@@ -127,17 +129,19 @@ TEST_CASE("axis set_regulation_callback: stored and invalid args", "[espFoC][axi
     TEST_ASSERT_EQUAL(1, axis_test_regulator_called);
 }
 
-/* Run axis: regulator callback runs and FOC outputs PWM (set_voltages) from regulator command. */
 static int axis_run_regulator_called_count;
-static void axis_run_regulator_cb(esp_foc_axis_t *ax, esp_foc_d_current *id_ref, esp_foc_q_current *iq_ref,
-                                  esp_foc_d_voltage *ud_ff, esp_foc_q_voltage *uq_ff)
+static void axis_run_regulator_cb(esp_foc_axis_t *ax,
+                                esp_foc_d_current_iq31_t *id_ref,
+                                esp_foc_q_current_iq31_t *iq_ref,
+                                esp_foc_d_voltage_iq31_t *ud_ff,
+                                esp_foc_q_voltage_iq31_t *uq_ff)
 {
     (void)ax;
     axis_run_regulator_called_count++;
-    id_ref->raw = 0.0f;
-    iq_ref->raw = 0.5f;   /* ask for some q current */
-    ud_ff->raw = 0.0f;
-    uq_ff->raw = 0.0f;
+    id_ref->raw = 0;
+    iq_ref->raw = q16_from_float(0.5f);
+    ud_ff->raw = 0;
+    uq_ff->raw = 0;
 }
 
 TEST_CASE("axis run: regulator runs and set_voltages receives FOC output", "[espFoC][axis_flow]")
@@ -152,7 +156,6 @@ TEST_CASE("axis run: regulator runs and set_voltages receives FOC output", "[esp
     esp_foc_err_t err = esp_foc_run(&axis);
     TEST_ASSERT_EQUAL(ESP_FOC_OK, err);
 
-    /* Simulate inverter ISR many times so low_speed_loop runs and sends voltages to mock */
     for (int i = 0; i < 40; i++) {
         mock_inverter_trigger_callback(&mock_inv);
         vTaskDelay(pdMS_TO_TICKS(10));

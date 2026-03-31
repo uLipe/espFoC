@@ -1,6 +1,8 @@
 # Drivers: fixed-point (IQ31) plan alongside float
 
-**Goal:** float remains the default; with `CONFIG_ESP_FOC_USE_FIXED_POINT=y`, each driver exposes **IQ31 vtable paths**, built only under that option, without removing the legacy float API.
+> **Deprecated / historical:** espFoC 3.x targets a **single IQ31 control path**; `CONFIG_ESP_FOC_USE_FIXED_POINT` is **removed** from Kconfig. Driver code and tests no longer follow the optional dual float/IQ31 model described below. Keep this file only as background for the migration; see [`PLAN_STATUS.md`](PLAN_STATUS.md) and [`PLAN_FIXED_POINT_ONLY_REFACTOR.md`](PLAN_FIXED_POINT_ONLY_REFACTOR.md).
+
+**Goal (2.x-era doc):** float remains the default; with `CONFIG_ESP_FOC_USE_FIXED_POINT=y`, each driver exposes **IQ31 vtable paths**, built only under that option, without removing the legacy float API.
 
 ## Principles
 

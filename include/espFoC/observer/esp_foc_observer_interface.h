@@ -2,42 +2,50 @@
  * MIT License
  *
  * Copyright (c) 2021 Felipe Neves
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
-
 #pragma once
+
+#include "espFoC/utils/esp_foc_iq31.h"
+
+/**
+ * Observer I/O is entirely IQ31 so update() is safe for ISR (no float).
+ *
+ * - u_*, i_*: per-unit voltages/currents in Q1.31 (same convention as the rest of espFoC).
+ * - dt, inv_dt: sample time (s) and 1/dt as iq31_from_float(...) at the control rate.
+ *
+ * get_angle: electrical angle in [0, IQ31_ONE) mapping to [0, 2π) rad (same as iq31_sin).
+ * get_speed: electrical ω [rad/s] normalized by ESP_FOC_OBS_OMEGA_MAX_RAD_S (see below).
+ *
+ * PLL/KF use the Q16.16 EMA low-pass internally; per-unit IQ31 is converted at the LPF
+ * boundary (see esp_foc_iq31_q16_bridge.h). Other observer state stays IQ31.
+ */
+#define ESP_FOC_OBS_OMEGA_MAX_RAD_S (10000.0f)
 
 typedef struct esp_foc_observer_s esp_foc_observer_t;
 
 typedef struct {
-    float u_dq[2];
-    float u_alpha_beta[2];
-    float i_dq[2];
-    float i_alpha_beta[2];
-    float dt;
-    float inv_dt;
-}esp_foc_observer_inputs_t;
+    iq31_t u_dq[2];
+    iq31_t u_alpha_beta[2];
+    iq31_t i_dq[2];
+    iq31_t i_alpha_beta[2];
+    iq31_t dt;
+    iq31_t inv_dt;
+} esp_foc_observer_inputs_t;
 
-struct esp_foc_observer_s{
-    int (*update)(esp_foc_observer_t *self, esp_foc_observer_inputs_t * in);
-    float (*get_angle)(esp_foc_observer_t *self);
-    float (*get_speed)(esp_foc_observer_t *self);
-    void (*reset)(esp_foc_observer_t *self, float offset);
+struct esp_foc_observer_s {
+    int (*update)(esp_foc_observer_t *self, esp_foc_observer_inputs_t *in);
+    iq31_t (*get_angle)(esp_foc_observer_t *self);
+    iq31_t (*get_speed)(esp_foc_observer_t *self);
+    void (*reset)(esp_foc_observer_t *self, iq31_t offset_angle);
 };
+
+/** ω [rad/s] ↔ iq31 for get_speed / internal omega state */
+static inline iq31_t esp_foc_obs_omega_to_q31(float omega_rad_s)
+{
+    return iq31_from_float(omega_rad_s / ESP_FOC_OBS_OMEGA_MAX_RAD_S);
+}
+
+static inline float esp_foc_obs_omega_from_q31(iq31_t w)
+{
+    return iq31_to_float(w) * ESP_FOC_OBS_OMEGA_MAX_RAD_S;
+}

@@ -63,15 +63,6 @@ menu "espFoC Settings"
         bool "Enable open loop simulated observer on sensorless mode"
         default n
 
-    config ESP_FOC_USE_FIXED_POINT
-        bool "Compile FOC core and drivers in fixed-point (IQ31)"
-        default n
-        help
-            When enabled, use fixed-point (Q1.31) for math, PID, filter, modulator,
-            axis and driver hot paths. Float APIs stay available; driver interfaces
-            gain optional IQ31 vtable entries (fetch_isensors_iq31, set_voltages_iq31, etc.).
-            When disabled, use the standard float-only driver surface.
-
 endmenu
 
 

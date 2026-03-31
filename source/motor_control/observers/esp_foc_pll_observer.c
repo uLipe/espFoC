@@ -3,23 +3,8 @@
  *
  * Copyright (c) 2021 Felipe Neves
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * PLL angle observer — IQ31 only in update() (ISR-safe).
+ * pll_observer_new() may use float for logging and coefficient conversion.
  */
 
 #include <math.h>
@@ -28,6 +13,10 @@
 #include <sys/cdefs.h>
 #include "esp_attr.h"
 #include "esp_log.h"
+#include "espFoC/utils/ema_low_pass_filter.h"
+#include "espFoC/utils/esp_foc_iq31_q16_bridge.h"
+#include "espFoC/observer/esp_foc_observer_interface.h"
+#include "espFoC/utils/foc_math_iq31.h"
 #include "espFoC/observer/esp_foc_pll_observer.h"
 
 #define PLL_OBSERVER_CONVERGE_WAIT_TIME     1.0f
@@ -35,164 +24,206 @@
 #define PLL_INTEGRATOR_FREEZE_TIME          0.5f
 #define PLL_MAG2_MIN                        0.5f
 
+#ifndef PLL_DEFAULT_V_FULL
+#define PLL_DEFAULT_V_FULL 24.0f
+#endif
+#ifndef PLL_DEFAULT_I_FULL
+#define PLL_DEFAULT_I_FULL 20.0f
+#endif
+
 typedef struct {
-    float theta_est;
-    float omega_est;
-    float theta_error;
+    iq31_t theta_est;
+    iq31_t omega_est;
+    iq31_t theta_error;
     esp_foc_lp_filter_t current_filters[2];
     esp_foc_lp_filter_t theta_filter;
-    float e_mag2;
-    float e_alpha;
-    float e_beta;
-    float i_alpha_prev;
-    float i_beta_prev;
-    float integral;
-    float kp;
-    float ki;
-    float r;
-    float l;
-    float dt;
-    float inv_dt;
+    iq31_t e_mag2;
+    iq31_t e_alpha;
+    iq31_t e_beta;
+    iq31_t i_alpha_prev;
+    iq31_t i_beta_prev;
+    iq31_t integral;
+    iq31_t kp_q31;
+    iq31_t ki_dt_q31;
+    iq31_t r_q31;
+    iq31_t l_q31;
+    iq31_t dt_q31;
+    iq31_t k_theta_q31;
+    iq31_t mag_eps_q31;
+    iq31_t mag2_min_q31;
+    iq31_t lock_var_q31;
+    iq31_t integral_decay_q31;
     int converging_count;
     int integrator_freeze_time;
-    float prev_err;
+    iq31_t prev_err;
+    int converge_period_ticks;
+    int integrator_freeze_ticks;
     esp_foc_observer_t interface;
 } angle_estimator_pll_t;
 
-static const char * TAG = "ESP-FOC-PLL-OBS";
+static const char *TAG = "ESP-FOC-PLL-OBS";
 static DRAM_ATTR angle_estimator_pll_t pll_observers[CONFIG_NOOF_AXIS];
 
-static int pll_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs_t * in)
+static int pll_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs_t *in)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
 
-    /* Estimate the back EMF alpha/beta voltages using motor parameters plus the current observed */
-    float di_alpha_dt = (in->i_alpha_beta[0] - est->i_alpha_prev) * est->inv_dt;
-    float di_beta_dt = (in->i_alpha_beta[1] - est->i_beta_prev)  * est->inv_dt;
+    iq31_t ia = in->i_alpha_beta[0];
+    iq31_t ib = in->i_alpha_beta[1];
+    iq31_t ua = in->u_alpha_beta[0];
+    iq31_t ub = in->u_alpha_beta[1];
 
-    est->i_alpha_prev = in->i_alpha_beta[0];
-    est->i_beta_prev = in->i_alpha_beta[1];
+    iq31_t delta_ia = iq31_sub(ia, est->i_alpha_prev);
+    iq31_t delta_ib = iq31_sub(ib, est->i_beta_prev);
 
-    est->e_alpha = esp_foc_low_pass_filter_update(&est->current_filters[0],
-                        in->u_alpha_beta[0] - est->r * in->i_alpha_beta[0] - est->l * di_alpha_dt);
+    iq31_t ldi_a = iq31_mul(est->l_q31, delta_ia);
+    iq31_t ldi_b = iq31_mul(est->l_q31, delta_ib);
 
-    est->e_beta = esp_foc_low_pass_filter_update(&est->current_filters[1],
-                        in->u_alpha_beta[1] - est->r * in->i_alpha_beta[1]- est->l * di_beta_dt);
+    iq31_t raw_a = iq31_sub(ua, iq31_add(iq31_mul(est->r_q31, ia), ldi_a));
+    iq31_t raw_b = iq31_sub(ub, iq31_add(iq31_mul(est->r_q31, ib), ldi_b));
 
-    /* Do the phase detector by cross producting the local NCO with the alphabeta EMF vector*/
-    float mix = (est->e_alpha * -esp_foc_sine(est->theta_est)) +
-                (est->e_beta * esp_foc_cosine(est->theta_est));
+    q16_t ea_q = esp_foc_low_pass_filter_update(&est->current_filters[0],
+                                                  esp_foc_iq31_per_unit_to_q16(raw_a));
+    q16_t eb_q = esp_foc_low_pass_filter_update(&est->current_filters[1],
+                                                  esp_foc_iq31_per_unit_to_q16(raw_b));
+    est->e_alpha = esp_foc_q16_per_unit_to_iq31(ea_q);
+    est->e_beta = esp_foc_q16_per_unit_to_iq31(eb_q);
 
-    est->e_mag2 = est->e_alpha * est->e_alpha + est->e_beta * est->e_beta;
+    est->i_alpha_prev = ia;
+    est->i_beta_prev = ib;
 
-    if(est->e_mag2 < PLL_MAG2_MIN) {
-        est->theta_error = 0.0f;
-        est->integral *= 0.9999f;
+    iq31_t sn = iq31_sin(est->theta_est);
+    iq31_t cs = iq31_cos(est->theta_est);
+    iq31_t mix = iq31_add(iq31_mul(est->e_alpha, iq31_sub(0, sn)), iq31_mul(est->e_beta, cs));
+
+    est->e_mag2 = iq31_add(iq31_mul(est->e_alpha, est->e_alpha), iq31_mul(est->e_beta, est->e_beta));
+
+    if (est->e_mag2 < est->mag2_min_q31) {
+        est->theta_error = 0;
+        est->integral = iq31_mul(est->integral, est->integral_decay_q31);
     } else {
-        /* Now normalize the resulting vector to keep the gain constant over the estimation speed */
-        est->theta_error = mix * (esp_foc_rsqrt_fast(est->e_mag2 + 0.0001f));
-        est->integral += (est->theta_error * est->dt * est->ki);
+        iq31_t rs = iq31_rsqrt_fast(iq31_add(est->e_mag2, est->mag_eps_q31));
+        est->theta_error = iq31_mul_q230(mix, rs);
+        est->theta_error = esp_foc_q16_per_unit_to_iq31(
+            esp_foc_low_pass_filter_update(&est->theta_filter,
+                                           esp_foc_iq31_per_unit_to_q16(est->theta_error)));
+        est->integral = iq31_add(est->integral, iq31_mul(est->theta_error, est->ki_dt_q31));
     }
 
-    est->theta_error = (esp_foc_low_pass_filter_update(&est->theta_filter, est->theta_error));
-    est->omega_est = (est->kp * est->theta_error) + (est->integral);
-    est->theta_est += est->omega_est * est->dt;
-    est->theta_est = esp_foc_normalize_angle(est->theta_est);
+    est->omega_est = iq31_add(iq31_mul(est->kp_q31, est->theta_error), est->integral);
+    est->theta_est = iq31_normalize_angle(iq31_add(est->theta_est, iq31_mul(est->omega_est, est->k_theta_q31)));
 
-    if((fabsf(est->theta_error - est->prev_err) <= PLL_LOCK_VAR) && (est->e_mag2 > PLL_MAG2_MIN)) {
+    if ((iq31_abs(iq31_sub(est->theta_error, est->prev_err)) <= est->lock_var_q31) &&
+        (est->e_mag2 >= est->mag2_min_q31)) {
         est->converging_count--;
-    } else  {
-        est->converging_count = (int)( PLL_OBSERVER_CONVERGE_WAIT_TIME / est->dt);
+    } else {
+        est->converging_count = est->converge_period_ticks;
     }
 
     est->prev_err = est->theta_error;
 
-    if(est->integrator_freeze_time) {
+    if (est->integrator_freeze_time) {
         est->integrator_freeze_time--;
     }
-
 
     return est->converging_count;
 }
 
-static float pll_observer_get_angle(esp_foc_observer_t *self)
+static iq31_t pll_observer_get_angle(esp_foc_observer_t *self)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
     return est->theta_est;
 }
 
-static float pll_observer_get_speed(esp_foc_observer_t *self)
+static iq31_t pll_observer_get_speed(esp_foc_observer_t *self)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
     return est->omega_est;
 }
 
-static void pll_observer_reset(esp_foc_observer_t *self, float offset)
+static void pll_observer_reset(esp_foc_observer_t *self, iq31_t offset)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
     est->integral = 0;
-    est->theta_est = esp_foc_normalize_angle(est->theta_est + offset);
-    est->integrator_freeze_time = (PLL_INTEGRATOR_FREEZE_TIME / est->dt);
+    est->theta_est = iq31_normalize_angle(iq31_add(est->theta_est, offset));
+    est->integrator_freeze_time = est->integrator_freeze_ticks;
 }
 
 esp_foc_observer_t *pll_observer_new(int unit, esp_foc_pll_observer_settings_t settings)
 {
-    if(unit >= CONFIG_NOOF_AXIS) {
+    if (unit >= CONFIG_NOOF_AXIS) {
         ESP_LOGE(TAG, "Invalid unit!");
         return NULL;
     }
 
-    if(settings.dt == 0.0f) {
+    if (settings.dt == 0.0f) {
         ESP_LOGE(TAG, "Invalid dt!");
         return NULL;
     }
 
-    if(settings.phase_resistance <= 0.0f) {
+    if (settings.phase_resistance <= 0.0f) {
         ESP_LOGE(TAG, "Invalid phase resistance !");
         return NULL;
     }
 
-    if(settings.phase_inductance <= 0.0f) {
+    if (settings.phase_inductance <= 0.0f) {
         ESP_LOGE(TAG, "Invalid phase Inductance !");
         return NULL;
     }
 
-    if(settings.pll_kp <= 0.0f) {
+    if (settings.pll_kp <= 0.0f) {
         ESP_LOGE(TAG, "Invalid proportional gain !");
         return NULL;
     }
 
-    if(settings.pll_ki < 0.0f) {
+    if (settings.pll_ki < 0.0f) {
         ESP_LOGE(TAG, "Invalid integral gain !");
         return NULL;
     }
 
-    angle_estimator_pll_t *est = &pll_observers[unit];
-    est->theta_est = 0.0f;
-    est->omega_est = 0.0f;
-    est->theta_error = 0.0f;
-    est->e_alpha = 0.0f;
-    est->e_beta = 0.0f;
-    est->i_alpha_prev = 0.0f;
-    est->i_beta_prev = 0.0f;
-    est->integral = 0.0f;
-    est->kp = settings.pll_kp;
-    est->ki = settings.pll_ki;
-    est->r = settings.phase_resistance;
-    est->l = settings.phase_inductance;
-    est->dt = settings.dt;
-    est->inv_dt = (1.0f / est->dt);
-    esp_foc_low_pass_filter_set_cutoff(&est->current_filters[0], 0.05f * est->inv_dt, est->inv_dt);
-    esp_foc_low_pass_filter_set_cutoff(&est->current_filters[1], 0.05f * est->inv_dt, est->inv_dt);
-    esp_foc_low_pass_filter_set_cutoff(&est->theta_filter, ESP_FOC_PLL_BANDWIDTH_HZ, est->inv_dt);
-    est->converging_count = (int)( PLL_OBSERVER_CONVERGE_WAIT_TIME / settings.dt);
+    const float Vb = PLL_DEFAULT_V_FULL;
+    const float Ib = PLL_DEFAULT_I_FULL;
 
-    ESP_LOGI(TAG, "Observer sample time %f s", est->dt);
+    angle_estimator_pll_t *est = &pll_observers[unit];
+    est->theta_est = 0;
+    est->omega_est = 0;
+    est->theta_error = 0;
+    est->e_alpha = 0;
+    est->e_beta = 0;
+    est->i_alpha_prev = 0;
+    est->i_beta_prev = 0;
+    est->integral = 0;
+    est->prev_err = 0;
+
+    est->dt_q31 = iq31_from_float(settings.dt);
+
+    est->r_q31 = iq31_from_float((settings.phase_resistance * Ib) / Vb);
+    est->l_q31 = iq31_from_float((settings.phase_inductance * Ib) / (Vb * settings.dt));
+
+    est->kp_q31 = iq31_from_float(settings.pll_kp / ESP_FOC_OBS_OMEGA_MAX_RAD_S);
+    est->ki_dt_q31 = iq31_from_float((settings.pll_ki * settings.dt) / ESP_FOC_OBS_OMEGA_MAX_RAD_S);
+
+    est->k_theta_q31 = iq31_from_float((ESP_FOC_OBS_OMEGA_MAX_RAD_S * settings.dt) / (2.0f * (float)M_PI));
+
+    est->mag_eps_q31 = iq31_from_float(0.0001f);
+    est->mag2_min_q31 = iq31_from_float(PLL_MAG2_MIN);
+    est->lock_var_q31 = iq31_from_float(PLL_LOCK_VAR);
+    est->integral_decay_q31 = iq31_from_float(0.9999f);
+
+    esp_foc_low_pass_filter_set_cutoff(&est->current_filters[0], 0.05f * (1.0f / settings.dt), 1.0f / settings.dt);
+    esp_foc_low_pass_filter_set_cutoff(&est->current_filters[1], 0.05f * (1.0f / settings.dt), 1.0f / settings.dt);
+    esp_foc_low_pass_filter_set_cutoff(&est->theta_filter, ESP_FOC_PLL_BANDWIDTH_HZ, 1.0f / settings.dt);
+
+    est->converge_period_ticks = (int)(PLL_OBSERVER_CONVERGE_WAIT_TIME / settings.dt);
+    est->converging_count = est->converge_period_ticks;
+    est->integrator_freeze_ticks = (int)(PLL_INTEGRATOR_FREEZE_TIME / settings.dt);
 
     est->interface.update = pll_observer_update;
     est->interface.get_angle = pll_observer_get_angle;
     est->interface.get_speed = pll_observer_get_speed;
     est->interface.reset = pll_observer_reset;
+
+    ESP_LOGI(TAG, "Observer sample time %f s (IQ31)", (double)settings.dt);
 
     return &est->interface;
 }

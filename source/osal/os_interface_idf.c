@@ -31,8 +31,6 @@
 #include "esp_cpu.h"
 #include "driver/gpio.h"
 
-static const float scale = 0.000001f;
-
 static portMUX_TYPE spinlock =  portMUX_INITIALIZER_UNLOCKED;
 static int debug_pin_internal = -1;
 
@@ -61,12 +59,6 @@ void esp_foc_sleep_ms(int sleep_ms)
 void esp_foc_runner_yield(void)
 {
     taskYIELD();
-}
-
-float esp_foc_now_seconds(void)
-{
-    float now = (float)esp_timer_get_time();
-    return(now * scale);
 }
 
 uint64_t esp_foc_now_useconds(void)

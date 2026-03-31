@@ -1,64 +1,54 @@
 /*
  * MIT License
- *
- * Copyright (c) 2021 Felipe Neves
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
-
+/**
+ * @file ema_low_pass_filter.h
+ * @brief First-order EMA low-pass in Q16.16.
+ */
 #pragma once
 
+#include "espFoC/utils/esp_foc_q16.h"
 #include <math.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
-    float alpha;
-    float beta;
-    float y_n_prev;
+    q16_t alpha;
+    q16_t beta;
+    q16_t y_n_prev;
 } esp_foc_lp_filter_t;
 
 static inline void esp_foc_low_pass_filter_init(esp_foc_lp_filter_t *filter,
-                                                float alpha)
+                                                q16_t alpha)
 {
-    if(alpha > 1.0f) {
-        alpha = 1.0f;
-    } else if (alpha < 0.0f) {
-        alpha = 0.0f;
+    if (alpha > Q16_ONE) {
+        alpha = Q16_ONE;
+    } else if (alpha < 0) {
+        alpha = 0;
     }
-
-    filter->y_n_prev = 0.0f;
+    filter->y_n_prev = 0;
     filter->alpha = alpha;
-    filter->beta = 1.0f - alpha;
-
+    filter->beta = q16_sub(Q16_ONE, alpha);
 }
 
 static inline void esp_foc_low_pass_filter_set_cutoff(esp_foc_lp_filter_t *filter,
-                                                    float cutoff, float fs)
+                                                      float cutoff, float fs)
 {
-    float wc_norm = (2.0f * M_PI * (cutoff / fs));
-    float alpha =  wc_norm / (1 + wc_norm);
-    esp_foc_low_pass_filter_init(filter, alpha);
+    float wc_norm = (2.0f * (float)M_PI * (cutoff / fs));
+    float alpha_f = wc_norm / (1.0f + wc_norm);
+    esp_foc_low_pass_filter_init(filter, q16_from_float(alpha_f));
 }
 
-static inline float esp_foc_low_pass_filter_update(esp_foc_lp_filter_t *filter,
-                                                  float x_n)
+static inline q16_t esp_foc_low_pass_filter_update(esp_foc_lp_filter_t *filter,
+                                                    q16_t x_n)
 {
-    float y_n = filter->alpha * x_n + filter->beta * filter->y_n_prev;
+    q16_t y_n = q16_add(q16_mul(filter->alpha, x_n), q16_mul(filter->beta, filter->y_n_prev));
     filter->y_n_prev = y_n;
     return y_n;
 }
+
+#ifdef __cplusplus
+}
+#endif
