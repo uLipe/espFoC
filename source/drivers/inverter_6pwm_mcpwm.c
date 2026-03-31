@@ -23,10 +23,7 @@
  */
 
 #include <string.h>
-#include <sdkconfig.h>
-#if CONFIG_ESP_FOC_USE_FIXED_POINT
 #include "espFoC/driver_iq31_local.h"
-#endif
 #include "espFoC/inverter_6pwm_mcpwm.h"
 #include "driver/mcpwm_prelude.h"
 #include "driver/gpio.h"
@@ -49,8 +46,7 @@ typedef struct {
     mcpwm_gen_handle_t gen_high[3];
     mcpwm_gen_handle_t gen_low[3];
 
-    float voltage_to_duty_ratio;
-    float dc_link_voltage;
+    float dc_link_voltage_nominal;
 
     esp_foc_inverter_callback_t notifier;
     void *arg;
@@ -108,51 +104,24 @@ static bool inverter_isr(mcpwm_timer_handle_t timer,
     return false;
 }
 
-static inline float clamp_pu(float x)
+static q16_t get_dc_link_voltage(esp_foc_inverter_t *self)
 {
-    if (x > 1.0f) return 1.0f;
-    if (x < 0.0f) return 0.0f;
-    return x;
+    (void)self;
+    return Q16_ONE;
 }
 
-static float get_dc_link_voltage(esp_foc_inverter_t *self)
-{
-    esp_foc_mcpwm6_inverter_t *obj = __containerof(self, esp_foc_mcpwm6_inverter_t, interface);
-    return obj->dc_link_voltage;
-}
-
-static void set_voltages(esp_foc_inverter_t *self, float v_u, float v_v, float v_w)
-{
-    esp_foc_mcpwm6_inverter_t *obj = __containerof(self, esp_foc_mcpwm6_inverter_t, interface);
-
-    /* Keep same clamping behavior as inverter_3pwm_mcpwm */
-    v_u = clamp_pu(v_u);
-    v_v = clamp_pu(v_v);
-    v_w = clamp_pu(v_w);
-
-    v_u *= obj->voltage_to_duty_ratio;
-    v_v *= obj->voltage_to_duty_ratio;
-    v_w *= obj->voltage_to_duty_ratio;
-
-    mcpwm_comparator_set_compare_value(obj->comparators[0], (uint16_t)v_u);
-    mcpwm_comparator_set_compare_value(obj->comparators[1], (uint16_t)v_v);
-    mcpwm_comparator_set_compare_value(obj->comparators[2], (uint16_t)v_w);
-}
-
-#if CONFIG_ESP_FOC_USE_FIXED_POINT
-static void set_voltages_iq31(esp_foc_inverter_t *self, iq31_t v_u, iq31_t v_v, iq31_t v_w)
+static void set_voltages(esp_foc_inverter_t *self, q16_t v_u, q16_t v_v, q16_t v_w)
 {
     esp_foc_mcpwm6_inverter_t *obj = __containerof(self, esp_foc_mcpwm6_inverter_t, interface);
     uint32_t ph = (uint32_t)MCPWM_PERIOD_TOP_HALF;
-    uint32_t du = esp_foc_iq31_duty_ticks(v_u, ph);
-    uint32_t dv = esp_foc_iq31_duty_ticks(v_v, ph);
-    uint32_t dw = esp_foc_iq31_duty_ticks(v_w, ph);
+    uint32_t du = esp_foc_q16_duty_ticks(v_u, ph);
+    uint32_t dv = esp_foc_q16_duty_ticks(v_v, ph);
+    uint32_t dw = esp_foc_q16_duty_ticks(v_w, ph);
 
     mcpwm_comparator_set_compare_value(obj->comparators[0], (uint16_t)du);
     mcpwm_comparator_set_compare_value(obj->comparators[1], (uint16_t)dv);
     mcpwm_comparator_set_compare_value(obj->comparators[2], (uint16_t)dw);
 }
-#endif
 
 static void set_inverter_callback(esp_foc_inverter_t *self,
                                 esp_foc_inverter_callback_t callback,
@@ -168,10 +137,10 @@ static void phase_remap(esp_foc_inverter_t *self)
     (void)self;
 }
 
-static float get_inverter_pwm_rate(esp_foc_inverter_t *self)
+static uint32_t get_inverter_pwm_rate(esp_foc_inverter_t *self)
 {
     (void)self;
-    return (float)MCPWM_RATE_HZ;
+    return (uint32_t)MCPWM_RATE_HZ;
 }
 
 static void inverter_enable(esp_foc_inverter_t *self)
@@ -213,7 +182,7 @@ esp_foc_inverter_t *inverter_6pwm_mpcwm_new(int gpio_u_high, int gpio_u_low,
     }
 
     obj->enable_gpio = gpio_enable;
-    obj->dc_link_voltage = dc_link_voltage;
+    obj->dc_link_voltage_nominal = dc_link_voltage;
 
     obj->interface.get_dc_link_voltage = get_dc_link_voltage;
     obj->interface.set_voltages = set_voltages;
@@ -222,11 +191,7 @@ esp_foc_inverter_t *inverter_6pwm_mpcwm_new(int gpio_u_high, int gpio_u_low,
     obj->interface.get_inverter_pwm_rate = get_inverter_pwm_rate;
     obj->interface.enable = inverter_enable;
     obj->interface.disable = inverter_disable;
-#if CONFIG_ESP_FOC_USE_FIXED_POINT
-    obj->interface.set_voltages_iq31 = set_voltages_iq31;
-#endif
-
-    obj->voltage_to_duty_ratio = MCPWM_PERIOD_TOP_HALF;
+    (void)obj->dc_link_voltage_nominal;
     obj->notifier = NULL;
     obj->arg = NULL;
 

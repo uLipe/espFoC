@@ -1,68 +1,58 @@
 /*
  * MIT License
- *
- * Copyright (c) 2021 Felipe Neves
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
-
+/**
+ * @file modulator.h
+ * @brief DQ voltage modulation and ABC→DQ current conversion (Q16.16).
+ */
 #pragma once
 
+#include "espFoC/utils/foc_math_q16.h"
 #include "espFoC/utils/space_vector_modulator.h"
 
-static inline void esp_foc_modulate_dq_voltage (float sin,
-                                            float cos,
-                                            float v_d,
-                                            float v_q,
-                                            float *v_alpha,
-                                            float *v_beta,
-                                            float *v_u,
-                                            float *v_v,
-                                            float *v_w,
-                                            float vmax,
-                                            float bias,
-                                            float normalization_scale)
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+static inline void esp_foc_modulate_dq_voltage(q16_t sin,
+                                               q16_t cos,
+                                               q16_t v_d,
+                                               q16_t v_q,
+                                               q16_t *v_alpha,
+                                               q16_t *v_beta,
+                                               q16_t *v_u,
+                                               q16_t *v_v,
+                                               q16_t *v_w,
+                                               q16_t vmax,
+                                               q16_t bias,
+                                               q16_t normalization_scale)
 {
-    float dq_frame[2] = {v_d, v_q};
-    float ab_frame[2];
-
-    esp_foc_limit_voltage(&dq_frame[0], &dq_frame[1], vmax);
-    esp_foc_inverse_park_transform(sin, cos, dq_frame, &ab_frame[0], &ab_frame[1]);
-    esp_foc_svm_set(ab_frame[0], ab_frame[1], normalization_scale ,v_u, v_v, v_w);
-    *v_alpha = ab_frame[0];
-    *v_beta = ab_frame[1];
+    (void)bias;
+    q16_t vd = v_d;
+    q16_t vq = v_q;
+    esp_foc_limit_voltage_q16(&vd, &vq, vmax);
+    q16_inverse_park(sin, cos, vd, vq, v_alpha, v_beta);
+    esp_foc_svm_set(*v_alpha, *v_beta, normalization_scale, v_u, v_v, v_w);
 }
 
-static inline void esp_foc_get_dq_currents(float sin,
-                                        float cos,
-                                        float i_u,
-                                        float i_v,
-                                        float i_w,
-                                        float *i_alpha,
-                                        float *i_beta,
-                                        float *i_q,
-                                        float *i_d) {
-
-    float phase_current_frame[3] = {i_u, i_v, i_w};
-    float ab_frame[2];
-    esp_foc_clarke_transform(phase_current_frame,&ab_frame[0], &ab_frame[1]);
-    esp_foc_park_transform(sin, cos, ab_frame, i_d, i_q);
-    *i_alpha = ab_frame[0];
-    *i_beta = ab_frame[1];
+static inline void esp_foc_get_dq_currents(q16_t sin,
+                                           q16_t cos,
+                                           q16_t i_u,
+                                           q16_t i_v,
+                                           q16_t i_w,
+                                           q16_t *i_alpha,
+                                           q16_t *i_beta,
+                                           q16_t *i_q,
+                                           q16_t *i_d)
+{
+    q16_t d;
+    q16_t q;
+    q16_clarke(i_u, i_v, i_w, i_alpha, i_beta);
+    q16_park(sin, cos, *i_alpha, *i_beta, &d, &q);
+    *i_d = d;
+    *i_q = q;
 }
+
+#ifdef __cplusplus
+}
+#endif

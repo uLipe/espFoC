@@ -2,32 +2,10 @@
  * MIT License
  *
  * Copyright (c) 2021 Felipe Neves
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
 
-#include <math.h>
-#include <sdkconfig.h>
-#if CONFIG_ESP_FOC_USE_FIXED_POINT
-#include "espFoC/utils/esp_foc_iq31.h"
+#include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/driver_iq31_local.h"
-#endif
 #include "espFoC/rotor_sensor_as5600.h"
 #include "driver/gpio.h"
 #include "driver/i2c.h"
@@ -39,114 +17,64 @@
 #define AS5600_PULSES_PER_REVOLUTION 4096.0f
 #define AS5600_READING_MASK 0xFFF
 #define AS5600_CPR_UINT 4096u
-#if CONFIG_ESP_FOC_USE_FIXED_POINT
-#define AS5600_WRAP_INT 3891 /* ~0.95 * 4096 */
-#endif
+#define AS5600_WRAP_INT 3891
 
 static const char *tag = "ROTOR_SENSOR_AS5600";
 
 typedef struct {
-    float accumulated;
-    float previous;
     uint16_t zero_offset;
     int i2c_port;
-#if CONFIG_ESP_FOC_USE_FIXED_POINT
     int32_t prev_raw_iq;
     int64_t accum_i64;
-#endif
     esp_foc_rotor_sensor_t interface;
-}esp_foc_as5600_t;
+} esp_foc_as5600_t;
 
 static bool i2c_bus_configured = false;
-
 static esp_foc_as5600_t rotor_sensors[CONFIG_NOOF_AXIS];
-static const float encoder_wrap_value = AS5600_PULSES_PER_REVOLUTION * 0.95f;
 
 static uint16_t read_angle_sensor(int i2c_port)
 {
     uint8_t write_buffer = AS5600_ANGLE_REGISTER_H;
-    uint8_t read_buffer[2] = {0,0};
+    uint8_t read_buffer[2] = {0, 0};
     uint16_t raw;
     esp_err_t err;
 
     do {
-        err =  i2c_master_write_read_device(i2c_port,
-                                        AS5600_SLAVE_ADDR,
-                                        &write_buffer,
-                                        1,
-                                        read_buffer,
-                                        2,
-                                        portMAX_DELAY);
-
+        err = i2c_master_write_read_device(i2c_port,
+                                           AS5600_SLAVE_ADDR,
+                                           &write_buffer,
+                                           1,
+                                           read_buffer,
+                                           2,
+                                           portMAX_DELAY);
     } while (err != ESP_OK);
 
     raw = read_buffer[0];
     raw <<= 8;
     raw |= read_buffer[1];
 
-    if(raw > AS5600_PULSES_PER_REVOLUTION - 1) {
-        raw = AS5600_PULSES_PER_REVOLUTION - 1 ;
+    if (raw > AS5600_PULSES_PER_REVOLUTION - 1) {
+        raw = AS5600_PULSES_PER_REVOLUTION - 1;
     }
 
     return raw;
 }
 
-static float read_accumulated_counts (esp_foc_rotor_sensor_t *self)
-{
-    esp_foc_as5600_t *obj =
-        __containerof(self,esp_foc_as5600_t, interface);
-
-    return obj->accumulated + obj->previous;
-}
-
 static void set_to_zero(esp_foc_rotor_sensor_t *self)
 {
-    esp_foc_as5600_t *obj =
-        __containerof(self,esp_foc_as5600_t, interface);
-
-    obj->zero_offset = obj->previous;
+    esp_foc_as5600_t *obj = __containerof(self, esp_foc_as5600_t, interface);
+    uint16_t raw = read_angle_sensor(obj->i2c_port) & AS5600_READING_MASK;
+    obj->zero_offset = raw;
     ESP_LOGI(tag, "Setting %d [ticks] as offset.", obj->zero_offset);
 }
 
-static float get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
+static uint32_t get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
 {
     (void)self;
-    return AS5600_PULSES_PER_REVOLUTION;
+    return AS5600_CPR_UINT;
 }
 
-static float read_counts(esp_foc_rotor_sensor_t *self)
-{
-    esp_foc_as5600_t *obj =
-        __containerof(self,esp_foc_as5600_t, interface);
-
-    uint16_t raw = read_angle_sensor(obj->i2c_port) & AS5600_READING_MASK;
-    float delta = (float)raw - obj->previous;
-
-    if(fabs(delta) >= encoder_wrap_value) {
-
-        esp_foc_critical_enter();
-        obj->accumulated = (delta < 0.0f) ?
-            obj->accumulated + AS5600_PULSES_PER_REVOLUTION :
-                obj->accumulated - AS5600_PULSES_PER_REVOLUTION;
-        esp_foc_critical_leave();
-
-    }
-
-    esp_foc_critical_enter();
-    obj->previous = (float)raw;
-    esp_foc_critical_leave();
-
-    return((float)((raw - obj->zero_offset) & AS5600_READING_MASK));
-}
-
-static void set_simulation_count_unused(esp_foc_rotor_sensor_t *self, float increment)
-{
-    (void)self;
-    (void)increment;
-}
-
-#if CONFIG_ESP_FOC_USE_FIXED_POINT
-static iq31_t read_counts_iq31(esp_foc_rotor_sensor_t *self)
+static q16_t read_counts(esp_foc_rotor_sensor_t *self)
 {
     esp_foc_as5600_t *obj = __containerof(self, esp_foc_as5600_t, interface);
 
@@ -168,7 +96,7 @@ static iq31_t read_counts_iq31(esp_foc_rotor_sensor_t *self)
     esp_foc_critical_leave();
 
     uint32_t cm = (uint32_t)((raw - obj->zero_offset) & AS5600_READING_MASK);
-    return esp_foc_iq31_from_counts_mod(cm, AS5600_CPR_UINT);
+    return esp_foc_q16_from_counts_mod(cm, AS5600_CPR_UINT);
 }
 
 static int64_t read_accumulated_counts_i64(esp_foc_rotor_sensor_t *self)
@@ -177,42 +105,32 @@ static int64_t read_accumulated_counts_i64(esp_foc_rotor_sensor_t *self)
     return obj->accum_i64 + (int64_t)obj->prev_raw_iq;
 }
 
-static void set_simulation_count_iq31(esp_foc_rotor_sensor_t *self, iq31_t increment_normalized)
+static void set_simulation_count(esp_foc_rotor_sensor_t *self, q16_t increment_normalized)
 {
     esp_foc_as5600_t *obj = __containerof(self, esp_foc_as5600_t, interface);
     int64_t dt = ((int64_t)increment_normalized * (int64_t)AS5600_CPR_UINT) >> 31;
     obj->accum_i64 += dt;
 }
-#endif
 
 esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
                                                 int pin_scl,
                                                 int port)
 {
-    if(port > CONFIG_NOOF_AXIS - 1) {
+    if (port > CONFIG_NOOF_AXIS - 1) {
         return NULL;
     }
 
     rotor_sensors[port].interface.get_counts_per_revolution = get_counts_per_revolution;
     rotor_sensors[port].interface.read_counts = read_counts;
     rotor_sensors[port].interface.set_to_zero = set_to_zero;
-    rotor_sensors[port].interface.read_accumulated_counts = read_accumulated_counts;
-    rotor_sensors[port].interface.set_simulation_count = set_simulation_count_unused;
-#if CONFIG_ESP_FOC_USE_FIXED_POINT
-    rotor_sensors[port].interface.read_counts_iq31 = read_counts_iq31;
     rotor_sensors[port].interface.read_accumulated_counts_i64 = read_accumulated_counts_i64;
-    rotor_sensors[port].interface.set_simulation_count_iq31 = set_simulation_count_iq31;
-#endif
+    rotor_sensors[port].interface.set_simulation_count = set_simulation_count;
     rotor_sensors[port].i2c_port = I2C_NUM_0;
     rotor_sensors[port].zero_offset = 0;
-    rotor_sensors[port].previous = 0;
-    rotor_sensors[port].accumulated = 0;
-#if CONFIG_ESP_FOC_USE_FIXED_POINT
     rotor_sensors[port].prev_raw_iq = 0;
     rotor_sensors[port].accum_i64 = 0;
-#endif
 
-    if(!i2c_bus_configured) {
+    if (!i2c_bus_configured) {
         i2c_config_t conf = {
             .mode = I2C_MODE_MASTER,
             .sda_io_num = pin_sda,
@@ -229,7 +147,7 @@ esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
         i2c_bus_configured = true;
     }
 
-    ESP_LOGI(tag, "Bus-check: %d", read_angle_sensor( rotor_sensors[port].i2c_port));
+    ESP_LOGI(tag, "Bus-check: %d", read_angle_sensor(rotor_sensors[port].i2c_port));
 
     return &rotor_sensors[port].interface;
 }

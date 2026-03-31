@@ -22,6 +22,10 @@
  * SOFTWARE.
  */
 
+/*
+ * Sensored quick start: canonical IQ31 API (esp_foc_initialize_axis / align / run).
+ */
+
 #include "esp_log.h"
 #include "esp_err.h"
 
@@ -30,7 +34,7 @@
 #include "espFoC/current_sensor_adc_one_shot.h"
 #include "espFoC/rotor_sensor_as5600.h"
 #include "espFoC/esp_foc.h"
-
+#include "espFoC/utils/esp_foc_q16.h"
 
 #ifdef CONFIG_IDF_TARGET_ESP32P4
 #include "tinyusb.h"
@@ -45,17 +49,19 @@ static esp_foc_isensor_t  *shunts;
 static esp_foc_rotor_sensor_t *sensor;
 
 static esp_foc_axis_t axis;
+
+/* Same motor as legacy demos: QBL4208-64-013 */
 static esp_foc_motor_control_settings_t settings = {
-    /*Motor part number: QBL4208 - 64 - 013 */
     .motor_pole_pairs = 4,
-    .motor_inductance = 0.0018f,
-    .motor_resistance = 1.08f,
+    .motor_inductance = 0,
+    .motor_resistance = 0,
+    .motor_inertia = 0,
     .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
+    .motor_unit = 0,
 };
 
 
 #ifdef CONFIG_IDF_TARGET_ESP32P4
-/* USB backed for espfoc scope */
 void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
 {
 }
@@ -75,19 +81,17 @@ void esp_foc_init_bus_callback(void)
 
     tinyusb_config_cdcacm_t acm_cfg = {
         .cdc_port = TINYUSB_CDC_ACM_0,
-        .callback_rx = &tinyusb_cdc_rx_callback, // the first way to register a callback
+        .callback_rx = &tinyusb_cdc_rx_callback,
         .callback_rx_wanted_char = NULL,
         .callback_line_state_changed = NULL,
         .callback_line_coding_changed = NULL
     };
 
     ESP_ERROR_CHECK(tinyusb_cdcacm_init(&acm_cfg));
-    /* the second way to register a callback */
     ESP_ERROR_CHECK(tinyusb_cdcacm_register_callback(
                         TINYUSB_CDC_ACM_0,
                         CDC_EVENT_LINE_STATE_CHANGED,
                         &tinyusb_cdc_line_state_changed_callback));
-
 }
 
 void esp_foc_send_buffer_callback(const uint8_t *buffer, int size)
@@ -100,26 +104,27 @@ void esp_foc_send_buffer_callback(const uint8_t *buffer, int size)
 }
 #endif
 
-static void regulation_callback (esp_foc_axis_t *axis, esp_foc_d_current  *id_ref, esp_foc_q_current *iq_ref,
-                                                    esp_foc_d_voltage *ud_forward, esp_foc_q_voltage *uq_forward)
+static void regulation_callback(esp_foc_axis_t *axis_cb,
+                                     esp_foc_d_current_q16_t *id_ref,
+                                     esp_foc_q_current_q16_t *iq_ref,
+                                     esp_foc_d_voltage_q16_t *ud_forward,
+                                     esp_foc_q_voltage_q16_t *uq_forward)
 {
+    (void)axis_cb;
 
-    float vq_base = 0.0f;
-    float vd_base = 0.0f;
-
-    float iq_base = 2.0f;
-    float id_base = 0.0f;
+    const q16_t vq_base = q16_from_float(0.0f);
+    const q16_t vd_base = q16_from_float(0.0f);
+    const q16_t iq_base = q16_from_float(2.0f);
+    const q16_t id_base = q16_from_float(0.0f);
 
     uq_forward->raw = vq_base;
     ud_forward->raw = vd_base;
     iq_ref->raw = iq_base;
     id_ref->raw = id_base;
-
 }
 
 static void initialize_foc_drivers(void)
 {
-
     inverter = inverter_6pwm_mpcwm_new(
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_UL_PIN,
@@ -131,7 +136,7 @@ static void initialize_foc_drivers(void)
         12.0f,
         0
     );
-    if(inverter == NULL) {
+    if (inverter == NULL) {
         ESP_LOGE(TAG, "failed to create the inverter driver, aborting!");
         ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
         abort();
@@ -148,7 +153,7 @@ static void initialize_foc_drivers(void)
     };
 
     shunts = isensor_adc_oneshot_new(&shunt_oneshot_cfg, NULL);
-    if(shunts == NULL) {
+    if (shunts == NULL) {
         ESP_LOGE(TAG, "failed to create the shunt sensor driver, aborting!");
         ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
         abort();
@@ -163,7 +168,7 @@ static void initialize_foc_drivers(void)
     };
 
     shunts = isensor_adc_new(&shunt_cfg);
-    if(shunts == NULL) {
+    if (shunts == NULL) {
         ESP_LOGE(TAG, "failed to create the shunt sensor driver, aborting!");
         ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
         abort();
@@ -176,7 +181,7 @@ static void initialize_foc_drivers(void)
         0
     );
 
-    if(sensor == NULL) {
+    if (sensor == NULL) {
         ESP_LOGE(TAG, "failed to create as5600 encoder driver");
         ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
         abort();
@@ -185,32 +190,47 @@ static void initialize_foc_drivers(void)
 
 void app_main(void)
 {
-    float vramp = 5.0f;
-    float step = 0.2f;
+    ESP_LOGI(TAG, "Initializing espFoC sensored axis (IQ31)");
 
-    esp_foc_q_voltage uq = {.raw = 0.0f};
-    esp_foc_q_current iq = {.raw = 0.0f};
-
-    ESP_LOGI(TAG, "Initializing the esp foc motor controller!");
+    settings.motor_inductance = q16_from_float(0.0018f);
+    settings.motor_resistance = q16_from_float(1.08f);
+    settings.motor_inertia = q16_from_float(0.0001f);
 
     initialize_foc_drivers();
 
-    esp_foc_initialize_axis(
+    esp_foc_err_t foc_err = esp_foc_initialize_axis(
         &axis,
         inverter,
         sensor,
         shunts,
         settings
     );
+    if (foc_err != ESP_FOC_OK) {
+        ESP_LOGE(TAG, "esp_foc_initialize_axis failed: %d", (int)foc_err);
+        abort();
+    }
 
-    /* Add some channels to monitor the currents */
 #ifdef CONFIG_ESP_FOC_SCOPE
     esp_foc_scope_add_channel(&axis.i_u, 1);
     esp_foc_scope_add_channel(&axis.i_v, 2);
     esp_foc_scope_add_channel(&axis.i_w, 3);
 #endif
 
-    esp_foc_align_axis(&axis);
-    esp_foc_run(&axis);
-    esp_foc_set_regulation_callback(&axis, regulation_callback);
+    foc_err = esp_foc_align_axis(&axis);
+    if (foc_err != ESP_FOC_OK) {
+        ESP_LOGE(TAG, "esp_foc_align_axis failed: %d", (int)foc_err);
+        abort();
+    }
+
+    foc_err = esp_foc_run(&axis);
+    if (foc_err != ESP_FOC_OK) {
+        ESP_LOGE(TAG, "esp_foc_run failed: %d", (int)foc_err);
+        abort();
+    }
+
+    foc_err = esp_foc_set_regulation_callback(&axis, regulation_callback);
+    if (foc_err != ESP_FOC_OK) {
+        ESP_LOGE(TAG, "esp_foc_set_regulation_callback failed: %d", (int)foc_err);
+        abort();
+    }
 }
