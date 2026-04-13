@@ -3,7 +3,7 @@
  */
 #pragma once
 
-#include "espFoC/esp_foc_units_iq31.h"
+#include "espFoC/esp_foc_units_q16.h"
 #include "espFoC/utils/pid_controller.h"
 #include "espFoC/utils/ema_low_pass_filter.h"
 #include "espFoC/drivers/inverter_interface.h"
@@ -18,10 +18,10 @@ typedef void (*esp_foc_low_speed_loop_callback_t)(void *arg);
 typedef void (*esp_foc_outer_loop_callback_t)(void *arg);
 typedef void (*esp_foc_motor_regulation_callback_t)(
     esp_foc_axis_t *axis,
-    esp_foc_d_current_iq31_t *id_ref,
-    esp_foc_q_current_iq31_t *iq_ref,
-    esp_foc_d_voltage_iq31_t *ud_forward,
-    esp_foc_q_voltage_iq31_t *uq_forward);
+    esp_foc_d_current_q16_t *id_ref,
+    esp_foc_q_current_q16_t *iq_ref,
+    esp_foc_d_voltage_q16_t *ud_forward,
+    esp_foc_q_voltage_q16_t *uq_forward);
 
 typedef struct {
     esp_foc_motor_direction_t natural_direction;
@@ -37,25 +37,25 @@ struct esp_foc_axis_s {
     q16_t i_v;
     q16_t i_w;
 
-    esp_foc_q_current_iq31_t target_i_q;
-    esp_foc_d_current_iq31_t target_i_d;
+    esp_foc_q_current_q16_t target_i_q;
+    esp_foc_d_current_q16_t target_i_d;
 
-    esp_foc_q_voltage_iq31_t target_u_q;
-    esp_foc_d_voltage_iq31_t target_u_d;
+    esp_foc_q_voltage_q16_t target_u_q;
+    esp_foc_d_voltage_q16_t target_u_d;
 
-    esp_foc_q_current_iq31_t i_q;
-    esp_foc_d_current_iq31_t i_d;
+    esp_foc_q_current_q16_t i_q;
+    esp_foc_d_current_q16_t i_d;
 
-    esp_foc_q_voltage_iq31_t u_q;
-    esp_foc_d_voltage_iq31_t u_d;
+    esp_foc_q_voltage_q16_t u_q;
+    esp_foc_d_voltage_q16_t u_d;
 
-    esp_foc_alpha_current_iq31_t i_alpha;
-    esp_foc_beta_current_iq31_t i_beta;
-    esp_foc_alpha_voltage_iq31_t u_alpha;
-    esp_foc_beta_voltage_iq31_t u_beta;
-    esp_foc_u_voltage_iq31_t u_u;
-    esp_foc_v_voltage_iq31_t u_v;
-    esp_foc_w_voltage_iq31_t u_w;
+    esp_foc_alpha_current_q16_t i_alpha;
+    esp_foc_beta_current_q16_t i_beta;
+    esp_foc_alpha_voltage_q16_t u_alpha;
+    esp_foc_beta_voltage_q16_t u_beta;
+    esp_foc_u_voltage_q16_t u_u;
+    esp_foc_v_voltage_q16_t u_v;
+    esp_foc_w_voltage_q16_t u_w;
 
     q16_t dt;
     q16_t inv_dt;

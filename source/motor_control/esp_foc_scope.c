@@ -36,7 +36,7 @@ struct scope_frame {
 };
 
 static uint32_t used_channels = 0;
-static float *scope_channels[CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS];
+static q16_t *scope_channels[CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS];
 static esp_foc_event_handle_t scope_ev;
 
 static bool scope_enable = false;
@@ -117,7 +117,7 @@ void esp_foc_scope_data_push(void)
     struct scope_frame *next_sample = &scope_buffer[!ping_pong_switch][wr_buff_index];
     for(int i = 0; i < CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS; i++) {
         if(used_channels & (1 << i)) {
-            next_sample->data[i] = *scope_channels[i];
+            next_sample->data[i] = q16_to_float(*scope_channels[i]);
         } else {
             next_sample->data[i] = 0.0f;
         }
@@ -132,7 +132,7 @@ void esp_foc_scope_data_push(void)
     }
 }
 
-int esp_foc_scope_add_channel(const float *data_to_wire, int channel_number)
+int esp_foc_scope_add_channel(const q16_t *data_to_wire, int channel_number)
 {
     if(used_channels & (1 << channel_number)) {
         ESP_LOGE(TAG, "Channel already used, select another! ");
@@ -146,7 +146,7 @@ int esp_foc_scope_add_channel(const float *data_to_wire, int channel_number)
 
     esp_foc_critical_enter();
     used_channels |= (1 << channel_number);
-    scope_channels[channel_number] = (float *)data_to_wire;
+    scope_channels[channel_number] = (q16_t *)data_to_wire;
     esp_foc_critical_leave();
 
     ESP_LOGI(TAG, "Wire data %p is attached to channel %d", data_to_wire, channel_number);

@@ -17,6 +17,7 @@ Unity-based unit tests for the espFoC component. They cover logic that does not 
 - **test_axis_flow.c**: Axis flow with mocks — init, align, `set_regulation_callback`, `run`; checks that the regulation callback runs and `set_voltages` receives FOC output
 - **test_observers_iq31.c**: Observer smoke tests (simu, PLL, KF, PMSM model) — `update` with IQ31 inputs, getters, and `reset`
 - **test_observers_trajectory_iq31.c**: Synthetic trajectories + float reference model stepped in lockstep — simu vs closed-form reference; PLL/KF with αβ waveforms consistent with steady-state motor operation (known electrical angle); PMSM vs float Euler aligned with the on-target integrator. Tags: `[espFoC][observer][trajectory]`
+- **test_q16_numerical_stability.c**: Numerical stability of the Q16.16 pipeline — arithmetic boundary saturation (overflow/underflow), sin/cos identity and wrap-around, Clarke/Park roundtrips at small and large signals, limit_voltage edge cases, PID sustained zero-error / windup / alternating-sign, EMA convergence and oscillation bounds, SVPWM extreme-input duty clamping, full 10000-step pipeline stability, Q16↔IQ31 bridge consistency, angle normalization wraps. Tags: `[espFoC][q16][stability]`
 
 ## Building and running
 
