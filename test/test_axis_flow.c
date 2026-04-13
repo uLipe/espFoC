@@ -98,10 +98,10 @@ TEST_CASE("axis align: already aligned returns error", "[espFoC][axis_flow]")
 
 static int axis_test_regulator_called;
 static void axis_test_regulator_cb(esp_foc_axis_t *ax,
-                                   esp_foc_d_current_iq31_t *id_ref,
-                                   esp_foc_q_current_iq31_t *iq_ref,
-                                   esp_foc_d_voltage_iq31_t *ud_ff,
-                                   esp_foc_q_voltage_iq31_t *uq_ff)
+                                   esp_foc_d_current_q16_t *id_ref,
+                                   esp_foc_q_current_q16_t *iq_ref,
+                                   esp_foc_d_voltage_q16_t *ud_ff,
+                                   esp_foc_q_voltage_q16_t *uq_ff)
 {
     (void)ax;
     (void)id_ref;
@@ -131,10 +131,10 @@ TEST_CASE("axis set_regulation_callback: stored and invalid args", "[espFoC][axi
 
 static int axis_run_regulator_called_count;
 static void axis_run_regulator_cb(esp_foc_axis_t *ax,
-                                esp_foc_d_current_iq31_t *id_ref,
-                                esp_foc_q_current_iq31_t *iq_ref,
-                                esp_foc_d_voltage_iq31_t *ud_ff,
-                                esp_foc_q_voltage_iq31_t *uq_ff)
+                                esp_foc_d_current_q16_t *id_ref,
+                                esp_foc_q_current_q16_t *iq_ref,
+                                esp_foc_d_voltage_q16_t *ud_ff,
+                                esp_foc_q_voltage_q16_t *uq_ff)
 {
     (void)ax;
     axis_run_regulator_called_count++;

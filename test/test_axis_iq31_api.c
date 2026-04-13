@@ -96,10 +96,10 @@ TEST_CASE("axis api: align and run happy path", "[espFoC][axis]")
 
 static int iq31_reg_cb_called;
 static void test_reg_cb(esp_foc_axis_t *axis,
-                        esp_foc_d_current_iq31_t *id_ref,
-                        esp_foc_q_current_iq31_t *iq_ref,
-                        esp_foc_d_voltage_iq31_t *ud_ff,
-                        esp_foc_q_voltage_iq31_t *uq_ff)
+                        esp_foc_d_current_q16_t *id_ref,
+                        esp_foc_q_current_q16_t *iq_ref,
+                        esp_foc_d_voltage_q16_t *ud_ff,
+                        esp_foc_q_voltage_q16_t *uq_ff)
 {
     (void)axis;
     iq31_reg_cb_called++;

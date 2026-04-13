@@ -2,24 +2,6 @@
  * MIT License
  *
  * Copyright (c) 2021 Felipe Neves
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
 
 #include "esp_log.h"
@@ -29,7 +11,7 @@
 #include "espFoC/current_sensor_adc.h"
 #include "espFoC/current_sensor_adc_one_shot.h"
 #include "espFoC/esp_foc.h"
-
+#include "espFoC/utils/esp_foc_q16.h"
 
 #ifdef CONFIG_IDF_TARGET_ESP32P4
 #include "tinyusb.h"
@@ -44,16 +26,15 @@ static esp_foc_isensor_t  *shunts;
 
 static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
-    /*Motor part number: QBL4208 - 64 - 013 */
     .motor_pole_pairs = 4,
-    .motor_inductance = 0.0018f,
-    .motor_resistance = 1.08f,
+    .motor_inductance = 0,
+    .motor_resistance = 0,
     .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
+    .motor_unit = 0,
 };
 
 
 #ifdef CONFIG_IDF_TARGET_ESP32P4
-/* USB backed for espfoc scope */
 void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
 {
 }
@@ -73,14 +54,13 @@ void esp_foc_init_bus_callback(void)
 
     tinyusb_config_cdcacm_t acm_cfg = {
         .cdc_port = TINYUSB_CDC_ACM_0,
-        .callback_rx = &tinyusb_cdc_rx_callback, // the first way to register a callback
+        .callback_rx = &tinyusb_cdc_rx_callback,
         .callback_rx_wanted_char = NULL,
         .callback_line_state_changed = NULL,
         .callback_line_coding_changed = NULL
     };
 
     ESP_ERROR_CHECK(tinyusb_cdcacm_init(&acm_cfg));
-    /* the second way to register a callback */
     ESP_ERROR_CHECK(tinyusb_cdcacm_register_callback(
                         TINYUSB_CDC_ACM_0,
                         CDC_EVENT_LINE_STATE_CHANGED,
@@ -98,26 +78,22 @@ void esp_foc_send_buffer_callback(const uint8_t *buffer, int size)
 }
 #endif
 
-static void regulation_callback (esp_foc_axis_t *axis, esp_foc_d_current  *id_ref, esp_foc_q_current *iq_ref,
-                                                    esp_foc_d_voltage *ud_forward, esp_foc_q_voltage *uq_forward)
+static void regulation_callback(esp_foc_axis_t *axis_cb,
+                                esp_foc_d_current_q16_t *id_ref,
+                                esp_foc_q_current_q16_t *iq_ref,
+                                esp_foc_d_voltage_q16_t *ud_forward,
+                                esp_foc_q_voltage_q16_t *uq_forward)
 {
+    (void)axis_cb;
 
-    float vq_base = 0.0f;
-    float vd_base = 0.0f;
-
-    float iq_base = 2.0f;
-    float id_base = 0.0f;
-
-    uq_forward->raw = vq_base;
-    ud_forward->raw = vd_base;
-    iq_ref->raw = iq_base;
-    id_ref->raw = id_base;
-
+    uq_forward->raw = q16_from_float(0.0f);
+    ud_forward->raw = q16_from_float(0.0f);
+    iq_ref->raw = q16_from_float(2.0f);
+    id_ref->raw = q16_from_float(0.0f);
 }
 
 static void initialize_foc_drivers(void)
 {
-
     inverter = inverter_6pwm_mpcwm_new(
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_UL_PIN,
@@ -172,26 +148,26 @@ static void initialize_foc_drivers(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Initializing the esp foc motor controller!");
+    ESP_LOGI(TAG, "Initializing the espFoC sensorless controller");
+    ESP_LOGW(TAG, "Sensorless mode requires observer integration (WIP)");
+
+    settings.motor_inductance = q16_from_float(0.0018f);
+    settings.motor_resistance = q16_from_float(1.08f);
 
     initialize_foc_drivers();
 
-    esp_foc_initialize_axis(
-        &axis,
-        inverter,
-        NULL, /* Rotor sensor must be NULL on sennsorless, an observer will be allocated instead*/
-        shunts,
-        settings
-    );
+    /*
+     * Sensorless requires a rotor position observer instead of a physical
+     * encoder.  Full observer integration is WIP; this example shows the
+     * API shape but will not run a closed loop until the observer chain
+     * is connected to the axis.
+     */
 
-    /* Add some channels to monitor the currents */
 #ifdef CONFIG_ESP_FOC_SCOPE
     esp_foc_scope_add_channel(&axis.i_u, 1);
     esp_foc_scope_add_channel(&axis.i_v, 2);
     esp_foc_scope_add_channel(&axis.i_w, 3);
 #endif
 
-    esp_foc_align_axis(&axis);
-    esp_foc_run(&axis);
-    esp_foc_set_regulation_callback(&axis, regulation_callback);
+    ESP_LOGI(TAG, "Sensorless startup placeholder complete");
 }

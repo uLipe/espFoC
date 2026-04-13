@@ -32,7 +32,7 @@
 #pragma once
 
 #include "espFoC/utils/esp_foc_iq31.h"
-#include <math.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -94,31 +94,48 @@ static inline iq31_t iq31_normalize_angle(iq31_t angle_q31)
 /**
  * If |(v_d, v_q)| > v_dc, scale both by v_dc/|v| so result lies on the circle.
  * All arguments in Q1.31. No-op if magnitude squared is zero or already <= v_dc.
- *
- * Scale uses double hypot/sqrt on int64 components so |v| matches the float
- * path for all magnitudes (pure iq31_rsqrt_fast chains can saturate or mis-scale).
+ * Pure integer path using Newton's method isqrt.
  */
+static inline uint64_t iq31_u64_isqrt(uint64_t x)
+{
+    if (x == 0u) {
+        return 0u;
+    }
+    uint64_t y = x;
+    uint64_t z = (x + 1u) >> 1;
+    while (z < y) {
+        y = z;
+        z = (x / z + z) >> 1;
+    }
+    return y;
+}
+
 static inline void esp_foc_limit_voltage_iq31(iq31_t *v_d, iq31_t *v_q, iq31_t v_dc)
 {
-    int64_t vd = (int64_t)*v_d;
-    int64_t vq = (int64_t)*v_q;
-    uint64_t sum_sq = (uint64_t)(vd * vd) + (uint64_t)(vq * vq);
-    uint64_t vdc_sq = (uint64_t)((int64_t)v_dc * (int64_t)v_dc);
-
-    if (sum_sq <= vdc_sq || sum_sq == 0ULL) {
+    int64_t vd64 = (int64_t)*v_d;
+    int64_t vq64 = (int64_t)*v_q;
+    int64_t dc = (int64_t)v_dc;
+    if (dc <= 0) {
         return;
     }
-
-    const double inv_scale = 2147483648.0; /* 2^31 */
-    double mag = hypot((double)vd, (double)vq) / inv_scale;
-    double vdc_d = (double)v_dc / inv_scale;
-    double scale_d = vdc_d / mag;
-    if (scale_d > 1.0) {
-        scale_d = 1.0;
+    uint64_t av = (uint64_t)(vd64 >= 0 ? vd64 : -vd64);
+    uint64_t aq = (uint64_t)(vq64 >= 0 ? vq64 : -vq64);
+    uint64_t m2 = av * av + aq * aq;
+    uint64_t dc_u = (uint64_t)dc;
+    uint64_t dc2 = dc_u * dc_u;
+    if (m2 <= dc2) {
+        return;
     }
-    iq31_t scale = iq31_from_float((float)scale_d);
-    *v_d = iq31_mul(*v_d, scale);
-    *v_q = iq31_mul(*v_q, scale);
+    uint64_t mag = iq31_u64_isqrt(m2);
+    if (mag == 0u) {
+        return;
+    }
+    int64_t s = ((int64_t)dc_u << 31) / (int64_t)mag;
+    if (s > (int64_t)IQ31_ONE) {
+        s = IQ31_ONE;
+    }
+    *v_d = iq31_mul(*v_d, (iq31_t)s);
+    *v_q = iq31_mul(*v_q, (iq31_t)s);
 }
 
 /* --- Apply bias: map [-1,1] -> [0,1] (v*0.5 + 0.5) --- */
@@ -139,8 +156,9 @@ static inline void esp_foc_third_harmonic_injection_iq31(iq31_t *v_alpha, iq31_t
     iq31_t v_offset = (iq31_t)(((int64_t)v_max + (int64_t)v_min) >> 1);
     *v_alpha = iq31_sub(*v_alpha, v_offset);
     *v_beta  = iq31_sub(*v_beta, v_offset);
-    *v_alpha = iq31_mul(*v_alpha, iq31_from_float(0.95f));
-    *v_beta  = iq31_mul(*v_beta, iq31_from_float(0.95f));
+    /* 0.95 in Q1.31 = floor(0.95 * 2^31) = 2040109465 */
+    *v_alpha = iq31_mul(*v_alpha, (iq31_t)2040109465);
+    *v_beta  = iq31_mul(*v_beta, (iq31_t)2040109465);
 }
 #endif
 
