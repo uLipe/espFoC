@@ -62,10 +62,11 @@ cd examples/axis_sensored
 idf.py build flash monitor
 ```
 
-Sensored quick start (IQ31 — default library pipeline):
+Sensored quick start:
 
 ```bash
 cd examples/axis_sensored
+idf.py set-target esp32s3
 idf.py build flash monitor
 ```
 
@@ -199,9 +200,9 @@ Below is a minimal example that initializes espFoC and runs the motor in **senso
 
 #include "espFoC/inverter_6pwm_mcpwm.h"
 #include "espFoC/current_sensor_adc.h"
-#include "espFoC/current_sensor_adc_one_shot.h"
 #include "espFoC/rotor_sensor_as5600.h"
 #include "espFoC/esp_foc.h"
+#include "espFoC/utils/esp_foc_q16.h"
 
 static const char *TAG = "esp-foc-example";
 
@@ -211,148 +212,69 @@ static esp_foc_rotor_sensor_t *sensor;
 
 static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
-    /*Motor part number: QBL4208 - 64 - 013 */
     .motor_pole_pairs = 4,
-    .motor_inductance = 0.0018f,
-    .motor_resistance = 1.08f,
+    .motor_inductance = 0,
+    .motor_resistance = 0,
     .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
+    .motor_unit = 0,
 };
 
-static void regulation_callback (esp_foc_axis_t *axis, esp_foc_d_current  *id_ref, esp_foc_q_current *iq_ref,
-                                                    esp_foc_d_voltage *ud_forward, esp_foc_q_voltage *uq_forward)
+static void regulation_callback(esp_foc_axis_t *axis_cb,
+                                esp_foc_d_current_q16_t *id_ref,
+                                esp_foc_q_current_q16_t *iq_ref,
+                                esp_foc_d_voltage_q16_t *ud_forward,
+                                esp_foc_q_voltage_q16_t *uq_forward)
 {
-
-    /* Actual motor drive is done inside of ythe user defined callback */
-    float vq_base = 0.0f;
-    float vd_base = 0.0f;
-
-    float iq_base = 2.0f;
-    float id_base = 0.0f;
-
-    uq_forward->raw = vq_base;
-    ud_forward->raw = vd_base;
-    iq_ref->raw = iq_base;
-    id_ref->raw = id_base;
-
-}
-
-static void initialize_foc_drivers(void)
-{
-
-    inverter = inverter_6pwm_mpcwm_new(
-        CONFIG_FOC_PWM_U_PIN,
-        CONFIG_FOC_PWM_UL_PIN,
-        CONFIG_FOC_PWM_V_PIN,
-        CONFIG_FOC_PWM_VL_PIN,
-        CONFIG_FOC_PWM_W_PIN,
-        CONFIG_FOC_PWM_WL_PIN,
-        -47,
-        12.0f,
-        0
-    );
-    if(inverter == NULL) {
-        ESP_LOGE(TAG, "failed to create the inverter driver, aborting!");
-        ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
-        abort();
-    }
-
-#ifdef CONFIG_IDF_TARGET_ESP32P4
-    esp_foc_isensor_adc_oneshot_config_t shunt_oneshot_cfg = {
-        .axis_channels = {ADC_CHANNEL_7, ADC_CHANNEL_6},
-        .units = {ADC_UNIT_1, ADC_UNIT_1},
-        .amp_gain = 20.0f,
-        .shunt_resistance = 0.005f,
-        .number_of_channels = 2,
-        .enable_analog_encoder = false,
-    };
-
-    shunts = isensor_adc_oneshot_new(&shunt_oneshot_cfg, NULL);
-    if(shunts == NULL) {
-        ESP_LOGE(TAG, "failed to create the shunt sensor driver, aborting!");
-        ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
-        abort();
-    }
-#elif defined (CONFIG_IDF_TARGET_ESP32S3)
-    esp_foc_isensor_adc_config_t shunt_cfg = {
-        .axis_channels = {ADC_CHANNEL_1, ADC_CHANNEL_5},
-        .units = {ADC_UNIT_1, ADC_UNIT_1},
-        .amp_gain = 50.0f,
-        .shunt_resistance = 0.01f,
-        .number_of_channels = 2,
-    };
-
-    shunts = isensor_adc_new(&shunt_cfg);
-    if(shunts == NULL) {
-        ESP_LOGE(TAG, "failed to create the shunt sensor driver, aborting!");
-        ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
-        abort();
-    }
-
-#endif
-    sensor = rotor_sensor_as5600_new(
-        CONFIG_FOC_ENCODER_SDA_PIN,
-        CONFIG_FOC_ENCODER_SCL_PIN,
-        0
-    );
-
-    if(sensor == NULL) {
-        ESP_LOGE(TAG, "failed to create as5600 encoder driver");
-        ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
-        abort();
-    }
+    (void)axis_cb;
+    uq_forward->raw = q16_from_float(0.0f);
+    ud_forward->raw = q16_from_float(0.0f);
+    iq_ref->raw = q16_from_float(2.0f);
+    id_ref->raw = q16_from_float(0.0f);
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Initializing the esp foc motor controller!");
+    ESP_LOGI(TAG, "Initializing espFoC");
 
-    initialize_foc_drivers();
+    settings.motor_inductance = q16_from_float(0.0018f);
+    settings.motor_resistance = q16_from_float(1.08f);
 
-    esp_foc_initialize_axis(
-        &axis,
-        inverter,
-        sensor,
-        shunts,
-        settings
-    );
+    inverter = inverter_6pwm_mpcwm_new(/* ... pin config ... */);
+    shunts   = /* ... ADC shunt config ... */;
+    sensor   = rotor_sensor_as5600_new(/* ... I2C pins ... */);
 
-    /* Add some virtual scope channels to monitor the currents */
-#ifdef CONFIG_ESP_FOC_SCOPE
-    esp_foc_scope_add_channel(&axis.i_u, 1);
-    esp_foc_scope_add_channel(&axis.i_v, 2);
-    esp_foc_scope_add_channel(&axis.i_w, 3);
-#endif
-
+    esp_foc_initialize_axis(&axis, inverter, sensor, shunts, settings);
     esp_foc_align_axis(&axis);
     esp_foc_run(&axis);
     esp_foc_set_regulation_callback(&axis, regulation_callback);
 }
 ```
 
-## Development
+## Numerical Format
 
-- **Fixed-point refactor (IQ31):** On branch `refactor/fixed_point`, the FOC core is being rewritten in fixed-point while keeping a float-oriented API. Analysis notes: `../REFACTOR_FIXED_POINT_ANALYSIS.md` (parent of this component).
+espFoC uses **Q16.16 fixed-point** (`q16_t`) for all runtime control signals
+(currents, voltages, angles, PID, filters, SVPWM). An IQ31 (Q1.31) LUT
+provides sin/cos and is also used inside observers. **Float** is used only in
+the public API for setup / parameter conversion (e.g. `q16_from_float()`);
+the hot-path control loop contains no floating-point operations.
 
 ---
 
 ## Repository Structure
 
 ```
-  espFoC/
-  ├── doc
-  │   └── images
-  ├── examples   # Examples with examples projects and bring-up code
-  │   ├── axis_sensored
-  │   ├── axis_sensorless
-  │   └── test_drivers
-  ├── include   # Public API header files
-  │   └── espFoC
-  └── source
-      ├── drivers         # Platform specific drivers
-      ├── motor_control   # Motor control algorithms.
-      ├── osal            # OS abstraction layer
-      └── rust            # plain FFI for future rust usage
-
+espFoC/
+├── examples/
+│   ├── axis_sensored        # Sensored FOC quick start
+│   ├── axis_sensorless      # Sensorless placeholder
+│   ├── test_drivers/        # Hardware bring-up examples
+│   └── unit_test_runner/    # Unity test runner (CI / QEMU)
+├── include/espFoC/          # Public API headers
+├── source/
+│   ├── drivers/             # Platform-specific drivers
+│   ├── motor_control/       # FOC core, observers, Q16/IQ31 math
+│   └── osal/                # OS abstraction layer
+└── test/                    # Unity unit tests
 ```
 
 ---

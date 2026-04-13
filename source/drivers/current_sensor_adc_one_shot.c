@@ -77,7 +77,6 @@ typedef struct {
 DRAM_ATTR static isensor_adc_t isensor_adc;
 static bool adc_initialized = false;
 static const float adc_to_volts = ((3.1f)/ 4096.0f);
-static const float adc_effective_range = 2048.0f;
 static float raw_floats[4];
 
 static adc_oneshot_hal_chan_cfg_t chan_cfg = {

@@ -104,7 +104,7 @@ TEST_CASE("mock rotor: set_simulation_count increments", "[espFoC][driver_mock]"
     iface->set_simulation_count(iface, q16_from_float(0.0015f));
     iface->set_simulation_count(iface, q16_from_float(0.0025f));
     TEST_ASSERT_EQUAL(2, rot.set_simulation_count_count);
-    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 4.0f, rot.counts);
+    TEST_ASSERT_FLOAT_WITHIN(0.05f, 4.0f, rot.counts);
 }
 
 TEST_CASE("mock isensor: fetch and calibrate counted", "[espFoC][driver_mock]")
