@@ -6,9 +6,7 @@
 #pragma once
 
 #include <stdbool.h>
-#include <math.h>
 #include <sdkconfig.h>
-#include "espFoC/utils/foc_math.h"
 #include "espFoC/utils/modulator.h"
 #include "espFoC/drivers/inverter_interface.h"
 #include "espFoC/drivers/current_sensor_interface.h"

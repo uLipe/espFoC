@@ -8,7 +8,6 @@
 #pragma once
 
 #include "espFoC/utils/esp_foc_q16.h"
-#include "espFoC/utils/foc_math.h"
 
 #ifdef __cplusplus
 extern "C" {

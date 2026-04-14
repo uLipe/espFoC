@@ -57,7 +57,6 @@ static void initialize_foc_drivers(void)
 void app_main(void)
 {
     q16_t theta = 0;
-    const q16_t vbus = q16_from_float(24.0f);
     const q16_t vmax = q16_from_float(24.0f / 1.7320508075688772f);
     const q16_t inv_vbus = q16_from_float(1.0f / 24.0f);
     const q16_t step = q16_from_float(0.2f);
@@ -78,7 +77,6 @@ void app_main(void)
                                     &valpha, &vbeta,
                                     &da, &db, &dc,
                                     vmax,
-                                    q16_mul(vbus, Q16_HALF),
                                     inv_vbus);
 
         inverter->set_voltages(inverter, da, db, dc);

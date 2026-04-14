@@ -120,11 +120,6 @@ static void set_inverter_callback(esp_foc_inverter_t *self,
                         LEDC_LSTIMER3_OVF_INT_ENA );
 }
 
-static void phase_remap(esp_foc_inverter_t *self)
-{
-    (void)self;
-}
-
 static uint32_t get_inverter_pwm_rate(esp_foc_inverter_t *self)
 {
     (void)self;
@@ -198,7 +193,6 @@ esp_foc_inverter_t *inverter_3pwm_ledc_new(ledc_channel_t ch_u,
     ledc[port].interface.get_dc_link_voltage = get_dc_link_voltage;
     ledc[port].interface.set_voltages = set_voltages;
     ledc[port].interface.set_inverter_callback = set_inverter_callback;
-    ledc[port].interface.phase_remap = phase_remap;
     ledc[port].interface.get_inverter_pwm_rate = get_inverter_pwm_rate;
     ledc[port].interface.enable = inverter_enable;
     ledc[port].interface.disable = inverter_disable;

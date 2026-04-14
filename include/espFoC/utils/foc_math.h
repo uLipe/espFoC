@@ -24,39 +24,20 @@
 
 #pragma once
 
-#ifdef CONFIG_ESP_FOC_CUSTOM_MATH
-extern const float ESP_FOC_FAST_PI;
-extern const float ESP_FOC_FAST_2PI;
-extern const float ESP_FOC_SIN_COS_APPROX_B;
-extern const float ESP_FOC_SIN_COS_APPROX_C;
-extern const float ESP_FOC_SIN_COS_APPROX_P;
-extern const float ESP_FOC_SIN_COS_APPROX_D;
-#endif
-
-extern const float ESP_FOC_CLARKE_K1;
-extern const float ESP_FOC_CLARKE_K2;
-extern const float ESP_FOC_CLARKE_PARK_SQRT3;
-extern const float ESP_FOC_CLARKE_K3;
-extern const float ESP_FOC_SQRT3_TWO;
+#define ESP_FOC_CLARKE_K1          (2.0f / 3.0f)
+#define ESP_FOC_CLARKE_K2          (1.0f / 3.0f)
+#define ESP_FOC_CLARKE_PARK_SQRT3  1.7320508075688772f
+#define ESP_FOC_CLARKE_K3          (1.0f / ESP_FOC_CLARKE_PARK_SQRT3)
+#define ESP_FOC_SQRT3_TWO          (ESP_FOC_CLARKE_PARK_SQRT3 / 2.0f)
 
 static inline float esp_foc_sine(float x)
 {
-#ifdef CONFIG_ESP_FOC_CUSTOM_MATH
-    extern float esp_foc_fast_sine(float angle);
-    return esp_foc_fast_sine(x);
-#else
     return sinf(x);
-#endif
 }
 
 static inline float esp_foc_cosine(float x)
 {
-#ifdef CONFIG_ESP_FOC_CUSTOM_MATH
-    extern float esp_foc_fast_cosine(float angle);
-    return esp_foc_fast_cosine(x);
-#else
     return cosf(x);
-#endif
 }
 
 static inline float esp_foc_sqrtf(float x)

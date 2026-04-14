@@ -12,7 +12,6 @@ struct esp_foc_inverter_s {
     q16_t (*get_dc_link_voltage)(esp_foc_inverter_t *self);
     void (*set_voltages)(esp_foc_inverter_t *self,
                         q16_t v_u, q16_t v_v, q16_t v_w);
-    void (*phase_remap)(esp_foc_inverter_t *self);
     uint32_t (*get_inverter_pwm_rate)(esp_foc_inverter_t *self);
     void (*enable)(esp_foc_inverter_t *self);
     void (*disable)(esp_foc_inverter_t *self);

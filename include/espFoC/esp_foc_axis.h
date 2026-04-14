@@ -61,8 +61,6 @@ struct esp_foc_axis_s {
     q16_t inv_dt;
 
     q16_t current_speed;
-    q16_t shaft_ticks_to_radians_ratio;
-    q16_t extrapolated_rotor_position;
     q16_t rotor_shaft_ticks;
     q16_t rotor_position;
     q16_t rotor_position_prev;
@@ -72,13 +70,10 @@ struct esp_foc_axis_s {
     int skip_torque_control;
 
     q16_t dc_link_voltage;
-    q16_t biased_dc_link_voltage;
     q16_t dc_link_to_normalized;
     q16_t max_voltage;
     int motor_pole_pairs;
     q16_t natural_direction;
-
-    q16_t current_offsets[3];
 
     esp_foc_err_t rotor_aligned;
     esp_foc_pid_controller_t torque_controller[2];

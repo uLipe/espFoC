@@ -86,13 +86,18 @@ void esp_foc_wait_notifier(void)
     ulTaskNotifyTake(pdFALSE ,portMAX_DELAY);
 }
 
-void esp_foc_send_notification(esp_foc_event_handle_t handle)
+void esp_foc_send_notification_from_isr(esp_foc_event_handle_t handle)
 {
     BaseType_t wake;
     vTaskNotifyGiveFromISR((TaskHandle_t)handle, &wake);
     if (wake == pdTRUE) {
         portYIELD_FROM_ISR();
     }
+}
+
+void esp_foc_send_notification(esp_foc_event_handle_t handle)
+{
+    xTaskNotifyGive((TaskHandle_t)handle);
 }
 
 int esp_foc_debug_pin_init(int debug_pin)

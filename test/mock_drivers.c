@@ -39,11 +39,6 @@ static void mock_set_voltages(esp_foc_inverter_t *self, q16_t v_u, q16_t v_v, q1
     m->last_v_w = v_w;
 }
 
-static void mock_phase_remap(esp_foc_inverter_t *self)
-{
-    (void)self;
-}
-
 static uint32_t mock_get_inverter_pwm_rate(esp_foc_inverter_t *self)
 {
     mock_inverter_t *m = MOCK_INVERTER_FROM_SELF(self);
@@ -70,7 +65,6 @@ void mock_inverter_init(mock_inverter_t *m, float dc_link_pu, float pwm_rate_hz)
     m->interface.set_inverter_callback = mock_set_inverter_callback;
     m->interface.get_dc_link_voltage = mock_get_dc_link_voltage;
     m->interface.set_voltages = mock_set_voltages;
-    m->interface.phase_remap = mock_phase_remap;
     m->interface.get_inverter_pwm_rate = mock_get_inverter_pwm_rate;
     m->interface.enable = mock_enable;
     m->interface.disable = mock_disable;
