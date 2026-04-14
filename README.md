@@ -74,29 +74,13 @@ idf.py build flash monitor
 
 ## Architectural Overview
 
-![Wiring](/doc/images/wiring.png)
+espFoC is built around a **motor axis abstraction**. Each axis owns one
+inverter, one rotor sensor, and (optionally) one current sensor. The
+application provides a regulation callback that sets Id/Iq references;
+espFoC handles everything from the PID current loop down to PWM duty
+generation. Velocity and position loops are left to the application.
 
-espFoC is built around a **motor axis abstraction**.
-
-Each axis is composed of:
-- one **inverter driver**
-- one **rotor sensor** (optional for open-loop)
-- one **current sensor** (optional)
-- one **control strategy**
-
-```
-
-Application
-|
-v
-esp_foc_axis
-|
-+-- inverter (PWM generation)
-+-- rotor sensor (position / speed)
-+-- current sensor (Id / Iq)
-+-- control strategy (voltage / current)
-
-```
+![espFoC architecture](doc/images/architecture.png)
 
 This design allows mixing and matching hardware blocks without changing the control core. espFoC is limited to motor driving and the torque (current) loop; velocity and position control are left to the application via the regulation callback.
 
@@ -263,18 +247,21 @@ the hot-path control loop contains no floating-point operations.
 ## Repository Structure
 
 ```
-espFoC/
-├── examples/
-│   ├── axis_sensored        # Sensored FOC quick start
-│   ├── axis_sensorless      # Sensorless placeholder
-│   ├── test_drivers/        # Hardware bring-up examples
-│   └── unit_test_runner/    # Unity test runner (CI / QEMU)
-├── include/espFoC/          # Public API headers
-├── source/
-│   ├── drivers/             # Platform-specific drivers
-│   ├── motor_control/       # FOC core, observers, Q16/IQ31 math
-│   └── osal/                # OS abstraction layer
-└── test/                    # Unity unit tests
+  espFoC/
+  ├── doc
+  │   └── images
+  ├── examples   # Examples with examples projects and bring-up code
+  │   ├── axis_sensored
+  │   ├── axis_sensorless
+  │   └── test_drivers
+  ├── include   # Public API header files
+  │   └── espFoC
+  └── source
+      ├── drivers         # Platform specific drivers
+      ├── motor_control   # Motor control algorithms.
+      ├── osal            # OS abstraction layer
+      └── rust            # plain FFI for future rust usage
+
 ```
 
 ---
