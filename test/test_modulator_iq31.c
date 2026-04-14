@@ -87,7 +87,7 @@ TEST_CASE("modulator_iq31: modulate_dq matches float typical operating point", "
     esp_foc_modulate_dq_voltage(q16_from_float(fs), q16_from_float(fc),
                                      q16_from_float(vd), q16_from_float(vq),
                                      &qa, &qb, &qu, &qv, &qw,
-                                     q16_from_float(vmax), 0,
+                                     q16_from_float(vmax),
                                      q16_from_float(norm));
 
     TEST_ASSERT_FLOAT_WITHIN(TOL_MOD, fa, q16_to_float(qa));
@@ -113,7 +113,7 @@ TEST_CASE("modulator_iq31: modulate_dq voltage limit scales dq", "[espFoC][modul
     esp_foc_modulate_dq_voltage(q16_from_float(fs), q16_from_float(fc),
                                      q16_from_float(vd), q16_from_float(vq),
                                      &qa, &qb, &qu, &qv, &qw,
-                                     q16_from_float(vmax), 0,
+                                     q16_from_float(vmax),
                                      q16_from_float(norm));
 
     TEST_ASSERT_FLOAT_WITHIN(TOL_MOD, fa, q16_to_float(qa));
@@ -130,7 +130,7 @@ TEST_CASE("modulator_iq31: modulate_dq zero dq", "[espFoC][modulator_iq31]")
 
     q16_t qa, qb, qu, qv, qw;
     esp_foc_modulate_dq_voltage(0, Q16_ONE, 0, 0, &qa, &qb, &qu, &qv, &qw,
-                                     Q16_ONE, 0, q16_from_float(0.5f));
+                                     Q16_ONE, q16_from_float(0.5f));
 
     TEST_ASSERT_FLOAT_WITHIN(TOL_MOD, fa, q16_to_float(qa));
     TEST_ASSERT_FLOAT_WITHIN(TOL_MOD, fu, q16_to_float(qu));

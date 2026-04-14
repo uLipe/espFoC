@@ -25,7 +25,6 @@
 #include <math.h>
 #include "esp_log.h"
 #include "espFoC/esp_foc.h"
-#include "espFoC/utils/foc_math.h"
 
 static const char *tag = "ESP_FOC_CORE";
 
@@ -67,13 +66,12 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
     axis->dc_link_voltage = axis->inverter_driver->get_dc_link_voltage(axis->inverter_driver);
     vbus_pu = q16_to_float(axis->dc_link_voltage);
-    axis->biased_dc_link_voltage = q16_from_float(vbus_pu / 2.0f);
     axis->dc_link_to_normalized = q16_from_float((vbus_pu > 1e-9f) ? (1.0f / vbus_pu) : 0.0f);
 
 #ifdef CONFIG_ESP_FOC_USE_SINE_PWM
     axis->max_voltage = q16_from_float(vbus_pu / 2.0f);
 #else
-    axis->max_voltage = q16_from_float(vbus_pu / ESP_FOC_CLARKE_PARK_SQRT3);
+    axis->max_voltage = q16_from_float(vbus_pu / 1.7320508075688772f);
 #endif
 
     axis->inverter_driver->set_voltages(axis->inverter_driver, 0, 0, 0);
@@ -108,8 +106,12 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->torque_controller[0].kp = q16_from_float(motor_l_f * current_control_analog_bandwith);
     axis->torque_controller[0].ki = q16_from_float(motor_r_f * current_control_analog_bandwith);
     axis->torque_controller[0].kd = q16_from_float(0.0f);
-    axis->torque_controller[0].integrator_limit = q16_from_float(q16_to_float(axis->max_voltage)
-        / q16_to_float(axis->torque_controller[0].ki));
+    {
+        float ki_f = q16_to_float(axis->torque_controller[0].ki);
+        axis->torque_controller[0].integrator_limit = (ki_f > 1e-6f)
+            ? q16_from_float(q16_to_float(axis->max_voltage) / ki_f)
+            : axis->max_voltage;
+    }
     axis->torque_controller[0].max_output_value = axis->max_voltage;
     axis->torque_controller[0].min_output_value = q16_from_float(-q16_to_float(axis->max_voltage));
     esp_foc_pid_reset(&axis->torque_controller[0]);
@@ -124,8 +126,12 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->torque_controller[1].kp = q16_from_float(motor_l_f * current_control_analog_bandwith);
     axis->torque_controller[1].ki = q16_from_float(motor_r_f * current_control_analog_bandwith);
     axis->torque_controller[1].kd = q16_from_float(0.0f);
-    axis->torque_controller[1].integrator_limit = q16_from_float((q16_to_float(axis->max_voltage) * 0.1f)
-        / q16_to_float(axis->torque_controller[1].ki));
+    {
+        float ki_f = q16_to_float(axis->torque_controller[1].ki);
+        axis->torque_controller[1].integrator_limit = (ki_f > 1e-6f)
+            ? q16_from_float((q16_to_float(axis->max_voltage) * 0.1f) / ki_f)
+            : q16_from_float(q16_to_float(axis->max_voltage) * 0.1f);
+    }
     axis->torque_controller[1].max_output_value = q16_from_float(q16_to_float(axis->max_voltage) * 0.1f);
     axis->torque_controller[1].min_output_value = q16_from_float(-(q16_to_float(axis->max_voltage) * 0.1f));
     esp_foc_pid_reset(&axis->torque_controller[1]);
@@ -138,10 +144,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     esp_foc_low_pass_filter_set_cutoff(&axis->velocity_filter, 50.0f,
                                        q16_to_float(axis->torque_controller[0].inv_dt));
 
-    {
-        uint32_t cpr = axis->rotor_sensor_driver->get_counts_per_revolution(axis->rotor_sensor_driver);
-        axis->shaft_ticks_to_radians_ratio = q16_from_float(((2.0f * (float)M_PI)) / (float)(cpr ? cpr : 1u));
-    }
     axis->natural_direction = (settings.natural_direction == ESP_FOC_MOTOR_NATURAL_DIRECTION_CW) ? Q16_ONE : Q16_MINUS_ONE;
 
     axis->high_speed_loop_cb = do_current_mode_sensored_high_speed_loop;
@@ -180,7 +182,6 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
                                      0,
                                      &a, &b, &u, &v, &w,
                                      axis->max_voltage,
-                                     axis->biased_dc_link_voltage,
                                      axis->dc_link_to_normalized);
     axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);
     esp_foc_sleep_ms(500);

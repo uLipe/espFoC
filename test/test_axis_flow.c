@@ -48,7 +48,6 @@ TEST_CASE("axis init: inverter and rotor mocks called", "[espFoC][axis_flow]")
     TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 0.0f, q16_to_float(mock_inv.last_v_w));
     TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 1.0f, q16_to_float(axis.dc_link_voltage));
     TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 20000.0f, q16_to_float(axis.inv_dt));
-    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, (2.0f * 3.14159265f) / 4096.0f, q16_to_float(axis.shaft_ticks_to_radians_ratio));
 }
 
 TEST_CASE("axis align: enable and set_voltages sequence", "[espFoC][axis_flow]")

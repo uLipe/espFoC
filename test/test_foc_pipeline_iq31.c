@@ -48,7 +48,7 @@ static void run_q16_pipeline_step(float angle_rad,
 
     esp_foc_modulate_dq_voltage(sq, cq, ud_q, uq_q,
                                      &ua_q, &ub_q, du, dv, dw,
-                                     vmax, 0, norm);
+                                     vmax, norm);
 }
 
 static void setup_pid_filters(esp_foc_pid_controller_t *pid_d,

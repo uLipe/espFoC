@@ -37,7 +37,7 @@ static void inverter_isr(void *data)
         axis->downsampling_low_speed--;
         if(!axis->downsampling_low_speed) {
             axis->downsampling_low_speed = ESP_FOC_LOW_SPEED_DOWNSAMPLING;
-            esp_foc_send_notification(axis->low_speed_ev);
+            esp_foc_send_notification_from_isr(axis->low_speed_ev);
         }
     }
 }
@@ -57,21 +57,20 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
     q16_t iv_q16;
     q16_t iw_q16;
     q16_t current_speed_q16;
-    uint64_t current_timestamp = 0;
+    uint64_t current_timestamp;
     bool no_isensor = (axis->isensor_driver == NULL) ? true : false;
 
     axis->low_speed_ev = esp_foc_get_event_handle();
     axis->downsampling_low_speed = ESP_FOC_LOW_SPEED_DOWNSAMPLING;
+    current_timestamp = esp_foc_now_useconds();
 
-    ESP_LOGI(tag,"Starting the current mode sensored low speed loop");
+    ESP_LOGI(tag,"Starting sensored FOC loop");
 
     q16_t ticks_q16 = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
     axis->rotor_shaft_ticks = ticks_q16;
     axis->rotor_position = q16_mul(ticks_q16, axis->natural_direction);
     axis->rotor_position_prev = axis->rotor_position;
     axis->current_speed = 0;
-
-    ESP_LOGI(tag,"Starting current mode sensored high speed loop");
 
     axis->inverter_driver->set_inverter_callback(axis->inverter_driver,
         inverter_isr,
@@ -189,7 +188,6 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
                         &u_v_q16,
                         &u_w_q16,
                         axis->max_voltage,
-                        axis->biased_dc_link_voltage,
                         axis->dc_link_to_normalized);
 
         axis->u_alpha.raw = u_alpha_q16;

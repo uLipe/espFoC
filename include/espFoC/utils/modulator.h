@@ -3,7 +3,7 @@
  */
 /**
  * @file modulator.h
- * @brief DQ voltage modulation and ABC→DQ current conversion (Q16.16).
+ * @brief DQ voltage modulation and ABC->DQ current conversion (Q16.16).
  */
 #pragma once
 
@@ -24,10 +24,8 @@ static inline void esp_foc_modulate_dq_voltage(q16_t sin,
                                                q16_t *v_v,
                                                q16_t *v_w,
                                                q16_t vmax,
-                                               q16_t bias,
                                                q16_t normalization_scale)
 {
-    (void)bias;
     q16_t vd = v_d;
     q16_t vq = v_q;
     esp_foc_limit_voltage_q16(&vd, &vq, vmax);

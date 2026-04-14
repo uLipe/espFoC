@@ -132,11 +132,6 @@ static void set_inverter_callback(esp_foc_inverter_t *self,
     obj->arg = argument;
 }
 
-static void phase_remap(esp_foc_inverter_t *self)
-{
-    (void)self;
-}
-
 static uint32_t get_inverter_pwm_rate(esp_foc_inverter_t *self)
 {
     (void)self;
@@ -187,7 +182,6 @@ esp_foc_inverter_t *inverter_6pwm_mpcwm_new(int gpio_u_high, int gpio_u_low,
     obj->interface.get_dc_link_voltage = get_dc_link_voltage;
     obj->interface.set_voltages = set_voltages;
     obj->interface.set_inverter_callback = set_inverter_callback;
-    obj->interface.phase_remap = phase_remap;
     obj->interface.get_inverter_pwm_rate = get_inverter_pwm_rate;
     obj->interface.enable = inverter_enable;
     obj->interface.disable = inverter_disable;

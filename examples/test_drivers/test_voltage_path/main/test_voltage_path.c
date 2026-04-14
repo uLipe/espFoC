@@ -33,7 +33,6 @@ void test_vdq_pipeline_single(float vd_in,
                                 &valpha, &vbeta,
                                 &da, &db, &dc,
                                 q16_from_float(vmax),
-                                q16_from_float(vbus / 2.0f),
                                 q16_from_float(1.0f / vbus));
 
     float da_f = q16_to_float(da);

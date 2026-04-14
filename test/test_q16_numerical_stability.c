@@ -316,7 +316,7 @@ TEST_CASE("full pipeline q16: 10000 steps bounded and deterministic", "[espFoC][
                                        esp_foc_low_pass_filter_update(&filt_d, id));
 
         q16_t ua, ub, du, dv, dw;
-        esp_foc_modulate_dq_voltage(sq, cq, ud, uq, &ua, &ub, &du, &dv, &dw, vmax, 0, norm);
+        esp_foc_modulate_dq_voltage(sq, cq, ud, uq, &ua, &ub, &du, &dv, &dw, vmax, norm);
 
         TEST_ASSERT_TRUE(q16_to_float(du) >= 0.0f && q16_to_float(du) <= 1.0f);
         TEST_ASSERT_TRUE(q16_to_float(dv) >= 0.0f && q16_to_float(dv) <= 1.0f);
