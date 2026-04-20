@@ -157,8 +157,14 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
             if (!axis->skip_torque_control) {
                 q16_t i_q_filt_q16 = esp_foc_low_pass_filter_update(&axis->current_filters[0], i_q_q16);
                 q16_t i_d_filt_q16 = esp_foc_low_pass_filter_update(&axis->current_filters[1], i_d_q16);
+#if defined(CONFIG_ESP_FOC_INJECTION_ENABLE)
+                q16_t iq_ref = esp_foc_injection_apply_q16(&axis->injection,
+                                                           axis->target_i_q.raw);
+#else
+                q16_t iq_ref = axis->target_i_q.raw;
+#endif
                 q16_t u_q_q16 = esp_foc_pid_update(&axis->torque_controller[0],
-                                                         axis->target_i_q.raw,
+                                                         iq_ref,
                                                          i_q_filt_q16);
                 q16_t u_d_q16 = esp_foc_pid_update(&axis->torque_controller[1],
                                                          axis->target_i_d.raw,

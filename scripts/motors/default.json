@@ -1,0 +1,16 @@
+{
+  "name": "iPower GBM5208-200T (gimbal reference)",
+  "comment": "Default profile shipped with espFoC. Replace with your motor or add new files in this directory and select via CONFIG_ESP_FOC_MOTOR_PROFILE.",
+  "motor": {
+    "resistance_ohm": 1.08,
+    "inductance_h":   0.0018,
+    "pole_pairs":     11
+  },
+  "control": {
+    "current_bw_hz":  150.0,
+    "v_max_volts":    12.0
+  },
+  "safety": {
+    "min_phase_margin_deg": 30.0
+  }
+}

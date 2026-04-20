@@ -158,13 +158,210 @@ espFoC is designed around **hardware-driven timing**:
 
 ---
 
+## PI Tuning Workflow
+
+espFoC ships with three complementary mechanisms for the current-loop PI:
+build-time autotuning, runtime retune, and a transport-agnostic tuner
+backend with optional signal injection. All three share the same
+**Matched Pole-Zero (MPZ) discrete-time synthesis** so the gains are
+consistent across boot, host tooling, and live retuning.
+
+The closed-form design assumes the standard first-order PMSM current
+plant `G(s) = 1 / (R + L·s)` with ZOH discretization at the loop sample
+period `Ts = decimation / f_pwm`:
+
+```
+alpha = exp(-R*Ts/L)              # discrete plant pole
+beta  = exp(-2*pi*bw_hz*Ts)       # desired closed-loop pole
+Kp    = R*(1 - beta)/(1 - alpha)
+Ki    = R*(1 - beta)/Ts
+```
+
+### 1. Build-time autotuner
+
+Motor profiles live under `scripts/motors/*.json`. Select one with
+`CONFIG_ESP_FOC_MOTOR_PROFILE` and the build runs `scripts/gen_pi_gains.py`,
+emitting `esp_foc_autotuned_gains.h` into the **build directory** (never the
+source tree, defended both by `.gitignore` rules and by the script's
+`--allow-in-tree` guard). The gains are picked up at boot whenever
+`esp_foc_motor_control_settings_t.motor_resistance` and `motor_inductance`
+are zero.
+
+Sample build-time output:
+
+```
+$ python3 scripts/gen_pi_gains.py \
+      --motor scripts/motors/default.json \
+      --output build/.../gen/esp_foc_autotuned_gains.h \
+      --report build/.../gen/esp_foc_autotuned_report.txt \
+      --pwm-rate-hz 20000 --decimation 20
+WARNING: phase margin (with 1-sample delay) is only 36.7 deg.
+espFoC PI autotuner: build/.../esp_foc_autotuned_gains.h generated
+                     (Kp=1.4610 V/A, Ki=659.17 V/(A*s), PM_delay=36.7 deg)
+```
+
+The report sidecar captures the full design context:
+
+```
+espFoC PI autotuning report
+===========================
+Profile     : iPower GBM5208-200T (gimbal reference) (default.json)
+Motor       : R = 1.080000 ohm, L = 1800.000 uH
+Loop        : PWM = 20000 Hz, decimation = 20, Ts = 1000 us
+Target BW   : 150.000 Hz (bw*Ts = 0.1500)
+V max       : 12.000 V
+
+Discrete plant pole alpha = exp(-R*Ts/L) = 0.548812
+Closed-loop pole    beta  = exp(-w_bw*Ts) = 0.389661
+
+Kp                 = 1.460955 V/A
+Ki                 = 659.166 V/(A*s)
+Integrator limit   = 12.000 V
+
+Phase margin (no delay)        : 72.2 deg
+Phase margin (1-sample delay)  : 36.7 deg
+```
+
+The script aborts the build when the design is unsafe. Two examples:
+
+```
+# bw above Nyquist: bw_hz * Ts >= 0.5
+ERROR: design failed: bandwidth 1000.0 Hz exceeds Nyquist for Ts=1000.0us
+       (bw*Ts=1.000 >= 0.5)
+exit=4
+
+# phase margin (with 1-sample delay) below the profile's safety floor
+ERROR: phase margin (with 1-sample delay) 27.1 deg < required 60.0 deg.
+       Reduce target bandwidth or revisit the motor profile.
+exit=5
+```
+
+### 2. Runtime retune API
+
+`include/espFoC/esp_foc_axis_tuning.h` exposes three primitives:
+
+```c
+esp_foc_axis_retune_current_pi_q16(axis, R_q16, L_q16, bw_hz_q16);
+esp_foc_axis_set_current_pi_gains_q16(axis, Kp, Ki, integrator_limit);
+esp_foc_axis_get_current_pi_gains_q16(axis, &Kp, &Ki, &lim);
+```
+
+`retune` invokes the same MPZ math the Python generator uses (now in
+fixed-point Q16, `source/motor_control/esp_foc_design_mpz.c`) and swaps
+the gains atomically through a critical section. The integrator and
+previous-error history are reset to keep the post-swap response
+well-defined.
+
+### 3. Tuner backend & signal injection
+
+Behind `CONFIG_ESP_FOC_TUNER_ENABLE`, `esp_foc_tuner.c` exposes a
+transport-agnostic request handler that maps to read / write / exec
+opcodes (`include/espFoC/esp_foc_tuner.h`). Three weak callbacks
+(`esp_foc_tuner_init_bus_callback`, `_recv_callback`, `_send_callback`)
+let the application plug UART, USB-CDC, BLE or TCP without touching
+the core.
+
+With `CONFIG_ESP_FOC_INJECTION_ENABLE` the q-axis reference can be
+augmented with a step or chirp from `esp_foc_axis_inject_step_q16()` /
+`esp_foc_axis_inject_chirp_q16()`, which closes the loop with the
+existing scope: arm injection, capture, plot, repeat.
+
+### 4. End-to-end demo (runs in QEMU)
+
+`examples/tuner_demo` is a self-contained app that exercises every
+piece above. From the example directory:
+
+```bash
+. $IDF_PATH/export.sh
+idf.py set-target esp32
+idf.py build
+python run_qemu.py
+```
+
+Output captured from QEMU:
+
+```
+I (..) tuner-demo: espFoC tuner demo starting (PWM=20000 Hz, decimation=20)
+I (..) tuner-demo: === Initial gains (build-time autogen, default.json) ===
+I (..) tuner-demo: autogen default        Kp=   1.4610 V/A   Ki=   659.17 V/(A*s)   ILim= 12.00 V
+I (..) tuner-demo: === Runtime retune via MPZ helper ===
+I (..) tuner-demo: retune iPower (R=1.08,L=1.8mH): R=1.080 L=1.8000mH bw=150Hz
+I (..) tuner-demo: iPower (R=1.08,L=1.8mH) Kp=   1.4613 V/A   Ki=   659.15 V/(A*s)   ILim=  0.58 V
+I (..) tuner-demo: retune low-R servo  (R=0.25,L=0.8mH): R=0.250 L=0.8000mH bw=200Hz
+I (..) tuner-demo: low-R servo  (R=0.25,L=0.8mH) Kp=   0.6618 V/A   Ki=   178.85 V/(A*s)   ILim=  0.58 V
+I (..) tuner-demo: retune high-L motor (R=0.80,L=5.0mH): R=0.800 L=5.0000mH bw=50Hz
+I (..) tuner-demo: high-L motor (R=0.80,L=5.0mH) Kp=   1.4600 V/A   Ki=   215.67 V/(A*s)   ILim=  0.58 V
+I (..) tuner-demo: Asking for a bandwidth above Nyquist (bw=600Hz, Ts=1ms):
+I (..) tuner-demo: retune above-nyquist demo: R=0.500 L=1.0000mH bw=600Hz
+W (..) tuner-demo: retune REJECTED (err=-2) -- bw probably above Nyquist for the current loop period
+I (..) tuner-demo: === Tuner protocol round-trip ===
+I (..) tuner-demo: READ Kp -> 1.4600 V/A
+I (..) tuner-demo: WRITE Kp = 2.345 (manual override)
+I (..) tuner-demo: READ Kp -> 2.3450 V/A (after write)
+I (..) tuner-demo: EXEC RECOMPUTE_GAINS R=1.08 L=1.8mH bw=150Hz
+I (..) tuner-demo: READ Kp -> 1.4613 V/A (after MPZ recompute)
+I (..) tuner-demo: READ Ki -> 659.15 V/(A*s)
+I (..) tuner-demo: === Signal injection (step) ===
+I (..) tuner-demo: arm_step amplitude=0.5A duration=5ms -> OK
+I (..) tuner-demo: step sample[0] = 0.500 A
+I (..) tuner-demo: step sample[1] = 0.500 A
+I (..) tuner-demo: step sample[2] = 0.500 A
+I (..) tuner-demo: step sample[3] = 0.500 A
+I (..) tuner-demo: step sample[4] = 0.000 A
+I (..) tuner-demo: === Signal injection (chirp 100->500 Hz) ===
+I (..) tuner-demo: arm_chirp amplitude=0.25A 100->500Hz over 10ms -> OK
+I (..) tuner-demo: chirp observed peak = 0.250 A (expected ~0.25)
+I (..) tuner-demo: === Demo complete ===
+```
+
+A few sanity checks on those numbers:
+
+- **autogen default vs iPower retune** produce the same Kp/Ki because
+  `default.json` *is* the iPower gimbal motor — the runtime path matches
+  the build-time path within Q16 quantization (1 LSB).
+- **low-R / high-L** motors yield clearly different Kp values, showing the
+  MPZ design adapting to the plant.
+- The integrator limit drops from `12.00 V` (build-time, from JSON
+  `v_max_volts`) to `0.58 V` after runtime retune. That's expected: the
+  runtime path uses the **actual** `axis->max_voltage`, derived from the
+  inverter's reported DC link (here `1.0 V` with SVPWM →
+  `1/√3 ≈ 0.577 V`).
+- The above-Nyquist request is rejected cleanly (`err=-2`) instead of
+  silently corrupting the gains.
+- Step injection delivers exactly five samples at 0.5 A then auto-disables
+  (5 ms @ 1 ms loop period, less the Q16 quantization of `Ts`).
+- Chirp peak matches the configured amplitude (0.25 A).
+
+### Cross-validation Python ↔ C
+
+`test/golden_motors.json` is the single source of truth for the regression
+table. `scripts/verify_goldens.py` checks both that the Python math agrees
+with the JSON and that the C test mirror in `test/test_design_mpz.c`
+matches it byte-for-byte:
+
+```
+$ python3 scripts/verify_goldens.py
+All 5 goldens agree across JSON, Python math, and C mirror.
+```
+
+---
+
 ## Examples
 
 The repository includes multiple examples demonstrating:
-- Sensored mode
-- Sensorless mode
-- Inverter and sensor bring-up
-- **unit_test_runner**: app that runs the Unity unit tests (for CI or local validation). Build with `idf.py -D TEST_COMPONENTS=espFoC build` from `examples/unit_test_runner`.
+- Sensored mode (`examples/axis_sensored`)
+- Sensorless mode (`examples/axis_sensorless`) — **temporarily disabled**:
+  the rotor observer is not yet wired into the axis. The example aborts at
+  compile time with a clear error unless `CONFIG_EXAMPLE_BUILD_INCOMPLETE_SENSORLESS`
+  is set, and even then app_main logs an error and returns without driving
+  the inverter.
+- Inverter and sensor bring-up (`examples/test_drivers`)
+- **tuner_demo** (`examples/tuner_demo`): self-contained app that exercises
+  build-time autogen, runtime retune, the tuner protocol, and signal
+  injection. Runs unchanged in QEMU via `python run_qemu.py`.
+- **unit_test_runner**: app that runs the Unity unit tests (for CI or local
+  validation). Build with `idf.py -D TEST_COMPONENTS=espFoC build` from
+  `examples/unit_test_runner`.
 
 Examples are located in the `examples/` directory.
 

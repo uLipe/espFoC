@@ -4,6 +4,16 @@
  * Copyright (c) 2021 Felipe Neves
  */
 
+#include "sdkconfig.h"
+
+#if !defined(CONFIG_EXAMPLE_BUILD_INCOMPLETE_SENSORLESS)
+#error "Sensorless support is temporarily disabled: the rotor observer is " \
+       "not yet wired into the axis, so this example cannot run a closed " \
+       "loop. Enable CONFIG_EXAMPLE_BUILD_INCOMPLETE_SENSORLESS via " \
+       "menuconfig (or sdkconfig.defaults) to compile it anyway during " \
+       "observer development."
+#endif
+
 #include "esp_log.h"
 #include "esp_err.h"
 
@@ -148,26 +158,11 @@ static void initialize_foc_drivers(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Initializing the espFoC sensorless controller");
-    ESP_LOGW(TAG, "Sensorless mode requires observer integration (WIP)");
-
-    settings.motor_inductance = q16_from_float(0.0018f);
-    settings.motor_resistance = q16_from_float(1.08f);
-
-    initialize_foc_drivers();
-
-    /*
-     * Sensorless requires a rotor position observer instead of a physical
-     * encoder.  Full observer integration is WIP; this example shows the
-     * API shape but will not run a closed loop until the observer chain
-     * is connected to the axis.
-     */
-
-#ifdef CONFIG_ESP_FOC_SCOPE
-    esp_foc_scope_add_channel(&axis.i_u, 1);
-    esp_foc_scope_add_channel(&axis.i_v, 2);
-    esp_foc_scope_add_channel(&axis.i_w, 3);
-#endif
-
-    ESP_LOGI(TAG, "Sensorless startup placeholder complete");
+    ESP_LOGE(TAG, "Sensorless support is temporarily disabled.");
+    ESP_LOGE(TAG, "The rotor observer is not yet wired into the axis, so this");
+    ESP_LOGE(TAG, "binary will NOT run a closed loop. Use examples/axis_sensored");
+    ESP_LOGE(TAG, "for a working setup, or extend the observer chain in");
+    ESP_LOGE(TAG, "source/motor_control/observers/ before re-enabling sensorless.");
+    ESP_LOGW(TAG, "Aborting app_main without touching the inverter for safety.");
+    return;
 }

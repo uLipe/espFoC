@@ -6,6 +6,7 @@
 #include "espFoC/esp_foc_units_q16.h"
 #include "espFoC/utils/pid_controller.h"
 #include "espFoC/utils/ema_low_pass_filter.h"
+#include "espFoC/esp_foc_injection.h"
 #include "espFoC/drivers/inverter_interface.h"
 #include "espFoC/drivers/current_sensor_interface.h"
 #include "espFoC/drivers/rotor_sensor_interface.h"
@@ -79,6 +80,8 @@ struct esp_foc_axis_s {
     esp_foc_pid_controller_t torque_controller[2];
     esp_foc_lp_filter_t velocity_filter;
     esp_foc_lp_filter_t current_filters[2];
+
+    esp_foc_injection_t injection;
 
     esp_foc_inverter_t *inverter_driver;
     esp_foc_rotor_sensor_t *rotor_sensor_driver;

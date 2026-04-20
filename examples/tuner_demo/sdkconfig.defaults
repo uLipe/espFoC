@@ -1,0 +1,13 @@
+# Disable task watchdog so the demo task can run without periodic feed
+CONFIG_ESP_TASK_WDT_EN=n
+
+# Enable runtime tuner backend
+CONFIG_ESP_FOC_TUNER_ENABLE=y
+
+# Enable signal injection on the q-axis reference
+CONFIG_ESP_FOC_INJECTION_ENABLE=y
+
+# Build-time autotuning (default profile)
+CONFIG_ESP_FOC_USE_AUTOGEN_GAINS=y
+CONFIG_ESP_FOC_AUTOGEN_PWM_RATE_HZ=20000
+CONFIG_ESP_FOC_AUTOGEN_DECIMATION=20
