@@ -192,6 +192,17 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "Initializing espFoC sensored axis (IQ31)");
 
+    /* Two equally valid options for the current-loop PI gains:
+     *
+     *   1) Provide motor R, L below. esp_foc_initialize_axis() will compute
+     *      Kp/Ki via the legacy continuous-time formula (default path).
+     *
+     *   2) Leave motor_resistance/motor_inductance at 0 and rely on the
+     *      build-time autotuner (CONFIG_ESP_FOC_USE_AUTOGEN_GAINS=y, default).
+     *      The MPZ-designed gains for the motor profile selected via
+     *      CONFIG_ESP_FOC_MOTOR_PROFILE (scripts/motors/<NAME>.json) are
+     *      injected at boot. Live retune is also available via
+     *      esp_foc_axis_retune_current_pi_q16(). */
     settings.motor_inductance = q16_from_float(0.0018f);
     settings.motor_resistance = q16_from_float(1.08f);
     settings.motor_inertia = q16_from_float(0.0001f);

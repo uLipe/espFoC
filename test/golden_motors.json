@@ -1,0 +1,57 @@
+{
+  "_comment": "Source of truth for the MPZ synthesis golden table. Shared by test_design_mpz.c (hardcoded mirror) and scripts/verify_goldens.py (authoritative computation).",
+  "_kp_tol_relative": 0.03,
+  "_ki_tol_relative": 0.03,
+  "motors": [
+    {
+      "name": "gimbal_iPower",
+      "r_ohm": 1.080,
+      "l_h": 0.00180,
+      "ts_us": 500,
+      "bw_hz": 150.0,
+      "v_max": 12.0,
+      "kp_expected": 1.565825,
+      "ki_expected": 811.667
+    },
+    {
+      "name": "servo_low_R",
+      "r_ohm": 0.250,
+      "l_h": 0.00080,
+      "ts_us": 100,
+      "bw_hz": 500.0,
+      "v_max": 24.0,
+      "kp_expected": 2.190654,
+      "ki_expected": 673.993
+    },
+    {
+      "name": "scooter_high_R",
+      "r_ohm": 0.500,
+      "l_h": 0.00050,
+      "ts_us": 200,
+      "bw_hz": 300.0,
+      "v_max": 48.0,
+      "kp_expected": 0.866330,
+      "ki_expected": 785.195
+    },
+    {
+      "name": "fast_bldc",
+      "r_ohm": 0.500,
+      "l_h": 0.00100,
+      "ts_us": 100,
+      "bw_hz": 600.0,
+      "v_max": 24.0,
+      "kp_expected": 3.219952,
+      "ki_expected": 1570.389
+    },
+    {
+      "name": "lo_bw_big_L",
+      "r_ohm": 0.800,
+      "l_h": 0.00500,
+      "ts_us": 1000,
+      "bw_hz": 50.0,
+      "v_max": 24.0,
+      "kp_expected": 1.458700,
+      "ki_expected": 215.678
+    }
+  ]
+}

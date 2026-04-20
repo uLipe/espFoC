@@ -63,6 +63,60 @@ menu "espFoC Settings"
         bool "Enable open loop simulated observer on sensorless mode"
         default n
 
+    config ESP_FOC_TUNER_ENABLE
+        bool "Enable runtime PI tuner backend"
+        default n
+        help
+            Compiles esp_foc_tuner.c (transport-agnostic request handler
+            for live PI tuning). User code attaches axes via
+            esp_foc_tuner_attach_axis() and calls
+            esp_foc_tuner_handle_request() from a transport task.
+
+    config ESP_FOC_INJECTION_ENABLE
+        bool "Enable signal injection on the q-axis current reference"
+        default n
+        help
+            Compiles the injection hook in the current-loop. When enabled
+            the tuner (or any other caller) can arm step or chirp
+            injections via esp_foc_axis_inject_*() to capture step or
+            frequency responses through the scope.
+
+    menu "Build-time PI autotuning"
+
+        config ESP_FOC_USE_AUTOGEN_GAINS
+            bool "Use build-time autotuned PI gains as fallback"
+            default y
+            help
+                When enabled, esp_foc_initialize_axis() falls back to the
+                MPZ-designed Kp/Ki/integrator_limit produced by
+                scripts/gen_pi_gains.py whenever the runtime
+                esp_foc_motor_control_settings_t leaves motor_resistance
+                and motor_inductance set to zero.
+
+        config ESP_FOC_MOTOR_PROFILE
+            string "Motor profile name (under scripts/motors/)"
+            depends on ESP_FOC_USE_AUTOGEN_GAINS
+            default "default"
+            help
+                Selects scripts/motors/<NAME>.json as input to the
+                autotuner. Add new files in that directory to support
+                more motors.
+
+        config ESP_FOC_AUTOGEN_PWM_RATE_HZ
+            int "PWM rate the autotuner assumes [Hz]"
+            depends on ESP_FOC_USE_AUTOGEN_GAINS
+            default 20000
+
+        config ESP_FOC_AUTOGEN_DECIMATION
+            int "Current loop decimation factor the autotuner assumes"
+            depends on ESP_FOC_USE_AUTOGEN_GAINS
+            default 20
+            help
+                Should match ESP_FOC_LOW_SPEED_DOWNSAMPLING in
+                esp_foc_controls.h. Use 1 for ISR-mode control loops.
+
+    endmenu
+
 endmenu
 
 

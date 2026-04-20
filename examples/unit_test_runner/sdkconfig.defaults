@@ -1,2 +1,8 @@
 # Disable task watchdog so unity_run_menu() (waiting for serial input) does not trigger it
 CONFIG_ESP_TASK_WDT_EN=n
+
+# Enable tuner backend for unit tests
+CONFIG_ESP_FOC_TUNER_ENABLE=y
+
+# Enable signal injection hook for unit tests
+CONFIG_ESP_FOC_INJECTION_ENABLE=y
