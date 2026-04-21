@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..link import LinkReader
+from .crosshair import attach_crosshair
 
 
 # 8-entry palette tuned for legibility on a dark pyqtgraph background.
@@ -99,6 +100,9 @@ class ScopePanel(QWidget):
         self._plot.setLabel('left', "amplitude")
         self._plot.setLabel('bottom', "time", units='s')
         self._plot.showGrid(x=True, y=True, alpha=0.3)
+        self._crosshair = attach_crosshair(
+            self._plot,
+            fmt=lambda x, y: f"t = {x:.3f} s\ny = {y:+.4g}")
         root.addWidget(self._plot, 1)
 
         # Render timer keeps the Qt thread independent from the reader
