@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..link import LinkReader
+from .crosshair import attach_crosshair
 
 
 _HEX_COLOR = "#6e7681"
@@ -99,6 +100,9 @@ class SvmPanel(QWidget):
         self._plot.setLabel('left', "β", units='V')
         self._plot.setLabel('bottom', "α", units='V')
         self._plot.showGrid(x=True, y=True, alpha=0.15)
+        self._hex_crosshair = attach_crosshair(
+            self._plot,
+            fmt=lambda x, y: f"α = {x:+.3f}\nβ = {y:+.3f}")
 
         self._hex_curve = self._plot.plot(
             pen=pg.mkPen(QColor(_HEX_COLOR), width=2))
@@ -113,16 +117,28 @@ class SvmPanel(QWidget):
 
         # Three static phase axes (A at 0°, B at 120°, C at 240°) — the
         # "rails" along which the instantaneous phase values project.
+        # Drawn in a neutral dim colour so they guide the eye without
+        # competing with the bright phase-projection vectors that sit
+        # on top of them.
         self._phase_axis_curves = tuple(
-            self._plot.plot(pen=pg.mkPen(QColor(c), width=1,
+            self._plot.plot(pen=pg.mkPen(QColor("#555759"), width=1,
                                           style=Qt.DashLine))
-            for c in _PHASE_COLORS)
+            for _ in _PHASE_COLORS)
         # Dynamic phase projection vectors: length = u_u / u_v / u_w,
-        # direction = phase-axis unit vector. Drawn under the resultant
-        # so the orange arrow stays on top.
+        # direction = phase-axis unit vector. These carry the per-phase
+        # colour so you can tell ch0/ch1/ch2 apart at a glance.
         self._phase_vec_curves = tuple(
-            self._plot.plot(pen=pg.mkPen(QColor(c), width=2))
+            self._plot.plot(pen=pg.mkPen(QColor(c), width=3))
             for c in _PHASE_COLORS)
+        self._phase_vec_tips = pg.ScatterPlotItem(
+            size=9, symbol='o', pen=None)
+        # Prime with three points at origin so pyqtgraph accepts the
+        # per-point brush list (3 items) — positions are updated every
+        # render tick.
+        self._phase_vec_tips.setData(
+            pos=np.zeros((3, 2)),
+            brush=[pg.mkBrush(QColor(c)) for c in _PHASE_COLORS])
+        self._plot.addItem(self._phase_vec_tips)
 
         self._trail_curve = self._plot.plot(
             pen=pg.mkPen(QColor(_TRAIL_COLOR), width=1))
@@ -157,6 +173,9 @@ class SvmPanel(QWidget):
         self._wave_plot.setLabel('bottom', "time", units='s')
         self._wave_plot.showGrid(x=True, y=True, alpha=0.2)
         self._wave_plot.addLegend()
+        self._wave_crosshair = attach_crosshair(
+            self._wave_plot,
+            fmt=lambda x, y: f"t = {x:.4f} s\nu = {y:+.3f} V")
         self._uu_curve = self._wave_plot.plot(
             pen=pg.mkPen(QColor(_PHASE_COLORS[0]), width=2), name="u_u (ch0)")
         self._uv_curve = self._wave_plot.plot(
@@ -245,9 +264,13 @@ class SvmPanel(QWidget):
             phases = (self._uu_buf[-1],
                       self._uv_buf[-1],
                       self._uw_buf[-1])
+            tip_positions = []
             for curve, (dx, dy), mag in zip(self._phase_vec_curves,
                                             self._PHASE_DIRS, phases):
-                curve.setData([0.0, mag * dx], [0.0, mag * dy])
+                tip = (mag * dx, mag * dy)
+                curve.setData([0.0, tip[0]], [0.0, tip[1]])
+                tip_positions.append(tip)
+            self._phase_vec_tips.setData(pos=np.array(tip_positions))
 
         # Trail + resultant arrow (drawn on top).
         t_a = np.fromiter(self._alpha_buf, dtype=float,

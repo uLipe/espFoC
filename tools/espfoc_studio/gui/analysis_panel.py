@@ -15,6 +15,7 @@ from ..model import (
     root_locus,
     step_response,
 )
+from .crosshair import attach_crosshair
 
 
 class AnalysisPanel(QWidget):
@@ -36,6 +37,9 @@ class AnalysisPanel(QWidget):
         self._step_plot.showGrid(x=True, y=True, alpha=0.3)
         self._step_curve = self._step_plot.plot(pen=pg.mkPen('#2196f3', width=2))
         self._step_ref = self._step_plot.plot(pen=pg.mkPen('#888', style=Qt.DashLine))
+        self._step_crosshair = attach_crosshair(
+            self._step_plot,
+            fmt=lambda x, y: f"t = {x*1000:.2f} ms\ni = {y:+.4f} A")
 
         self._bode_mag = pg.PlotWidget(title="Open-loop gain |L(jω)|")
         self._bode_mag.setLabel('left', "Magnitude", units='dB')
@@ -43,12 +47,18 @@ class AnalysisPanel(QWidget):
         self._bode_mag.setLogMode(x=True, y=False)
         self._bode_mag.showGrid(x=True, y=True, alpha=0.3)
         self._bode_mag_curve = self._bode_mag.plot(pen=pg.mkPen('#00897b', width=2))
+        self._bode_crosshair = attach_crosshair(
+            self._bode_mag,
+            fmt=lambda x, y: f"f = {10.0**x:.1f} Hz\n|L| = {y:+.2f} dB")
 
         self._pz_plot = pg.PlotWidget(title="Pole / zero map")
         self._pz_plot.setAspectLocked(True)
         self._pz_plot.setLabel('left', "Im(z)")
         self._pz_plot.setLabel('bottom', "Re(z)")
         self._pz_plot.showGrid(x=True, y=True, alpha=0.3)
+        self._pz_crosshair = attach_crosshair(
+            self._pz_plot,
+            fmt=lambda x, y: f"Re = {x:+.3f}\nIm = {y:+.3f}")
         # Unit circle overlay.
         theta = np.linspace(0, 2 * np.pi, 361)
         self._pz_plot.plot(np.cos(theta), np.sin(theta),
@@ -69,6 +79,9 @@ class AnalysisPanel(QWidget):
         self._rl_plot.setLabel('left', "Im(z)")
         self._rl_plot.setLabel('bottom', "Re(z)")
         self._rl_plot.showGrid(x=True, y=True, alpha=0.3)
+        self._rl_crosshair = attach_crosshair(
+            self._rl_plot,
+            fmt=lambda x, y: f"Re = {x:+.3f}\nIm = {y:+.3f}")
         self._rl_plot.plot(np.cos(theta), np.sin(theta),
                            pen=pg.mkPen('#bdbdbd', width=1))
         self._rl_points = pg.ScatterPlotItem(size=6, pen=None,
