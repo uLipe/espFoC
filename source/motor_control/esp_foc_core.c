@@ -184,6 +184,12 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     return ESP_FOC_OK;
 }
 
+/* Minimum encoder deflection considered conclusive when probing for the
+ * natural direction. Expressed in raw encoder counts; AS5600 has 4096
+ * counts/rev so 50 counts is ~4.4 degrees — well above noise but small
+ * enough that a stuck rotor will obviously fail to clear the bar. */
+#define ESP_FOC_DIR_PROBE_MIN_COUNTS 50
+
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 {
     q16_t e_sin, e_cos;
@@ -205,17 +211,66 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     axis->inverter_driver->enable(axis->inverter_driver);
     esp_foc_sleep_ms(500);
 
-    esp_foc_modulate_dq_voltage(e_sin,
-                                     e_cos,
-                                     Q16_ONE,
-                                     0,
-                                     &a, &b, &u, &v, &w,
-                                     axis->max_voltage,
-                                     axis->dc_link_to_normalized);
+    /* Step 1 — park the rotor at electrical angle 0 by driving Vd. */
+    esp_foc_modulate_dq_voltage(e_sin, e_cos,
+                                Q16_ONE, 0,
+                                &a, &b, &u, &v, &w,
+                                axis->max_voltage,
+                                axis->dc_link_to_normalized);
     axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);
     esp_foc_sleep_ms(500);
 
+    /* Step 2 — zero the encoder. The current physical position is now
+     * the firmware's electrical zero. */
     axis->rotor_sensor_driver->set_to_zero(axis->rotor_sensor_driver);
+    int64_t ticks_zero = axis->rotor_sensor_driver->read_accumulated_counts_i64(
+                            axis->rotor_sensor_driver);
+
+    /* Step 3 — probe natural direction by applying a positive Vq pulse.
+     * In a properly aligned PMSM, +Vq produces forward torque. We watch
+     * raw encoder counts to decide whether the encoder counts up or
+     * down on physical forward motion, and set natural_direction so
+     * the computed axis->rotor_position increases in the forward
+     * direction. The settings hint is kept only when the rotor refuses
+     * to move enough to be conclusive (load-stuck or open phase). */
+    q16_t probe_vq = q16_from_float(q16_to_float(axis->max_voltage) * 0.30f);
+    esp_foc_modulate_dq_voltage(e_sin, e_cos,
+                                0, probe_vq,
+                                &a, &b, &u, &v, &w,
+                                axis->max_voltage,
+                                axis->dc_link_to_normalized);
+    axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);
+    esp_foc_sleep_ms(300);
+
+    int64_t ticks_after = axis->rotor_sensor_driver->read_accumulated_counts_i64(
+                             axis->rotor_sensor_driver);
+    int64_t delta = ticks_after - ticks_zero;
+
+    if (delta >= ESP_FOC_DIR_PROBE_MIN_COUNTS) {
+        axis->natural_direction = Q16_ONE;        /* CW */
+        ESP_LOGI(tag, "alignment: natural direction = CW (delta=%lld)",
+                 (long long)delta);
+    } else if (delta <= -ESP_FOC_DIR_PROBE_MIN_COUNTS) {
+        axis->natural_direction = Q16_MINUS_ONE;  /* CCW */
+        ESP_LOGI(tag, "alignment: natural direction = CCW (delta=%lld)",
+                 (long long)delta);
+    } else {
+        ESP_LOGW(tag, "alignment: rotor moved only %lld counts (need >= %d) — "
+                      "keeping the natural_direction hint from settings",
+                 (long long)delta, ESP_FOC_DIR_PROBE_MIN_COUNTS);
+    }
+
+    /* Step 4 — re-park the rotor at electrical 0 and re-zero the
+     * encoder so steady state matches what the control loop expects. */
+    esp_foc_modulate_dq_voltage(e_sin, e_cos,
+                                Q16_ONE, 0,
+                                &a, &b, &u, &v, &w,
+                                axis->max_voltage,
+                                axis->dc_link_to_normalized);
+    axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);
+    esp_foc_sleep_ms(500);
+    axis->rotor_sensor_driver->set_to_zero(axis->rotor_sensor_driver);
+
     axis->rotor_aligned = ESP_FOC_OK;
     axis->inverter_driver->set_voltages(axis->inverter_driver, 0, 0, 0);
     esp_foc_sleep_ms(500);

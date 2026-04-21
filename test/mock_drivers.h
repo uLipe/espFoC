@@ -40,10 +40,20 @@ typedef struct {
     int set_simulation_count_count;
     q16_t last_angle_q16;
     int64_t last_accum_i64;
+    /* Optional scripted return queue for read_accumulated_counts_i64.
+     * Each call pops one entry; once exhausted the mock returns the
+     * natural accumulated value. Used by the alignment direction tests
+     * to simulate rotor motion between probe samples. */
+    int64_t scripted_reads[8];
+    int scripted_count;
+    int scripted_idx;
 } mock_rotor_sensor_t;
 
 void mock_rotor_sensor_init(mock_rotor_sensor_t *m, float counts_per_rev);
 esp_foc_rotor_sensor_t *mock_rotor_sensor_interface(mock_rotor_sensor_t *m);
+void mock_rotor_sensor_script_accumulated(mock_rotor_sensor_t *m,
+                                          const int64_t *seq,
+                                          int n);
 
 typedef struct {
     esp_foc_isensor_t interface;
