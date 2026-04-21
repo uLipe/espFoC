@@ -105,6 +105,13 @@ struct esp_foc_axis_s {
      * isensor driver (per-phase, on raw ADC counts), which is the
      * only placement that survives the move into the PWM ISR. */
     esp_foc_biquad_q16_t velocity_filter;
+    /* Current-sense low-pass cutoff (Hz, q16) currently programmed in
+     * the isensor driver. The driver owns the biquad coefficients;
+     * this field is just so the tuner can read the value back without
+     * a driver-side accessor. Sample rate fed to the biquad designer
+     * is current_filter_fs_hz_q16, captured at init. */
+    q16_t current_filter_fc_hz_q16;
+    q16_t current_filter_fs_hz_q16;
 
     esp_foc_injection_t injection;
 

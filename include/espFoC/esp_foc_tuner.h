@@ -49,6 +49,7 @@ typedef enum {
     ESP_FOC_TUNER_PARAM_KI_Q16          = 0x0011, /* read q16 */
     ESP_FOC_TUNER_PARAM_INT_LIM_Q16     = 0x0012, /* read q16 */
     ESP_FOC_TUNER_PARAM_V_MAX_Q16       = 0x0013, /* read q16 */
+    ESP_FOC_TUNER_PARAM_I_FILTER_FC_Q16 = 0x0014, /* read q16 (Hz, current LPF) */
     ESP_FOC_TUNER_PARAM_AXIS_STATE      = 0x0040, /* read u8 bitmap */
     ESP_FOC_TUNER_PARAM_AXIS_LAST_ERR   = 0x0041, /* read i8 (esp_foc_err_t) */
     ESP_FOC_TUNER_PARAM_NVS_PRESENT     = 0x0042, /* read u8 (0/1) */
@@ -62,6 +63,9 @@ typedef enum {
     ESP_FOC_TUNER_WRITE_KP_Q16          = 0x0020, /* write q16 */
     ESP_FOC_TUNER_WRITE_KI_Q16          = 0x0021, /* write q16 */
     ESP_FOC_TUNER_WRITE_INT_LIM_Q16     = 0x0022, /* write q16 */
+    ESP_FOC_TUNER_WRITE_I_FILTER_FC_Q16 = 0x0023, /* write q16 Hz; redesigns
+                                                   * the per-phase Butterworth
+                                                   * inside the isensor driver */
 
     /* Write: tuner-driven motion targets (only honored while override active) */
     ESP_FOC_TUNER_WRITE_TARGET_ID_Q16   = 0x0060, /* write q16 (current ref) */

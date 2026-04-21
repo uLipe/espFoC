@@ -202,6 +202,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                                 current_filter_fc_hz,
                                                 loop_fs_hz);
     }
+    axis->current_filter_fc_hz_q16 = q16_from_float(current_filter_fc_hz);
+    axis->current_filter_fs_hz_q16 = q16_from_float(loop_fs_hz);
 
     axis->motor_pole_pairs = settings.motor_pole_pairs;
 
