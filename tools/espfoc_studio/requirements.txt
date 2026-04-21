@@ -1,0 +1,7 @@
+# Runtime dependencies for espfoc_studio (CLI + GUI).
+pyserial>=3.5
+numpy>=1.23
+
+# GUI only; safe to skip when using the CLI headlessly.
+PySide6>=6.5
+pyqtgraph>=0.13

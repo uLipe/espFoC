@@ -344,6 +344,23 @@ $ python3 scripts/verify_goldens.py
 All 5 goldens agree across JSON, Python math, and C mirror.
 ```
 
+### 5. TunerStudio (host GUI + CLI)
+
+`tools/espfoc_studio/` hosts the PySide6 + pyqtgraph desktop app and the
+`tunerctl` CLI that drive the firmware through the runtime tuner. The
+whole stack (link codec, protocol client, motor model, GUI) is pure
+Python and can be exercised against a simulated firmware with no hardware
+attached:
+
+```
+pip install -r tools/espfoc_studio/requirements.txt
+PYTHONPATH=tools python3 -m espfoc_studio.gui --demo
+```
+
+Swap `--demo` for `--port /dev/ttyACM0` once you flash a board built with
+`CONFIG_ESP_FOC_BRIDGE_UART` or `CONFIG_ESP_FOC_BRIDGE_USBCDC`. See
+`tools/espfoc_studio/README.md` for the full layout.
+
 ---
 
 ## Examples
