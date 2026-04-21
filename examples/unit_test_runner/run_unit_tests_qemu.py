@@ -21,21 +21,33 @@ def main() -> int:
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
     # Run idf.py qemu; it will build first if needed
-    child = pexpect.spawn("idf.py qemu", timeout=150, encoding="utf-8", codec_errors="replace", cwd=script_dir)
+    child = pexpect.spawn("idf.py qemu", timeout=300, encoding="utf-8",
+                          codec_errors="replace", cwd=script_dir)
     child.logfile = sys.stdout
 
     try:
-        child.expect("Press ENTER to see the list of tests.", timeout=60)
+        child.expect("Press ENTER to see the list of tests.", timeout=120)
     except (pexpect.TIMEOUT, pexpect.EOF) as e:
         print(f"Failed to get Unity menu: {e}")
         return 1
 
+    # Press Enter to print the menu, then wait for Unity's input prompt
+    # before sending "*". Doing them back-to-back is race-prone under CI
+    # I/O buffering and Unity silently discards the "*" if it arrives
+    # before the menu prompt is ready.
     child.sendline("")
+    try:
+        child.expect("Enter test for running", timeout=60)
+    except (pexpect.TIMEOUT, pexpect.EOF):
+        print("Unity menu prompt never appeared")
+        return 1
     child.sendline("*")
 
-    # Match "0 Failures" in the summary line (success)
+    # Match "0 Failures" in the summary line (success). QEMU runs
+    # tests serially; ~200 tests need comfortably more than two minutes
+    # on a loaded CI runner, so we budget five.
     try:
-        child.expect(re.compile(r"\d+ Tests 0 Failures"), timeout=120)
+        child.expect(re.compile(r"\d+ Tests 0 Failures"), timeout=300)
     except pexpect.TIMEOUT:
         print("Timeout waiting for test results or tests failed (non-zero failures).")
         return 1
