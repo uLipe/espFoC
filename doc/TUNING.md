@@ -141,9 +141,60 @@ python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 align
 python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 \
       persist --r 1.08 --l 0.0018 --bw 150
 python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 firmware-type
+
+# read or program the per-phase current LPF cutoff (Hz)
+python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 cutoff
+python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 cutoff --set 500
 ```
 
 Set `PYTHONPATH=tools` if you have not installed the package.
+
+## Current sense filtering
+
+Every phase current sample lands inside the isensor driver and is
+pushed straight through a 2nd-order Butterworth low-pass biquad
+(`include/espFoC/utils/biquad_q16.h`) before the gain conversion.
+This is the single shaping stage between the ADC counts and the
+Clarke / Park / PI pipeline: the EMA on i_q / i_d that 2.x kept
+between Park and the PI is gone, and so is the moving-average ring
+that used to sit on top of the ADC samples themselves. One filter,
+one place, no buried double smoothing.
+
+The biquad runs in Direct-Form-II Transposed in Q16 (5 multiplies,
+4 adds, no internal accumulator drift). Coefficients come from a
+prewarped bilinear design:
+
+```
+r  = tan(pi * fc / fs)
+a0 = 1 + sqrt(2)*r + r^2
+b0 = b2 = r^2 / a0
+b1 = 2*r^2 / a0
+a1 = 2*(r^2 - 1) / a0
+a2 = (1 - sqrt(2)*r + r^2) / a0
+```
+
+DC gain is exactly unity by construction; the design places a
+perfect zero at Nyquist (Butterworth LPF has H(-1) = 0). All
+coefficients live in [-2, +2], so Q16.16 keeps ~14 bits of
+headroom for any sane fc / fs ratio.
+
+Boot precedence for the cutoff, identical to the gain pipeline:
+
+1. NVS calibration overlay (when `current_filter_fc_hz != 0`).
+2. `CONFIG_ESP_FOC_CURRENT_FILTER_CUTOFF_HZ` (default 300 Hz).
+
+The runtime tuner can override at any time
+(`WRITE_I_FILTER_FC_Q16` or `tunerctl cutoff --set`); persisting
+through `CMD_PERSIST_NVS` stamps the live value into the
+calibration blob so the next boot picks it back up.
+
+The same biquad replaces the EMA across the rest of the library:
+the velocity estimate uses `CONFIG_ESP_FOC_VELOCITY_FILTER_CUTOFF_HZ`
+(default 50 Hz), and the PLL / KF observers swap their internal
+EMAs for biquads with the same nominal cutoffs they used before.
+Operators with hand-tuned observer cutoffs may want to revisit:
+the new filter has the same -3 dB position but a sharper roll-off
+(40 dB/decade vs 20 dB/decade) and slightly different phase.
 
 ## Alignment with natural-direction probe
 

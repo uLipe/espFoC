@@ -4,6 +4,25 @@ This file is used to generate GitHub releases. All versions from 2.0.0 onward ar
 
 ---
 
+## Unreleased
+
+### BREAKING CHANGES (major)
+
+- **EMA helper retired.** `include/espFoC/utils/ema_low_pass_filter.h` and `esp_foc_lp_filter_t` are gone. Every consumer (current filtering, velocity estimate, PLL observer, KF observer) migrated to the new 2nd-order Butterworth biquad in `include/espFoC/utils/biquad_q16.h`. Application code that called `esp_foc_low_pass_filter_*` directly must port to `esp_foc_biquad_q16_*` and `esp_foc_biquad_butterworth_lpf_design_q16()`.
+- **`esp_foc_axis_t` shrank.** The two `current_filters[2]` EMAs are gone — the per-phase Butterworth lives inside the isensor driver, applied to raw ADC counts before the gain conversion. `velocity_filter` keeps its slot but switches type from `esp_foc_lp_filter_t` to `esp_foc_biquad_q16_t`.
+- **Moving-average dropped from both ADC drivers.** `current_sensor_adc.c` and `current_sensor_adc_one_shot.c` no longer buffer `ESP_FOC_LOW_SPEED_DOWNSAMPLING` samples per channel and average them. Each fresh count goes through a per-channel biquad inside the ADC ISR. Consumers see the same `fetch_isensors()` interface.
+- **`esp_foc_isensor_t` interface grew `set_filter_cutoff(self, fc_hz, fs_hz)`.** Existing user-supplied isensor implementations must add the method (a no-op stub is acceptable).
+
+### Features
+
+- **Discrete 2nd-order Butterworth low-pass filter** (`biquad_q16`) with bilinear-prewarped designer. Direct-Form-II Transposed for fixed-point stability; coefficients land in Q16.16; DC gain exactly unity, perfect zero at Nyquist by construction.
+- **Per-phase current sense filtering** runs inside the isensor driver, fed straight from the ADC interrupt. Cutoff defaults to `CONFIG_ESP_FOC_CURRENT_FILTER_CUTOFF_HZ` (300 Hz), overridable at runtime via tuner protocol, persisted in NVS calibration.
+- **Tuner protocol additions:** `PARAM_I_FILTER_FC_Q16` (0x0014, read), `WRITE_I_FILTER_FC_Q16` (0x0023). Writes re-run the Butterworth designer per-phase under critical section and emit a LOG-channel breadcrumb. The calibration NVS payload claims 4 of its 16 reserved bytes for the cutoff (schema version unchanged at 1; old blobs migrate silently with cutoff=0 → use default).
+- **TunerStudio:** new "I-LPF fc" live readout and spinbox + "Apply current LPF cutoff" button on the Tuning tab. The Generate App tab bakes the live cutoff into the produced project's NVS image and into the main.c header comment.
+- **`tunerctl cutoff [--set HZ]`** subcommand for scripted use.
+
+---
+
 ## 3.0.0
 
 ### BREAKING CHANGES (major)
