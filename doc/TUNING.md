@@ -29,9 +29,9 @@ directory** (never the source tree — `.gitignore` and a path guard in
 the script keep it that way).
 
 The generated header is consumed by `esp_foc_initialize_axis()`
-whenever both `motor_resistance` and `motor_inductance` are left at
-zero in the settings struct, so the application picks up the tuned
-values without touching runtime code.
+unconditionally — every axis boots with the autotuned gains. Override
+at runtime with `esp_foc_axis_retune_current_pi_q16()` or by writing
+through the tuner protocol.
 
 Example run on the reference gimbal profile:
 

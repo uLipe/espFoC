@@ -42,10 +42,6 @@ menu "espFoC Settings"
 
     endchoice
 
-    config ESP_FOC_ENABLE_LEGACY_LEDC_PWM
-        bool "Enable the Legacy LEDC PWM driver"
-        default n
-
     config ESP_FOC_ENABLE_PCNT_DRIVER
         bool "Enable the PNCT driver"
         default n
@@ -128,14 +124,14 @@ menu "espFoC Settings"
     menu "Build-time PI autotuning"
 
         config ESP_FOC_USE_AUTOGEN_GAINS
-            bool "Use build-time autotuned PI gains as fallback"
+            bool "Use build-time autotuned PI gains"
             default y
             help
-                When enabled, esp_foc_initialize_axis() falls back to the
-                MPZ-designed Kp/Ki/integrator_limit produced by
-                scripts/gen_pi_gains.py whenever the runtime
-                esp_foc_motor_control_settings_t leaves motor_resistance
-                and motor_inductance set to zero.
+                When enabled, esp_foc_initialize_axis() seeds every axis
+                with Kp/Ki/integrator_limit produced by
+                scripts/gen_pi_gains.py for the selected motor profile.
+                When disabled, gains start at zero and must be programmed
+                via the runtime tuner before the loop is commanded.
 
         config ESP_FOC_MOTOR_PROFILE
             string "Motor profile name (under scripts/motors/)"

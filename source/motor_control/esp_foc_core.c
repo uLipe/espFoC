@@ -67,18 +67,38 @@ static void do_foc_outer_loop(void *arg)
     }
 }
 
+/* Apply autotuned gains to one of the torque controllers. The build-time
+ * autogen header is the only source of truth in 3.0 — the legacy
+ * continuous-time formula on motor R/L is gone. */
+static void apply_autogen_gains(esp_foc_pid_controller_t *pid, q16_t out_max)
+{
+#if defined(ESP_FOC_AUTOGEN_GAINS_AVAILABLE)
+    pid->kp = ESP_FOC_AUTOGEN_CURRENT_KP_Q16;
+    pid->ki = ESP_FOC_AUTOGEN_CURRENT_KI_Q16;
+    pid->integrator_limit = ESP_FOC_AUTOGEN_CURRENT_INT_LIM_Q16;
+#else
+    /* Without autogen, leave gains zeroed so the user MUST set them via
+     * the runtime tuner before commanding any current. Better a silent
+     * motor than a runaway with garbage gains. */
+    pid->kp = 0;
+    pid->ki = 0;
+    pid->integrator_limit = 0;
+#endif
+    pid->kd = 0;
+    pid->max_output_value = out_max;
+    pid->min_output_value = q16_from_float(-q16_to_float(out_max));
+    esp_foc_pid_reset(pid);
+}
+
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                       esp_foc_inverter_t *inverter,
                                       esp_foc_rotor_sensor_t *rotor,
                                       esp_foc_isensor_t *isensor,
                                       esp_foc_motor_control_settings_t settings)
 {
-    float current_control_analog_bandwith;
     float vbus_pu;
     float pwm_rate_hz_f;
     float dt_f;
-    float motor_r_f;
-    float motor_l_f;
 
     if (axis == NULL || inverter == NULL || rotor == NULL) {
         ESP_LOGE(tag, "invalid args for axis initialization");
@@ -130,80 +150,30 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         axis->isensor_driver->calibrate_isensors(axis->isensor_driver, ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
     }
 
-    current_control_analog_bandwith = (2.0f * (float)M_PI * 150.0f);
-    motor_r_f = q16_to_float(settings.motor_resistance);
-    motor_l_f = q16_to_float(settings.motor_inductance);
-
-    /* Decide where the current-loop gains come from:
-     *   1) runtime settings (when motor_resistance/inductance > 0): legacy
-     *      continuous-time formulas, kept for back-compat.
-     *   2) build-time autogen (when both are zero AND ESP_FOC_USE_AUTOGEN_GAINS
-     *      is enabled): MPZ values from scripts/gen_pi_gains.py. */
-    bool use_autogen = false;
-#if defined(ESP_FOC_AUTOGEN_GAINS_AVAILABLE) && defined(CONFIG_ESP_FOC_USE_AUTOGEN_GAINS)
-    use_autogen = (settings.motor_resistance == 0 && settings.motor_inductance == 0);
-#endif
-
-    axis->torque_controller[0].dt = q16_from_float(dt_f * ESP_FOC_LOW_SPEED_DOWNSAMPLING);
-    axis->torque_controller[0].inv_dt = q16_from_float((dt_f * ESP_FOC_LOW_SPEED_DOWNSAMPLING) > 1e-9f
-                                                         ? (1.0f / (dt_f * ESP_FOC_LOW_SPEED_DOWNSAMPLING))
-                                                         : 0.0f);
-#if defined(ESP_FOC_AUTOGEN_GAINS_AVAILABLE) && defined(CONFIG_ESP_FOC_USE_AUTOGEN_GAINS)
-    if (use_autogen) {
-        axis->torque_controller[0].kp = ESP_FOC_AUTOGEN_CURRENT_KP_Q16;
-        axis->torque_controller[0].ki = ESP_FOC_AUTOGEN_CURRENT_KI_Q16;
-        axis->torque_controller[0].integrator_limit = ESP_FOC_AUTOGEN_CURRENT_INT_LIM_Q16;
-    } else
-#endif
-    {
-        axis->torque_controller[0].kp = q16_from_float(motor_l_f * current_control_analog_bandwith);
-        axis->torque_controller[0].ki = q16_from_float(motor_r_f * current_control_analog_bandwith);
-        float ki_f = q16_to_float(axis->torque_controller[0].ki);
-        axis->torque_controller[0].integrator_limit = (ki_f > 1e-6f)
-            ? q16_from_float(q16_to_float(axis->max_voltage) / ki_f)
-            : axis->max_voltage;
+    /* Both torque controllers (Q-axis and D-axis) share the same dt and
+     * the same starting gains; the runtime tuner can rewrite either one
+     * later with esp_foc_axis_set_current_pi_gains_q16(). */
+    float loop_dt_s = dt_f * (float)ESP_FOC_LOW_SPEED_DOWNSAMPLING;
+    q16_t loop_dt = q16_from_float(loop_dt_s);
+    q16_t loop_inv_dt = q16_from_float((loop_dt_s > 1e-9f) ? (1.0f / loop_dt_s) : 0.0f);
+    for (int i = 0; i < 2; ++i) {
+        axis->torque_controller[i].dt = loop_dt;
+        axis->torque_controller[i].inv_dt = loop_inv_dt;
+        apply_autogen_gains(&axis->torque_controller[i], axis->max_voltage);
+        esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[i],
+                                           0.1f * q16_to_float(loop_inv_dt),
+                                           q16_to_float(loop_inv_dt));
     }
-    axis->torque_controller[0].kd = q16_from_float(0.0f);
-    axis->torque_controller[0].max_output_value = axis->max_voltage;
-    axis->torque_controller[0].min_output_value = q16_from_float(-q16_to_float(axis->max_voltage));
-    esp_foc_pid_reset(&axis->torque_controller[0]);
-    esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[0],
-                                            0.1f * q16_to_float(axis->torque_controller[0].inv_dt),
-                                            q16_to_float(axis->torque_controller[0].inv_dt));
-
-    axis->torque_controller[1].dt = q16_from_float(dt_f * ESP_FOC_LOW_SPEED_DOWNSAMPLING);
-    axis->torque_controller[1].inv_dt = q16_from_float((dt_f * ESP_FOC_LOW_SPEED_DOWNSAMPLING) > 1e-9f
-                                                         ? (1.0f / (dt_f * ESP_FOC_LOW_SPEED_DOWNSAMPLING))
-                                                         : 0.0f);
-#if defined(ESP_FOC_AUTOGEN_GAINS_AVAILABLE) && defined(CONFIG_ESP_FOC_USE_AUTOGEN_GAINS)
-    if (use_autogen) {
-        axis->torque_controller[1].kp = ESP_FOC_AUTOGEN_CURRENT_KP_Q16;
-        axis->torque_controller[1].ki = ESP_FOC_AUTOGEN_CURRENT_KI_Q16;
-        axis->torque_controller[1].integrator_limit = ESP_FOC_AUTOGEN_CURRENT_INT_LIM_Q16;
-    } else
-#endif
-    {
-        axis->torque_controller[1].kp = q16_from_float(motor_l_f * current_control_analog_bandwith);
-        axis->torque_controller[1].ki = q16_from_float(motor_r_f * current_control_analog_bandwith);
-        float ki_f = q16_to_float(axis->torque_controller[1].ki);
-        axis->torque_controller[1].integrator_limit = (ki_f > 1e-6f)
-            ? q16_from_float((q16_to_float(axis->max_voltage) * 0.1f) / ki_f)
-            : q16_from_float(q16_to_float(axis->max_voltage) * 0.1f);
-    }
-    axis->torque_controller[1].kd = q16_from_float(0.0f);
-    axis->torque_controller[1].max_output_value = q16_from_float(q16_to_float(axis->max_voltage) * 0.1f);
-    axis->torque_controller[1].min_output_value = q16_from_float(-(q16_to_float(axis->max_voltage) * 0.1f));
-    esp_foc_pid_reset(&axis->torque_controller[1]);
-    esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[1],
-                                            0.1f * q16_to_float(axis->torque_controller[1].inv_dt),
-                                            q16_to_float(axis->torque_controller[1].inv_dt));
 
     axis->motor_pole_pairs = settings.motor_pole_pairs;
 
     esp_foc_low_pass_filter_set_cutoff(&axis->velocity_filter, 50.0f,
-                                       q16_to_float(axis->torque_controller[0].inv_dt));
+                                       q16_to_float(loop_inv_dt));
 
-    axis->natural_direction = (settings.natural_direction == ESP_FOC_MOTOR_NATURAL_DIRECTION_CW) ? Q16_ONE : Q16_MINUS_ONE;
+    /* settings.natural_direction is a hint; esp_foc_align_axis() probes
+     * the rotor and overrides this once the motor is energised. */
+    axis->natural_direction = (settings.natural_direction == ESP_FOC_MOTOR_NATURAL_DIRECTION_CW)
+                              ? Q16_ONE : Q16_MINUS_ONE;
 
     axis->high_speed_loop_cb = do_current_mode_sensored_high_speed_loop;
     axis->low_speed_loop_cb = do_current_mode_sensored_low_speed_loop;

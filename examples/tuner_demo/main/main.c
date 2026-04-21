@@ -250,9 +250,6 @@ void app_main(void)
     esp_foc_motor_control_settings_t settings = {
         .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
         .motor_pole_pairs = 7,
-        .motor_resistance = 0,   /* triggers the autogen fallback */
-        .motor_inductance = 0,
-        .motor_inertia    = q16_from_float(0.0001f),
         .motor_unit       = 0,
     };
 

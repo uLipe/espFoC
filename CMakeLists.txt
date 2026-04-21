@@ -19,7 +19,7 @@ if(ESP_PLATFORM)
 
 idf_build_get_property(target IDF_TARGET)
 
-set(requires esp_driver_uart esp_driver_pcnt esp_driver_gpio esp_driver_mcpwm esp_driver_ledc esp_adc driver freertos esp_system esp_timer)
+set(requires esp_driver_uart esp_driver_pcnt esp_driver_gpio esp_driver_mcpwm esp_adc driver freertos esp_system esp_timer)
 # esp_tinyusb is fetched conditionally for USB-capable targets via
 # idf_component.yml; declare the priv require eagerly here so the bridge
 # source file finds tinyusb.h on those targets even when the user has not
@@ -28,8 +28,7 @@ if(target STREQUAL "esp32s2" OR target STREQUAL "esp32s3" OR target STREQUAL "es
     list(APPEND requires espressif__esp_tinyusb)
 endif()
 list(APPEND includes "source/drivers")
-list(APPEND srcs    "source/drivers/inverter_3pwm_ledc.c"
-                    "source/drivers/inverter_3pwm_mcpwm.c"
+list(APPEND srcs    "source/drivers/inverter_3pwm_mcpwm.c"
                     "source/drivers/inverter_6pwm_mcpwm.c"
                     "source/drivers/rotor_sensor_as5600.c"
                     "source/drivers/rotor_sensor_as5048.c"

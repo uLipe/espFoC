@@ -76,10 +76,7 @@ single window you get:
 - predicted step response, Bode, pole-zero and root-locus plots;
 - firmware scope stream with per-channel colour, toggle and cursor;
 - SVPWM hexagon with the three phase projections and the resultant
-  voltage vector rotating as the motor is driven:
-
-![TunerStudio SVPWM Analyzer](doc/images/tuner_svpwm.png)
-
+  voltage vector rotating as the motor is driven.
 
 ### Try it without hardware
 
@@ -117,10 +114,9 @@ covered in [`doc/TUNING.md`](doc/TUNING.md).
 ## Minimal example
 
 Sensored current mode with a 6-PWM MCPWM inverter, an AS5600 encoder
-and an ADC shunt. With `CONFIG_ESP_FOC_USE_AUTOGEN_GAINS=y` (default)
-the PI gains come from the selected motor profile; leave
-`motor_resistance` / `motor_inductance` zeroed to use that path, or
-fill them in to fall back on the legacy continuous-time formula.
+and an ADC shunt. PI gains come from the build-time autotuner for the
+motor profile selected via `CONFIG_ESP_FOC_MOTOR_PROFILE`; the runtime
+tuner / TunerStudio can rewrite them later.
 
 ```c
 #include "esp_log.h"
@@ -134,8 +130,6 @@ fill them in to fall back on the legacy continuous-time formula.
 static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
     .motor_pole_pairs  = 4,
-    .motor_inductance  = 0,   /* zero => use autogen / TunerStudio */
-    .motor_resistance  = 0,
     .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
     .motor_unit        = 0,
 };
@@ -171,10 +165,6 @@ void app_main(void)
 ## Examples
 
 - `examples/axis_sensored` — reference bring-up (sensored current mode).
-- `examples/axis_sensorless` — placeholder; the observer integration
-  is being reworked. Compile is gated by
-  `CONFIG_EXAMPLE_BUILD_INCOMPLETE_SENSORLESS` so nobody ships a
-  broken binary by accident.
 - `examples/tuner_demo` — runs in QEMU, exercises autogen gains,
   runtime retune, the tuner protocol and signal injection.
 - `examples/unit_test_runner` — Unity suite for CI / QEMU.
@@ -199,7 +189,7 @@ espFoC/
 ├── doc/
 │   ├── images/         # architecture, TunerStudio screenshot, demo gif
 │   └── TUNING.md       # deep dive: autogen, runtime API, protocol, CLI
-├── examples/           # axis_sensored / axis_sensorless / tuner_demo / ...
+├── examples/           # axis_sensored / tuner_demo / unit_test_runner / ...
 ├── include/espFoC/     # public API
 ├── scripts/
 │   ├── gen_pi_gains.py # build-time MPZ autotuner

@@ -32,11 +32,8 @@ typedef void (*esp_foc_motor_regulation_callback_t)(
     esp_foc_q_voltage_q16_t *uq_forward);
 
 typedef struct {
-    esp_foc_motor_direction_t natural_direction;
+    esp_foc_motor_direction_t natural_direction;  /* hint; alignment can override */
     int motor_pole_pairs;
-    q16_t motor_resistance;
-    q16_t motor_inductance;
-    q16_t motor_inertia;
     int motor_unit;
 } esp_foc_motor_control_settings_t;
 

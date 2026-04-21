@@ -56,10 +56,6 @@ jobs:
         idf.py set-target esp32p4
         idf.py build
         popd
-        # axis_sensorless is intentionally guarded behind
-        # CONFIG_EXAMPLE_BUILD_INCOMPLETE_SENSORLESS while the rotor
-        # observer integration is WIP. Skip it in CI until the flag is
-        # removed (see examples/axis_sensorless/main/axis_sensorless.c).
         pushd examples/tuner_demo
         idf.py set-target esp32
         idf.py build
