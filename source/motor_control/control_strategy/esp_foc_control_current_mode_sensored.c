@@ -132,7 +132,7 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
         {
             q16_t dtheta = q16_sub(axis->rotor_position, axis->rotor_position_prev);
             q16_t raw_speed_q16 = q16_mul(dtheta, axis->torque_controller[0].inv_dt);
-            current_speed_q16 = esp_foc_low_pass_filter_update(&axis->velocity_filter, raw_speed_q16);
+            current_speed_q16 = esp_foc_biquad_q16_update(&axis->velocity_filter, raw_speed_q16);
         }
         axis->current_speed = current_speed_q16;
         axis->rotor_position_prev = axis->rotor_position;
@@ -155,8 +155,9 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
             axis->i_d.raw = i_d_q16;
 
             if (!axis->skip_torque_control) {
-                q16_t i_q_filt_q16 = esp_foc_low_pass_filter_update(&axis->current_filters[0], i_q_q16);
-                q16_t i_d_filt_q16 = esp_foc_low_pass_filter_update(&axis->current_filters[1], i_d_q16);
+                /* No EMA on i_q / i_d any more — the per-phase
+                 * Butterworth inside the isensor driver has already
+                 * shaped the spectrum upstream of Clarke / Park. */
 #if defined(CONFIG_ESP_FOC_INJECTION_ENABLE)
                 q16_t iq_ref = esp_foc_injection_apply_q16(&axis->injection,
                                                            axis->target_i_q.raw);
@@ -165,10 +166,10 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
 #endif
                 q16_t u_q_q16 = esp_foc_pid_update(&axis->torque_controller[0],
                                                          iq_ref,
-                                                         i_q_filt_q16);
+                                                         i_q_q16);
                 q16_t u_d_q16 = esp_foc_pid_update(&axis->torque_controller[1],
                                                          axis->target_i_d.raw,
-                                                         i_d_filt_q16);
+                                                         i_d_q16);
                 u_q_q16 = q16_add(u_q_q16, axis->target_u_q.raw);
                 u_d_q16 = q16_add(u_d_q16, axis->target_u_d.raw);
                 axis->u_q.raw = u_q_q16;

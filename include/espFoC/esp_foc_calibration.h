@@ -48,8 +48,16 @@ typedef struct {
     q16_t motor_r_ohm;
     q16_t motor_l_h;
     q16_t bandwidth_hz;
-    /* Reserved for speed loop / observer params in a future revision. */
-    uint8_t reserved[16];
+    /* Cutoff of the per-phase Butterworth filter inside the isensor
+     * driver. Zero means "use the build-time default"
+     * (CONFIG_ESP_FOC_CURRENT_FILTER_CUTOFF_HZ). Claimed from the
+     * 16-byte reserved block so the on-flash schema stays at version
+     * 1 and old blobs (which read zero here) gracefully fall back. */
+    q16_t current_filter_fc_hz;
+    /* Remaining 12 bytes for future expansion (speed loop, observer
+     * gains, etc.). Old blobs zero-fill these so additions can keep
+     * extending the payload without bumping the schema version. */
+    uint8_t reserved[12];
 } esp_foc_calibration_data_t;
 
 /**
