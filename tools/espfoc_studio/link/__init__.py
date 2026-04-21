@@ -16,6 +16,7 @@ from .codec import (
     encode,
     Decoder,
 )
+from .transport import Transport, LoopbackTransport
 
 __all__ = [
     "SYNC",
@@ -29,4 +30,6 @@ __all__ = [
     "crc16_ccitt",
     "encode",
     "Decoder",
+    "Transport",
+    "LoopbackTransport",
 ]

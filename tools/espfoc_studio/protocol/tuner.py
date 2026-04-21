@@ -1,0 +1,251 @@
+"""Synchronous tuner protocol client.
+
+Wraps a Transport in the link codec and the application-level
+[op][id][axis][payload] envelope. Built around a single round-trip per
+call: send request, decode bytes until a tuner-channel response with the
+same seq comes back. The reactor on the firmware side is also synchronous,
+so this matches it without needing async io on the host.
+
+Q16.16 helpers convert between Python floats and the 32-bit signed
+fixed-point format used everywhere in the firmware.
+"""
+
+from __future__ import annotations
+
+import struct
+import time
+from dataclasses import dataclass
+from enum import IntEnum, IntFlag
+from typing import Optional
+
+from ..link import (
+    Channel,
+    Decoder,
+    LinkError,
+    Status,
+    Transport,
+    encode,
+)
+
+
+class Op(IntEnum):
+    READ = 0x01
+    WRITE = 0x02
+    EXEC = 0x03
+
+
+class ParamId(IntEnum):
+    # Read-only
+    KP_Q16          = 0x0010
+    KI_Q16          = 0x0011
+    INT_LIM_Q16     = 0x0012
+    V_MAX_Q16       = 0x0013
+    AXIS_STATE      = 0x0040
+    AXIS_LAST_ERR   = 0x0041
+    # Gain writes (atomic swap)
+    WRITE_KP        = 0x0020
+    WRITE_KI        = 0x0021
+    WRITE_INT_LIM   = 0x0022
+    # Motion targets (only honored while override is on)
+    WRITE_TARGET_ID = 0x0050
+    WRITE_TARGET_IQ = 0x0051
+    WRITE_TARGET_UD = 0x0052
+    WRITE_TARGET_UQ = 0x0053
+    # Commands (exec)
+    CMD_RECOMPUTE_GAINS = 0x0080
+    CMD_OVERRIDE_ON     = 0x00A0
+    CMD_OVERRIDE_OFF    = 0x00A1
+
+
+class AxisStateFlag(IntFlag):
+    INITIALIZED    = 1 << 0
+    ALIGNED        = 1 << 1
+    RUNNING        = 1 << 2
+    TUNER_OVERRIDE = 1 << 3
+
+
+# Mirror of esp_foc_err_t. Negative values indicate failure.
+ESP_FOC_OK = 0
+ESP_FOC_ERR_NOT_ALIGNED          = -1
+ESP_FOC_ERR_INVALID_ARG          = -2
+ESP_FOC_ERR_AXIS_INVALID_STATE   = -3
+ESP_FOC_ERR_ALIGNMENT_IN_PROGRESS = -4
+ESP_FOC_ERR_TIMESTEP_TOO_SMALL   = -5
+ESP_FOC_ERR_ROTOR_STARTUP        = -6
+ESP_FOC_ERR_ROTOR_STARTUP_PI     = -7
+
+
+_ERR_NAMES = {
+    ESP_FOC_OK: "OK",
+    ESP_FOC_ERR_NOT_ALIGNED: "NOT_ALIGNED",
+    ESP_FOC_ERR_INVALID_ARG: "INVALID_ARG",
+    ESP_FOC_ERR_AXIS_INVALID_STATE: "AXIS_INVALID_STATE",
+    ESP_FOC_ERR_ALIGNMENT_IN_PROGRESS: "ALIGNMENT_IN_PROGRESS",
+    ESP_FOC_ERR_TIMESTEP_TOO_SMALL: "TIMESTEP_TOO_SMALL",
+    ESP_FOC_ERR_ROTOR_STARTUP: "ROTOR_STARTUP",
+    ESP_FOC_ERR_ROTOR_STARTUP_PI: "ROTOR_STARTUP_PI",
+}
+
+
+def _err_name(code: int) -> str:
+    return _ERR_NAMES.get(code, f"errno {code}")
+
+
+class TunerError(Exception):
+    """Raised when the firmware returns a non-OK status, the response
+    times out, or the link layer fails to parse a frame."""
+
+
+@dataclass
+class TunerResponse:
+    status: int
+    payload: bytes
+
+
+def q16_from_float(x: float) -> int:
+    v = round(x * 65536.0)
+    if v > 0x7FFFFFFF:
+        v = 0x7FFFFFFF
+    if v < -0x80000000:
+        v = -0x80000000
+    return int(v)
+
+
+def q16_to_float(v: int) -> float:
+    return v / 65536.0
+
+
+class TunerClient:
+    """Send tuner requests over a Transport and wait for matching responses."""
+
+    DEFAULT_TIMEOUT = 0.5  # seconds per round-trip
+
+    def __init__(self, transport: Transport, axis: int = 0) -> None:
+        self._t = transport
+        self._axis = axis
+        self._seq = 0
+        self._dec = Decoder()
+
+    def _next_seq(self) -> int:
+        self._seq = (self._seq + 1) & 0xFF
+        return self._seq
+
+    def _round_trip(self, op: Op, id_: ParamId,
+                    cmd_payload: bytes = b"",
+                    timeout: Optional[float] = None) -> TunerResponse:
+        seq = self._next_seq()
+        app = bytes([
+            int(op),
+            int(id_) & 0xFF, (int(id_) >> 8) & 0xFF,
+            self._axis & 0xFF,
+        ]) + cmd_payload
+        frame = encode(Channel.TUNER, seq, app)
+        self._t.send_bytes(frame)
+
+        deadline = time.monotonic() + (timeout if timeout is not None
+                                       else self.DEFAULT_TIMEOUT)
+        self._dec.reset()
+        while time.monotonic() < deadline:
+            data = self._t.read_bytes(64, timeout=0.05)
+            if not data:
+                continue
+            for b in data:
+                st = self._dec.push(b)
+                if st == Status.OK:
+                    if (self._dec.channel == int(Channel.TUNER) and
+                            self._dec.seq == seq):
+                        body = bytes(self._dec.payload)
+                        if len(body) < 2:
+                            raise TunerError(
+                                f"response too short ({len(body)} bytes)")
+                        status = struct.unpack("<b", body[:1])[0]
+                        return TunerResponse(status=status, payload=body[2:])
+                    # Frame for somebody else: keep looking
+                    self._dec.reset()
+                elif st < 0 and st != Status.NEED_MORE:
+                    raise TunerError(f"link decode error: {st.name}")
+        raise TunerError(f"timeout waiting for response (seq={seq})")
+
+    # --- High-level helpers -------------------------------------------------
+
+    def _read_q16(self, id_: ParamId) -> float:
+        r = self._round_trip(Op.READ, id_)
+        if r.status != ESP_FOC_OK:
+            raise TunerError(f"read {id_.name} failed: {_err_name(r.status)}")
+        if len(r.payload) != 4:
+            raise TunerError(f"read {id_.name}: expected 4 bytes, got {len(r.payload)}")
+        return q16_to_float(struct.unpack("<i", r.payload)[0])
+
+    def _write_q16(self, id_: ParamId, value_float: float) -> None:
+        payload = struct.pack("<i", q16_from_float(value_float))
+        r = self._round_trip(Op.WRITE, id_, payload)
+        if r.status != ESP_FOC_OK:
+            raise TunerError(
+                f"write {id_.name}={value_float} failed: {_err_name(r.status)}")
+
+    def _exec(self, id_: ParamId, payload: bytes = b"") -> None:
+        r = self._round_trip(Op.EXEC, id_, payload)
+        if r.status != ESP_FOC_OK:
+            raise TunerError(f"exec {id_.name} failed: {_err_name(r.status)}")
+
+    # Public API ------------------------------------------------------------
+
+    def read_kp(self) -> float:
+        return self._read_q16(ParamId.KP_Q16)
+
+    def read_ki(self) -> float:
+        return self._read_q16(ParamId.KI_Q16)
+
+    def read_int_lim(self) -> float:
+        return self._read_q16(ParamId.INT_LIM_Q16)
+
+    def read_v_max(self) -> float:
+        return self._read_q16(ParamId.V_MAX_Q16)
+
+    def read_axis_state(self) -> AxisStateFlag:
+        r = self._round_trip(Op.READ, ParamId.AXIS_STATE)
+        if r.status != ESP_FOC_OK:
+            raise TunerError(f"read axis state failed: {_err_name(r.status)}")
+        if len(r.payload) != 1:
+            raise TunerError(
+                f"axis state response has {len(r.payload)} bytes, want 1")
+        return AxisStateFlag(r.payload[0])
+
+    def read_last_error(self) -> int:
+        r = self._round_trip(Op.READ, ParamId.AXIS_LAST_ERR)
+        if r.status != ESP_FOC_OK:
+            raise TunerError(f"read last err failed: {_err_name(r.status)}")
+        return struct.unpack("<b", r.payload[:1])[0]
+
+    def write_kp(self, kp: float) -> None:
+        self._write_q16(ParamId.WRITE_KP, kp)
+
+    def write_ki(self, ki: float) -> None:
+        self._write_q16(ParamId.WRITE_KI, ki)
+
+    def write_int_lim(self, lim: float) -> None:
+        self._write_q16(ParamId.WRITE_INT_LIM, lim)
+
+    def write_target_id(self, id_amps: float) -> None:
+        self._write_q16(ParamId.WRITE_TARGET_ID, id_amps)
+
+    def write_target_iq(self, iq_amps: float) -> None:
+        self._write_q16(ParamId.WRITE_TARGET_IQ, iq_amps)
+
+    def write_target_ud(self, ud_volts: float) -> None:
+        self._write_q16(ParamId.WRITE_TARGET_UD, ud_volts)
+
+    def write_target_uq(self, uq_volts: float) -> None:
+        self._write_q16(ParamId.WRITE_TARGET_UQ, uq_volts)
+
+    def recompute_gains(self, motor_r: float, motor_l: float, bw_hz: float) -> None:
+        payload = (struct.pack("<i", q16_from_float(motor_r))
+                   + struct.pack("<i", q16_from_float(motor_l))
+                   + struct.pack("<i", q16_from_float(bw_hz)))
+        self._exec(ParamId.CMD_RECOMPUTE_GAINS, payload)
+
+    def override_on(self) -> None:
+        self._exec(ParamId.CMD_OVERRIDE_ON)
+
+    def override_off(self) -> None:
+        self._exec(ParamId.CMD_OVERRIDE_OFF)
