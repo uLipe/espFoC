@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGridLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QVBoxLayout, QWidget
 
 from ..model import (
     MotorParams,
@@ -27,14 +27,6 @@ class AnalysisPanel(QWidget):
         pg.setConfigOptions(antialias=True)
 
         root = QVBoxLayout(self)
-        heading = QLabel(
-            "Analytical views — recomputed whenever motor R/L/bandwidth "
-            "or manual gains change. Matches the firmware PI structure "
-            "(delayed forward-Euler) and ZOH plant.")
-        heading.setWordWrap(True)
-        heading.setAlignment(Qt.AlignLeft)
-        root.addWidget(heading)
-
         grid = QGridLayout()
         root.addLayout(grid, 1)
 

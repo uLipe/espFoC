@@ -119,9 +119,20 @@ class DemoFirmware(threading.Thread):
         display_mag = max(abs(u_q_cmd), floor)
         if self.target_iq < 0:
             display_mag = -display_mag
-        u_u = display_mag * math.sin(angle)
-        u_v = display_mag * math.sin(angle - 2.0 * math.pi / 3.0)
-        u_w = display_mag * math.sin(angle + 2.0 * math.pi / 3.0)
+        # Pure three-phase sinusoids...
+        u_u_raw = display_mag * math.sin(angle)
+        u_v_raw = display_mag * math.sin(angle - 2.0 * math.pi / 3.0)
+        u_w_raw = display_mag * math.sin(angle + 2.0 * math.pi / 3.0)
+        # ... with the same min-max common-mode injection the real
+        # firmware SVPWM applies (source/motor_control/.../space_vector_
+        # modulator.h: v_cm = (max+min)/2; phases are shifted by -v_cm).
+        # This is what produces the characteristic "saddle" waveform
+        # that lets SVPWM push 15 % more DC bus than pure sine.
+        v_cm = 0.5 * (max(u_u_raw, u_v_raw, u_w_raw)
+                      + min(u_u_raw, u_v_raw, u_w_raw))
+        u_u = u_u_raw - v_cm
+        u_v = u_v_raw - v_cm
+        u_w = u_w_raw - v_cm
         fields = (u_u,             # ch0: SVPWM phase U (for hexagon)
                   u_v,             # ch1: SVPWM phase V
                   u_w,             # ch2: SVPWM phase W
