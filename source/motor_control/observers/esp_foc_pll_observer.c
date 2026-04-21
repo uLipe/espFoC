@@ -13,7 +13,7 @@
 #include <sys/cdefs.h>
 #include "esp_attr.h"
 #include "esp_log.h"
-#include "espFoC/utils/ema_low_pass_filter.h"
+#include "espFoC/utils/biquad_q16.h"
 #include "espFoC/utils/esp_foc_iq31_q16_bridge.h"
 #include "espFoC/observer/esp_foc_observer_interface.h"
 #include "espFoC/utils/foc_math_iq31.h"
@@ -35,8 +35,8 @@ typedef struct {
     iq31_t theta_est;
     iq31_t omega_est;
     iq31_t theta_error;
-    esp_foc_lp_filter_t current_filters[2];
-    esp_foc_lp_filter_t theta_filter;
+    esp_foc_biquad_q16_t current_filters[2];
+    esp_foc_biquad_q16_t theta_filter;
     iq31_t e_mag2;
     iq31_t e_alpha;
     iq31_t e_beta;
@@ -82,10 +82,10 @@ static int pll_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs
     iq31_t raw_a = iq31_sub(ua, iq31_add(iq31_mul(est->r_q31, ia), ldi_a));
     iq31_t raw_b = iq31_sub(ub, iq31_add(iq31_mul(est->r_q31, ib), ldi_b));
 
-    q16_t ea_q = esp_foc_low_pass_filter_update(&est->current_filters[0],
-                                                  esp_foc_iq31_per_unit_to_q16(raw_a));
-    q16_t eb_q = esp_foc_low_pass_filter_update(&est->current_filters[1],
-                                                  esp_foc_iq31_per_unit_to_q16(raw_b));
+    q16_t ea_q = esp_foc_biquad_q16_update(&est->current_filters[0],
+                                            esp_foc_iq31_per_unit_to_q16(raw_a));
+    q16_t eb_q = esp_foc_biquad_q16_update(&est->current_filters[1],
+                                            esp_foc_iq31_per_unit_to_q16(raw_b));
     est->e_alpha = esp_foc_q16_per_unit_to_iq31(ea_q);
     est->e_beta = esp_foc_q16_per_unit_to_iq31(eb_q);
 
@@ -105,8 +105,8 @@ static int pll_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs
         iq31_t rs = iq31_rsqrt_fast(iq31_add(est->e_mag2, est->mag_eps_q31));
         est->theta_error = iq31_mul_q230(mix, rs);
         est->theta_error = esp_foc_q16_per_unit_to_iq31(
-            esp_foc_low_pass_filter_update(&est->theta_filter,
-                                           esp_foc_iq31_per_unit_to_q16(est->theta_error)));
+            esp_foc_biquad_q16_update(&est->theta_filter,
+                                      esp_foc_iq31_per_unit_to_q16(est->theta_error)));
         est->integral = iq31_add(est->integral, iq31_mul(est->theta_error, est->ki_dt_q31));
     }
 
@@ -210,9 +210,15 @@ esp_foc_observer_t *pll_observer_new(int unit, esp_foc_pll_observer_settings_t s
     est->lock_var_q31 = iq31_from_float(PLL_LOCK_VAR);
     est->integral_decay_q31 = iq31_from_float(0.9999f);
 
-    esp_foc_low_pass_filter_set_cutoff(&est->current_filters[0], 0.05f * (1.0f / settings.dt), 1.0f / settings.dt);
-    esp_foc_low_pass_filter_set_cutoff(&est->current_filters[1], 0.05f * (1.0f / settings.dt), 1.0f / settings.dt);
-    esp_foc_low_pass_filter_set_cutoff(&est->theta_filter, ESP_FOC_PLL_BANDWIDTH_HZ, 1.0f / settings.dt);
+    {
+        float fs_hz = 1.0f / settings.dt;
+        esp_foc_biquad_butterworth_lpf_design_q16(&est->current_filters[0],
+                                                  0.05f * fs_hz, fs_hz);
+        esp_foc_biquad_butterworth_lpf_design_q16(&est->current_filters[1],
+                                                  0.05f * fs_hz, fs_hz);
+        esp_foc_biquad_butterworth_lpf_design_q16(&est->theta_filter,
+                                                  ESP_FOC_PLL_BANDWIDTH_HZ, fs_hz);
+    }
 
     est->converge_period_ticks = (int)(PLL_OBSERVER_CONVERGE_WAIT_TIME / settings.dt);
     est->converging_count = est->converge_period_ticks;
