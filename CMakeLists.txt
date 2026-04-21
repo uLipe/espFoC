@@ -1,5 +1,6 @@
 set(srcs    "source/motor_control/esp_foc_core.c"
             "source/motor_control/control_strategy/esp_foc_control_current_mode_sensored.c"
+            "source/motor_control/esp_foc_calibration.c"
             "source/motor_control/esp_foc_design_mpz.c"
             "source/motor_control/esp_foc_link.c"
             "source/motor_control/esp_foc_axis_tuning.c"
@@ -19,7 +20,7 @@ if(ESP_PLATFORM)
 
 idf_build_get_property(target IDF_TARGET)
 
-set(requires esp_driver_uart esp_driver_pcnt esp_driver_gpio esp_driver_mcpwm esp_adc driver freertos esp_system esp_timer)
+set(requires esp_driver_uart esp_driver_pcnt esp_driver_gpio esp_driver_mcpwm esp_adc driver freertos esp_system esp_timer nvs_flash)
 # esp_tinyusb is fetched conditionally for USB-capable targets via
 # idf_component.yml; declare the priv require eagerly here so the bridge
 # source file finds tinyusb.h on those targets even when the user has not
