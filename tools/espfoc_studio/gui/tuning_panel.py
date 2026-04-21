@@ -20,14 +20,25 @@ from PySide6.QtWidgets import (
 from ..protocol import AxisStateFlag, TunerClient, TunerError
 
 
-def _spin(maximum: float = 10000.0, minimum: float = -10000.0,
-          decimals: int = 4, value: float = 0.0,
-          step: float = 0.1) -> QDoubleSpinBox:
+def _spin(minimum: float, maximum: float,
+          decimals: int, value: float,
+          step: float = 0.1,
+          suffix: str = "") -> QDoubleSpinBox:
+    """Convenience wrapper matching Qt's (min, max) ordering and with an
+    optional unit suffix. Type-in is always allowed — the step value
+    only controls the ± buttons / scroll wheel."""
+    if minimum > maximum:
+        minimum, maximum = maximum, minimum
     box = QDoubleSpinBox()
     box.setRange(minimum, maximum)
     box.setDecimals(decimals)
     box.setSingleStep(step)
     box.setValue(value)
+    if suffix:
+        box.setSuffix(suffix)
+    # Keep the spinner buttons; make the field wide enough so long
+    # suffixes like " Ω" do not visually collide with the number.
+    box.setMinimumWidth(140)
     return box
 
 
@@ -74,9 +85,10 @@ class TuningPanel(QWidget):
         # --- Manual gain editor ---
         manual = QGroupBox("Manual gain override")
         mform = QFormLayout(manual)
-        self._kp_spin = _spin(0, 500, 4, 1.46)
-        self._ki_spin = _spin(0, 1_000_000, 2, 659.17, 10.0)
-        self._lim_spin = _spin(0, 200, 3, 12.0)
+        self._kp_spin = _spin(0.0, 500.0, 4, 1.46, step=0.01, suffix=" V/A")
+        self._ki_spin = _spin(0.0, 1_000_000.0, 2, 659.17, step=10.0,
+                              suffix=" V/(A·s)")
+        self._lim_spin = _spin(0.0, 200.0, 3, 12.0, step=0.1, suffix=" V")
         mform.addRow("Kp", self._kp_spin)
         mform.addRow("Ki", self._ki_spin)
         mform.addRow("ILim", self._lim_spin)
@@ -88,12 +100,19 @@ class TuningPanel(QWidget):
         # --- MPZ retune ---
         mpz = QGroupBox("MPZ recompute")
         mfrm = QFormLayout(mpz)
-        self._r_spin = _spin(0, 1000, 4, self._last_motor_r, step=0.01)
-        self._l_spin = _spin(0, 10, 7, self._last_motor_l, step=0.0001)
-        self._bw_spin = _spin(1, 5000, 1, self._last_bw, step=10.0)
-        mfrm.addRow("R [Ω]", self._r_spin)
-        mfrm.addRow("L [H]", self._l_spin)
-        mfrm.addRow("Bandwidth [Hz]", self._bw_spin)
+        # L is stored in Henries but displayed in milli-Henries to keep the
+        # typing experience reasonable for normal motors (0.1 mH .. 100 mH).
+        # Conversions happen in _on_mpz and in _notify_params_changed.
+        self._r_spin = _spin(0.001, 1000.0, 4, self._last_motor_r,
+                             step=0.01, suffix=" Ω")
+        self._l_mh_spin = _spin(0.001, 10_000.0, 4,
+                                self._last_motor_l * 1000.0,
+                                step=0.01, suffix=" mH")
+        self._bw_spin = _spin(1.0, 5000.0, 1, self._last_bw,
+                              step=10.0, suffix=" Hz")
+        mfrm.addRow("R", self._r_spin)
+        mfrm.addRow("L", self._l_mh_spin)
+        mfrm.addRow("Bandwidth", self._bw_spin)
         btn_mpz = QPushButton("Recompute gains")
         btn_mpz.clicked.connect(self._on_mpz)
         mfrm.addRow(btn_mpz)
@@ -104,7 +123,7 @@ class TuningPanel(QWidget):
                                     self._last_bw,
                                     self._kp_spin.value(),
                                     self._ki_spin.value())
-        for spin in (self._r_spin, self._l_spin, self._bw_spin,
+        for spin in (self._r_spin, self._l_mh_spin, self._bw_spin,
                      self._kp_spin, self._ki_spin):
             spin.valueChanged.connect(self._notify_params_changed)
 
@@ -115,8 +134,8 @@ class TuningPanel(QWidget):
         self._override_box.toggled.connect(self._on_override_toggled)
         ovr_layout.addWidget(self._override_box)
         target_form = QFormLayout()
-        self._iq_spin = _spin(-50, 50, 4, 0.0, step=0.1)
-        self._id_spin = _spin(-50, 50, 4, 0.0, step=0.1)
+        self._iq_spin = _spin(-50.0, 50.0, 4, 0.0, step=0.1, suffix=" A")
+        self._id_spin = _spin(-50.0, 50.0, 4, 0.0, step=0.1, suffix=" A")
         self._iq_spin.setEnabled(False)
         self._id_spin.setEnabled(False)
         self._iq_spin.valueChanged.connect(self._on_iq_changed)
@@ -173,17 +192,18 @@ class TuningPanel(QWidget):
         self._notify_params_changed()
 
     def _on_mpz(self) -> None:
+        motor_l_h = self._l_mh_spin.value() * 1e-3  # mH -> H
         try:
             self._client.recompute_gains(
                 motor_r=self._r_spin.value(),
-                motor_l=self._l_spin.value(),
+                motor_l=motor_l_h,
                 bw_hz=self._bw_spin.value())
         except TunerError as e:
             self._status.setText(str(e))
             return
         self._status.setText("")
         self._last_motor_r = self._r_spin.value()
-        self._last_motor_l = self._l_spin.value()
+        self._last_motor_l = motor_l_h
         self._last_bw = self._bw_spin.value()
         # Wait a tick for the firmware to update, then refresh readouts
         # so the manual spinboxes line up with the new design.
@@ -231,7 +251,8 @@ class TuningPanel(QWidget):
     def _notify_params_changed(self) -> None:
         if self._on_params_changed is None:
             return
-        self._on_params_changed(self._r_spin.value(), self._l_spin.value(),
+        motor_l_h = self._l_mh_spin.value() * 1e-3  # mH -> H for the model
+        self._on_params_changed(self._r_spin.value(), motor_l_h,
                                 self._bw_spin.value(),
                                 self._kp_spin.value(), self._ki_spin.value())
 

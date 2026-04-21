@@ -42,6 +42,17 @@ class MainWindow(QMainWindow):
         self._analysis = AnalysisPanel()
         self._scope = ScopePanel(scope_source)
 
+        # Analysis plots are expensive (step sim + bode + root locus).
+        # Debounce spinbox storms so one nudge of the mouse wheel doesn't
+        # fire a dozen full recomputes back-to-back. Must be created
+        # BEFORE the TuningPanel because the panel primes an initial
+        # _on_params call during construction.
+        self._analysis_pending = None
+        self._analysis_debounce = QTimer(self)
+        self._analysis_debounce.setSingleShot(True)
+        self._analysis_debounce.setInterval(150)
+        self._analysis_debounce.timeout.connect(self._run_pending_analysis)
+
         self._tuning = TuningPanel(client, on_params_changed=self._on_params)
         splitter.addWidget(self._tuning)
 
@@ -53,13 +64,16 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([380, 900])
 
-        # Single polling timer drives everything needing periodic refresh.
+        # Live gains readout — every 500 ms is plenty for human perception
+        # and leaves headroom for the 50 FPS scope. Each poll issues five
+        # short tuner round-trips; 0.5 s keeps CPU usage near the noise
+        # floor on real serial links.
         self._timer = QTimer(self)
-        self._timer.setInterval(200)
+        self._timer.setInterval(500)
         self._timer.timeout.connect(self._poll)
         self._timer.start()
 
-        # Scope samples faster to show waveform detail.
+        # Scope samples at ~50 FPS for smooth waveforms in --demo mode.
         self._scope_timer = QTimer(self)
         self._scope_timer.setInterval(20)
         self._scope_timer.timeout.connect(self._scope.poll)
@@ -73,4 +87,12 @@ class MainWindow(QMainWindow):
 
     def _on_params(self, r: float, l: float, bw: float,
                    kp: float, ki: float) -> None:
+        self._analysis_pending = (r, l, bw, kp, ki)
+        self._analysis_debounce.start()
+
+    def _run_pending_analysis(self) -> None:
+        if self._analysis_pending is None:
+            return
+        r, l, bw, kp, ki = self._analysis_pending
+        self._analysis_pending = None
         self._analysis.update_model(r, l, bw, kp, ki)
