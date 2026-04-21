@@ -25,6 +25,7 @@
 #include <math.h>
 #include "esp_log.h"
 #include "espFoC/esp_foc.h"
+#include "espFoC/esp_foc_calibration.h"
 
 #if defined(ESP_FOC_AUTOGEN_GAINS_AVAILABLE)
 #include "esp_foc_autotuned_gains.h"
@@ -163,6 +164,29 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[i],
                                            0.1f * q16_to_float(loop_inv_dt),
                                            q16_to_float(loop_inv_dt));
+    }
+
+    /* If a tuned calibration exists for this axis AND it was made for
+     * the same motor profile, override the autogen seed gains. NVS
+     * load is a cold path; failure (no entry, profile mismatch, NVS
+     * empty) just skips the overlay silently. */
+    {
+        esp_foc_calibration_data_t cal;
+        if (esp_foc_calibration_load((uint8_t)settings.motor_unit, &cal)
+            == ESP_FOC_OK) {
+            for (int i = 0; i < 2; ++i) {
+                axis->torque_controller[i].kp = cal.kp;
+                axis->torque_controller[i].ki = cal.ki;
+                axis->torque_controller[i].integrator_limit =
+                    cal.integrator_limit;
+            }
+            ESP_LOGI(tag,
+                     "axis %d: NVS calibration overlay applied "
+                     "(Kp=%.4f Ki=%.2f)",
+                     settings.motor_unit,
+                     (double)q16_to_float(cal.kp),
+                     (double)q16_to_float(cal.ki));
+        }
     }
 
     axis->motor_pole_pairs = settings.motor_pole_pairs;

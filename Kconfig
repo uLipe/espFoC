@@ -112,6 +112,28 @@ menu "espFoC Settings"
             default 18
     endif
 
+    config ESP_FOC_CALIBRATION_NVS
+        bool "Persist current-loop calibration to NVS"
+        depends on ESP_FOC_TUNER_ENABLE
+        default y
+        help
+            When enabled, esp_foc_calibration_save() writes the
+            current gains + motor params to a dedicated NVS namespace,
+            and esp_foc_initialize_axis() loads them at boot if a
+            matching profile_hash entry is found. Disable to drop
+            the nvs_flash dependency on extreme-nano builds.
+
+    config ESP_FOC_PROFILE_VERSION
+        int "Motor profile schema version"
+        depends on ESP_FOC_USE_AUTOGEN_GAINS
+        default 1
+        help
+            Bumped whenever the user wants to invalidate previously
+            persisted calibrations. Stored profiles whose hash does
+            not match the active profile name + version are ignored
+            at boot — protects you from silently loading a gimbal
+            calibration onto a scooter motor.
+
     config ESP_FOC_INJECTION_ENABLE
         bool "Enable signal injection on the q-axis current reference"
         default n
