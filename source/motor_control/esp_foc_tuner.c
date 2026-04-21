@@ -8,6 +8,7 @@
 #include "espFoC/esp_foc_tuner.h"
 #include "espFoC/esp_foc_axis_tuning.h"
 #include "espFoC/esp_foc_axis.h"
+#include "espFoC/esp_foc_link.h"
 
 /* Per-axis registry. Pointers are only mutated from esp_foc_tuner_attach_axis,
  * which is expected to be called from a non-time-critical context. */
@@ -248,6 +249,87 @@ esp_foc_err_t esp_foc_tuner_handle_request(
     default:
         return ESP_FOC_ERR_INVALID_ARG;
     }
+}
+
+/* --- Reactor: link decoder + dispatcher ------------------------------- */
+
+static esp_foc_link_decoder_t s_dec;
+static bool s_dec_initialized = false;
+
+void esp_foc_tuner_reactor_reset(void)
+{
+    esp_foc_link_decoder_reset(&s_dec);
+    s_dec_initialized = true;
+}
+
+static void send_response_frame(uint8_t seq,
+                                int8_t status,
+                                const uint8_t *resp_payload,
+                                size_t resp_len)
+{
+    /* Application-level response: [status:i8][seq:u8][payload]. The seq
+     * is echoed so the host can correlate responses to requests. */
+    uint8_t app[2 + ESP_FOC_LINK_MAX_PAYLOAD];
+    if (resp_len > sizeof(app) - 2) {
+        resp_len = sizeof(app) - 2;
+    }
+    app[0] = (uint8_t)status;
+    app[1] = seq;
+    if (resp_len > 0 && resp_payload != NULL) {
+        memcpy(&app[2], resp_payload, resp_len);
+    }
+
+    uint8_t frame[ESP_FOC_LINK_MAX_FRAME];
+    size_t frame_len = 0;
+    if (esp_foc_link_encode(ESP_FOC_LINK_CH_TUNER, seq, app, 2 + resp_len,
+                            frame, sizeof(frame), &frame_len) != ESP_FOC_LINK_OK) {
+        return;
+    }
+    esp_foc_tuner_send_callback(frame, frame_len);
+}
+
+static void dispatch_frame(uint8_t seq,
+                           const uint8_t *payload,
+                           size_t payload_len)
+{
+    /* Application-level request: [op:u8][id:u16 LE][axis:u8][cmd_payload]. */
+    if (payload_len < 4) {
+        send_response_frame(seq, (int8_t)ESP_FOC_ERR_INVALID_ARG, NULL, 0);
+        return;
+    }
+    esp_foc_tuner_op_t op = (esp_foc_tuner_op_t)payload[0];
+    esp_foc_tuner_id_t id = (esp_foc_tuner_id_t)(payload[1] | ((uint16_t)payload[2] << 8));
+    uint8_t axis_id = payload[3];
+    const uint8_t *cmd_payload = payload + 4;
+    size_t cmd_len = payload_len - 4;
+
+    uint8_t resp_buf[8];
+    size_t  resp_len = sizeof(resp_buf);
+    esp_foc_err_t err = esp_foc_tuner_handle_request(axis_id, op, id,
+                                                     cmd_payload, cmd_len,
+                                                     resp_buf, &resp_len);
+    if (err != ESP_FOC_OK) {
+        resp_len = 0;
+    }
+    send_response_frame(seq, (int8_t)err, resp_buf, resp_len);
+}
+
+void esp_foc_tuner_process_byte(uint8_t byte)
+{
+    if (!s_dec_initialized) {
+        esp_foc_tuner_reactor_reset();
+    }
+    esp_foc_link_status_t st = esp_foc_link_decoder_push(&s_dec, byte);
+    if (st != ESP_FOC_LINK_OK) {
+        return;
+    }
+    if (esp_foc_link_decoder_channel(&s_dec) == ESP_FOC_LINK_CH_TUNER) {
+        dispatch_frame(esp_foc_link_decoder_seq(&s_dec),
+                       esp_foc_link_decoder_payload(&s_dec),
+                       esp_foc_link_decoder_payload_len(&s_dec));
+    }
+    /* Reset for the next frame. */
+    esp_foc_link_decoder_reset(&s_dec);
 }
 
 /* --- Default weak transport callbacks (no-op) -------------------------- */

@@ -108,6 +108,33 @@ esp_foc_err_t esp_foc_tuner_handle_request(
     void *response,
     size_t *response_len);
 
+/**
+ * @brief Drive the tuner with raw bytes from a transport reader.
+ *
+ * Bridges (UART, USB-CDC, ...) implement esp_foc_tuner_recv_callback() to
+ * pull bytes off the wire and feed them here one at a time. When a full
+ * tuner-channel frame is reassembled, it is dispatched to handle_request()
+ * and the encoded response is sent back via esp_foc_tuner_send_callback().
+ *
+ * The reactor maintains internal state across calls; do not interleave
+ * bytes coming from different physical buses.
+ *
+ * Application-level frame layout (inside the link payload):
+ *
+ *   request : [op:u8][id:u16 LE][axis:u8][cmd_payload:N]
+ *   response: [status:i8][seq:u8][resp_payload:N]
+ *
+ * The seq byte is echoed from the request frame's header so the host can
+ * match responses to outstanding requests.
+ */
+void esp_foc_tuner_process_byte(uint8_t byte);
+
+/**
+ * @brief Reset the reactor's link decoder. Useful after a transport
+ * disconnect / reconnect so a half-parsed frame does not leak across.
+ */
+void esp_foc_tuner_reactor_reset(void);
+
 /* Optional weak hooks for the user-defined transport layer.
  * The default no-op implementations let the protocol be exercised directly
  * via esp_foc_tuner_handle_request() without any I/O. */

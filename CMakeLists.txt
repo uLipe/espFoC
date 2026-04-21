@@ -20,6 +20,13 @@ if(ESP_PLATFORM)
 idf_build_get_property(target IDF_TARGET)
 
 set(requires esp_driver_uart esp_driver_pcnt esp_driver_gpio esp_driver_mcpwm esp_driver_ledc esp_adc driver freertos esp_system esp_timer)
+# esp_tinyusb is fetched conditionally for USB-capable targets via
+# idf_component.yml; declare the priv require eagerly here so the bridge
+# source file finds tinyusb.h on those targets even when the user has not
+# enabled CONFIG_ESP_FOC_BRIDGE_USBCDC at component-graph resolution time.
+if(target STREQUAL "esp32s2" OR target STREQUAL "esp32s3" OR target STREQUAL "esp32p4")
+    list(APPEND requires espressif__esp_tinyusb)
+endif()
 list(APPEND includes "source/drivers")
 list(APPEND srcs    "source/drivers/inverter_3pwm_ledc.c"
                     "source/drivers/inverter_3pwm_mcpwm.c"
@@ -33,6 +40,12 @@ list(APPEND srcs    "source/drivers/inverter_3pwm_ledc.c"
 
 if(CONFIG_ESP_FOC_TUNER_ENABLE)
     list(APPEND srcs "source/motor_control/esp_foc_tuner.c")
+endif()
+if(CONFIG_ESP_FOC_BRIDGE_UART)
+    list(APPEND srcs "source/drivers/esp_foc_bridge_uart.c")
+endif()
+if(CONFIG_ESP_FOC_BRIDGE_USBCDC)
+    list(APPEND srcs "source/drivers/esp_foc_bridge_usbcdc.c")
 endif()
 
 idf_component_register(SRCS "${srcs}"

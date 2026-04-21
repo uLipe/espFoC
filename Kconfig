@@ -72,6 +72,50 @@ menu "espFoC Settings"
             esp_foc_tuner_attach_axis() and calls
             esp_foc_tuner_handle_request() from a transport task.
 
+    choice ESP_FOC_TUNER_BRIDGE
+        prompt "Tuner transport bridge"
+        depends on ESP_FOC_TUNER_ENABLE
+        default ESP_FOC_BRIDGE_NONE
+        help
+            Selects the physical bus that ferries tuner / scope frames
+            between the firmware and TunerStudio. Pick "None" if you
+            implement the weak callbacks in your own application.
+
+        config ESP_FOC_BRIDGE_NONE
+            bool "None (user provides callbacks)"
+
+        config ESP_FOC_BRIDGE_UART
+            bool "UART"
+            help
+                Uses one of the chip's UART peripherals; works on every
+                ESP32 variant including the original ESP32 without USB.
+
+        config ESP_FOC_BRIDGE_USBCDC
+            bool "USB CDC-ACM (TinyUSB)"
+            depends on IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4
+            help
+                Uses TinyUSB CDC-ACM. No external adapter required;
+                the same cable used to flash the board carries the tuner
+                traffic. Requires the espressif/tinyusb managed component.
+
+    endchoice
+
+    if ESP_FOC_BRIDGE_UART
+        config ESP_FOC_BRIDGE_UART_NUM
+            int "UART peripheral number"
+            range 0 2
+            default 1
+        config ESP_FOC_BRIDGE_UART_BAUD
+            int "UART baud rate"
+            default 921600
+        config ESP_FOC_BRIDGE_UART_TX_PIN
+            int "UART TX pin"
+            default 17
+        config ESP_FOC_BRIDGE_UART_RX_PIN
+            int "UART RX pin"
+            default 18
+    endif
+
     config ESP_FOC_INJECTION_ENABLE
         bool "Enable signal injection on the q-axis current reference"
         default n
