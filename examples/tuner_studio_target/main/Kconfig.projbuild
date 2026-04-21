@@ -1,0 +1,56 @@
+menu "TunerStudio target — pin map"
+
+    config TUNER_TARGET_PWM_U_HI
+        int "PWM U high pin"
+        range 0 54
+        default 5
+
+    config TUNER_TARGET_PWM_V_HI
+        int "PWM V high pin"
+        range 0 54
+        default 6
+
+    config TUNER_TARGET_PWM_W_HI
+        int "PWM W high pin"
+        range 0 54
+        default 7
+
+    config TUNER_TARGET_PWM_U_LO
+        int "PWM U low pin"
+        range 0 54
+        default 15
+
+    config TUNER_TARGET_PWM_V_LO
+        int "PWM V low pin"
+        range 0 54
+        default 16
+
+    config TUNER_TARGET_PWM_W_LO
+        int "PWM W low pin"
+        range 0 54
+        default 17
+
+    config TUNER_TARGET_PWM_FREQ_HZ
+        int "PWM frequency [Hz]"
+        default 20000
+
+    config TUNER_TARGET_DC_LINK_V
+        int "DC link voltage (Volts)"
+        default 12
+
+    config TUNER_TARGET_ENC_SDA
+        int "Encoder I2C SDA pin"
+        range 0 54
+        default 4
+
+    config TUNER_TARGET_ENC_SCL
+        int "Encoder I2C SCL pin"
+        range 0 54
+        default 8
+
+    config TUNER_TARGET_POLE_PAIRS
+        int "Motor pole pairs"
+        range 1 64
+        default 7
+
+endmenu

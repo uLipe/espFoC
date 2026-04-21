@@ -1,0 +1,33 @@
+# TunerStudio service-mode firmware. Boots, attaches to the tuner,
+# parks the motor at zero current, then waits for the GUI to drive
+# alignment / current steps / persistence. No application logic.
+
+CONFIG_ESP_TASK_WDT_EN=n
+
+# Tuner runtime + transport (USB-CDC default; switch to UART via
+# menuconfig when targeting plain ESP32).
+CONFIG_ESP_FOC_TUNER_ENABLE=y
+CONFIG_ESP_FOC_BRIDGE_NONE=n
+CONFIG_ESP_FOC_BRIDGE_USBCDC=y
+
+# TinyUSB CDC needed by the USB-CDC bridge.
+CONFIG_TINYUSB_CDC_ENABLED=y
+
+# Scope + injection so the GUI's hexagon and step buttons just work.
+# Default scope buffer is 4096 frames * 8 channels which fits big SRAM
+# parts but blows DRAM on plain ESP32 / S3. 512 frames is plenty for
+# the GUI's 50 FPS rolling view and keeps RAM headroom.
+CONFIG_ESP_FOC_SCOPE=y
+CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS=8
+CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE=512
+CONFIG_ESP_FOC_INJECTION_ENABLE=y
+
+# Calibration overlay so persisted gains survive reboots.
+CONFIG_ESP_FOC_CALIBRATION_NVS=y
+
+# Build-time autotuner with the default profile — overridden at boot
+# by NVS calibration once the operator has saved one.
+CONFIG_ESP_FOC_USE_AUTOGEN_GAINS=y
+CONFIG_ESP_FOC_MOTOR_PROFILE="default"
+CONFIG_ESP_FOC_AUTOGEN_PWM_RATE_HZ=20000
+CONFIG_ESP_FOC_AUTOGEN_DECIMATION=20
