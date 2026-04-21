@@ -22,4 +22,14 @@ struct esp_foc_isensor_s {
     void (*sample_isensors)(esp_foc_isensor_t *self);
     void (*calibrate_isensors)(esp_foc_isensor_t *self, int calibration_rounds);
     void (*set_isensor_callback)(esp_foc_isensor_t *self, isensor_callback_t cb, void *param);
+
+    /**
+     * @brief Designs / re-designs the per-phase low-pass biquad inside
+     *        the driver. Called from esp_foc_initialize_axis() and from
+     *        the runtime tuner when the operator changes the cutoff.
+     *
+     * Drivers without a built-in filter (mocks, future hall-only)
+     * provide a no-op stub.
+     */
+    void (*set_filter_cutoff)(esp_foc_isensor_t *self, float fc_hz, float fs_hz);
 };

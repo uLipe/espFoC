@@ -27,6 +27,7 @@
 #include <sdkconfig.h>
 #include <math.h>
 #include "espFoC/utils/esp_foc_q16.h"
+#include "espFoC/utils/biquad_q16.h"
 #include "espFoC/driver_iq31_local.h"
 #include "espFoC/current_sensor_adc.h"
 #include "hal/adc_hal.h"
@@ -48,9 +49,14 @@ typedef struct {
     adc_continuous_handle_t handle;
     float adc_to_current_scale;
     q16_t adc_to_current_scale_q16;
-    uint32_t raw_reads[4][ESP_FOC_LOW_SPEED_DOWNSAMPLING];
-    int sample_avg_idx;
-    float currents[4];
+    /* latest_raw is the most recent unfiltered ADC sample per channel.
+     * Used by calibration (we want the raw DC at no-current). */
+    int32_t latest_raw[4];
+    /* filtered_count is bq[i] output mapped back into ADC count units
+     * (still int32 because the rest of the pipeline subtracts an int
+     * offset before scaling). */
+    int32_t filtered_count[4];
+    esp_foc_biquad_q16_t bq[4];
     float offsets[4];
     esp_foc_isensor_t interface;
     int number_of_channels;
@@ -86,26 +92,6 @@ static adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
 DRAM_ATTR static isensor_adc_t isensor_adc;
 static bool adc_initialized = false;
 static const float adc_to_volts = ((3.1f)/ 4096.0f);
-static float raw_floats[4];
-
-static inline float avg_calc(uint32_t *raws)
-{
-    uint32_t avg = 0;
-    for(int i = 0; i < ESP_FOC_LOW_SPEED_DOWNSAMPLING; i++) {
-        avg += raws[i];
-    }
-
-    return (float)(avg/ESP_FOC_LOW_SPEED_DOWNSAMPLING);
-}
-
-static int32_t avg_calc_int(uint32_t *raws)
-{
-    uint32_t sum = 0;
-    for (int i = 0; i < ESP_FOC_LOW_SPEED_DOWNSAMPLING; i++) {
-        sum += raws[i];
-    }
-    return (int32_t)(sum / (uint32_t)ESP_FOC_LOW_SPEED_DOWNSAMPLING);
-}
 
 static bool isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
 {
@@ -115,13 +101,18 @@ static bool isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_
     isensor_adc_t *isensor = (isensor_adc_t *)user_data;
     adc_digi_output_data_t *p = (adc_digi_output_data_t *)edata->conv_frame_buffer;
 
+    /* Push every fresh ADC sample straight through its per-channel
+     * biquad. Raw counts (12-bit) shift-left into Q16 with plenty of
+     * headroom (4095 << 16 = 268 M, well below INT32_MAX). The output
+     * shifts back to count units; the rest of the pipeline never sees
+     * the q16 representation. */
     for(int i = 0; i < isensor->number_of_channels; i++) {
-        isensor->raw_reads[i][isensor->sample_avg_idx] = ADC_GET_DATA(p);
+        int32_t raw = (int32_t)ADC_GET_DATA(p);
+        isensor->latest_raw[i] = raw;
+        q16_t y = esp_foc_biquad_q16_update(&isensor->bq[i],
+                                            (q16_t)(raw << 16));
+        isensor->filtered_count[i] = y >> 16;
         p++;
-    }
-
-    if(isensor->sample_avg_idx >= ESP_FOC_LOW_SPEED_DOWNSAMPLING) {
-        isensor->sample_avg_idx = 0;
     }
 
     if(isensor->callback != NULL) {
@@ -164,27 +155,17 @@ static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
     isensor_adc_t *obj = __containerof(self, isensor_adc_t, interface);
     const int32_t adc_rng = 2048;
 
-    int32_t av0 = avg_calc_int(&obj->raw_reads[0][0]);
-    int32_t av1 = avg_calc_int(&obj->raw_reads[1][0]);
-    int32_t av2 = avg_calc_int(&obj->raw_reads[2][0]);
-    int32_t av3 = avg_calc_int(&obj->raw_reads[3][0]);
+    /* Pull the latest filtered counts produced by the per-channel
+     * biquad in the ADC ISR. */
+    int32_t f0 = obj->filtered_count[0];
+    int32_t f1 = obj->filtered_count[1];
+    int32_t f2 = obj->filtered_count[2];
+    int32_t f3 = obj->filtered_count[3];
 
-    esp_foc_critical_enter();
-    obj->currents[0] = (float)av0;
-    obj->currents[1] = (float)av1;
-    obj->currents[2] = (float)av2;
-    obj->currents[3] = (float)av3;
-    esp_foc_critical_leave();
-
-    raw_floats[0] = (float)av0;
-    raw_floats[1] = (float)av1;
-    raw_floats[2] = (float)av2;
-    raw_floats[3] = (float)av3;
-
-    int32_t d0 = av0 - (int32_t)lroundf(obj->offsets[0]);
-    int32_t d1 = av1 - (int32_t)lroundf(obj->offsets[1]);
-    int32_t d2 = av2 - (int32_t)lroundf(obj->offsets[2]);
-    int32_t d3 = av3 - (int32_t)lroundf(obj->offsets[3]);
+    int32_t d0 = f0 - (int32_t)lroundf(obj->offsets[0]);
+    int32_t d1 = f1 - (int32_t)lroundf(obj->offsets[1]);
+    int32_t d2 = f2 - (int32_t)lroundf(obj->offsets[2]);
+    int32_t d3 = f3 - (int32_t)lroundf(obj->offsets[3]);
 
     d0 = esp_foc_clamp_int32(d0, -adc_rng, adc_rng);
     d1 = esp_foc_clamp_int32(d1, -adc_rng, adc_rng);
@@ -231,16 +212,27 @@ static void calibrate_isensors (esp_foc_isensor_t *self, int calibration_rounds)
         self->sample_isensors(self);
         esp_foc_sleep_ms(10);
 
-        obj->offsets[0] += ((float)obj->raw_reads[0][0]);
-        obj->offsets[1] += ((float)obj->raw_reads[1][0]);
-        obj->offsets[2] += ((float)obj->raw_reads[2][0]);
-        obj->offsets[3] += ((float)obj->raw_reads[3][0]);
+        /* Use the unfiltered latest_raw value here on purpose: we want
+         * the genuine zero-current DC level, not whatever the biquad
+         * happens to be settling towards (the loop is still cold and
+         * the filter has not had time to converge across rounds). */
+        obj->offsets[0] += ((float)obj->latest_raw[0]);
+        obj->offsets[1] += ((float)obj->latest_raw[1]);
+        obj->offsets[2] += ((float)obj->latest_raw[2]);
+        obj->offsets[3] += ((float)obj->latest_raw[3]);
     }
 
     obj->offsets[0] /= calibration_rounds;
     obj->offsets[1] /= calibration_rounds;
     obj->offsets[2] /= calibration_rounds;
     obj->offsets[3] /= calibration_rounds;
+
+    /* Clear filter state so the post-calibration steady state lines up
+     * with the freshly-measured offsets. */
+    for (int i = 0; i < 4; ++i) {
+        esp_foc_biquad_q16_reset(&obj->bq[i]);
+        obj->filtered_count[i] = obj->latest_raw[i];
+    }
 
     ESP_LOGI(TAG, "ADC calibrated, phase current offsets are: %f, %f, %f, %f",
             obj->offsets[0], obj->offsets[1], obj->offsets[2], obj->offsets[3]);
@@ -268,6 +260,20 @@ static void set_callback(esp_foc_isensor_t *self, isensor_callback_t cb, void *a
     esp_foc_critical_leave();
 }
 
+static void set_filter_cutoff(esp_foc_isensor_t *self, float fc_hz, float fs_hz)
+{
+    isensor_adc_t *obj =
+        __containerof(self, isensor_adc_t, interface);
+
+    /* Designer is float-heavy; do it under critical section so the ADC
+     * ISR cannot land mid-redesign and use partially-updated coefs. */
+    esp_foc_critical_enter();
+    for (int i = 0; i < 4; ++i) {
+        esp_foc_biquad_butterworth_lpf_design_q16(&obj->bq[i], fc_hz, fs_hz);
+    }
+    esp_foc_critical_leave();
+}
+
 
 esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
 {
@@ -283,6 +289,12 @@ esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
     isensor_adc.interface.sample_isensors = sample_isensors;
     isensor_adc.interface.calibrate_isensors = calibrate_isensors;
     isensor_adc.interface.set_isensor_callback = set_callback;
+    isensor_adc.interface.set_filter_cutoff = set_filter_cutoff;
+    /* Default to bypass so the driver works correctly even if the
+     * caller (axis init / tuner) never invokes set_filter_cutoff. */
+    for (int i = 0; i < 4; ++i) {
+        esp_foc_biquad_q16_set_bypass(&isensor_adc.bq[i]);
+    }
     isensor_adc.number_of_channels = config->number_of_channels;
     isensor_adc.channels[0] = config->axis_channels[0];
     isensor_adc.channels[1] = config->axis_channels[1];
