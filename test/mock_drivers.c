@@ -180,6 +180,14 @@ static void mock_isensor_calibrate(esp_foc_isensor_t *self, int calibration_roun
     (void)calibration_rounds;
 }
 
+static void mock_isensor_set_filter_cutoff(esp_foc_isensor_t *self, float fc, float fs)
+{
+    mock_isensor_t *m = MOCK_ISENSOR_FROM_SELF(self);
+    m->set_filter_cutoff_count++;
+    m->last_filter_fc = fc;
+    m->last_filter_fs = fs;
+}
+
 static void mock_isensor_set_callback(esp_foc_isensor_t *self, isensor_callback_t cb, void *param)
 {
     mock_isensor_t *m = MOCK_ISENSOR_FROM_SELF(self);
@@ -195,6 +203,7 @@ void mock_isensor_init(mock_isensor_t *m)
     m->interface.sample_isensors = mock_isensor_sample;
     m->interface.calibrate_isensors = mock_isensor_calibrate;
     m->interface.set_isensor_callback = mock_isensor_set_callback;
+    m->interface.set_filter_cutoff = mock_isensor_set_filter_cutoff;
 }
 
 esp_foc_isensor_t *mock_isensor_interface(mock_isensor_t *m)

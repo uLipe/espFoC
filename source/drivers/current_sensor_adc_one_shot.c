@@ -27,6 +27,7 @@
 #include <math.h>
 #include <sdkconfig.h>
 #include "espFoC/utils/esp_foc_q16.h"
+#include "espFoC/utils/biquad_q16.h"
 #include "espFoC/driver_iq31_local.h"
 #include "espFoC/current_sensor_adc_one_shot.h"
 #include "hal/adc_hal.h"
@@ -48,9 +49,13 @@ typedef struct {
     int32_t encoder_prev_iq;
     int64_t encoder_accum_i64;
     uint32_t encoder_ppr_u32;
-    uint32_t raw_reads[4][ESP_FOC_LOW_SPEED_DOWNSAMPLING];
-    int sample_avg_idx;
-    float currents[4];
+    /* latest_raw is the unfiltered ADC sample per channel — used by
+     * calibration AND by the optional analog encoder, which must not
+     * see filtered position. */
+    int32_t latest_raw[4];
+    /* filtered_count is bq[i] output mapped back to count units. */
+    int32_t filtered_count[4];
+    esp_foc_biquad_q16_t bq[4];
     float offsets[4];
     esp_foc_isensor_t interface;
 
@@ -77,7 +82,6 @@ typedef struct {
 DRAM_ATTR static isensor_adc_t isensor_adc;
 static bool adc_initialized = false;
 static const float adc_to_volts = ((3.1f)/ 4096.0f);
-static float raw_floats[4];
 
 static adc_oneshot_hal_chan_cfg_t chan_cfg = {
     .atten = ADC_ATTEN_DB_12,
@@ -92,25 +96,6 @@ static adc_oneshot_hal_cfg_t hal_cfg = {
 
 static void oneshot_adc_start_sample(isensor_adc_t *isensor, adc_channel_t channel, adc_unit_t unit);
 
-static inline float avg_calc(uint32_t *raws)
-{
-    uint32_t avg = 0;
-    for(int i = 0; i < ESP_FOC_LOW_SPEED_DOWNSAMPLING; i++) {
-        avg += raws[i];
-    }
-
-    return (float)(avg/ESP_FOC_LOW_SPEED_DOWNSAMPLING);
-}
-
-static int32_t avg_calc_int(uint32_t *raws)
-{
-    uint32_t sum = 0;
-    for (int i = 0; i < ESP_FOC_LOW_SPEED_DOWNSAMPLING; i++) {
-        sum += raws[i];
-    }
-    return (int32_t)(sum / (uint32_t)ESP_FOC_LOW_SPEED_DOWNSAMPLING);
-}
-
 static void isensor_adc_isr(void *arg)
 {
     isensor_adc_t * isensor = (isensor_adc_t *)arg;
@@ -122,18 +107,27 @@ static void isensor_adc_isr(void *arg)
 
     if(adc_oneshot_ll_get_event(event)) {
 
-        isensor->raw_reads[isensor->number_of_conversions][isensor->sample_avg_idx] =
-            adc_oneshot_ll_get_raw_result(isensor->units[isensor->number_of_conversions]);
+        int32_t raw = (int32_t)adc_oneshot_ll_get_raw_result(
+                            isensor->units[isensor->number_of_conversions]);
+        int ch = isensor->number_of_conversions;
+        isensor->latest_raw[ch] = raw;
+        /* Only filter the channels that carry currents. When the
+         * analog encoder is enabled it lives on channel 2 and must
+         * stay raw — otherwise the position read would lag the
+         * actual rotor angle. */
+        if (isensor->enable_analog_encoder && ch == 2) {
+            isensor->filtered_count[ch] = raw;
+        } else {
+            q16_t y = esp_foc_biquad_q16_update(&isensor->bq[ch],
+                                                (q16_t)(raw << 16));
+            isensor->filtered_count[ch] = y >> 16;
+        }
 
         isensor->number_of_conversions++;
         if(isensor->number_of_conversions == isensor->number_of_channels) {
             isensor->number_of_conversions = 0;
             adc_oneshot_ll_clear_event(event);
             adc_oneshot_ll_disable_all_unit();
-            isensor->sample_avg_idx++;
-            if(isensor->sample_avg_idx >= ESP_FOC_LOW_SPEED_DOWNSAMPLING) {
-                isensor->sample_avg_idx = 0;
-            }
             if(isensor->callback) {
                 isensor->callback(isensor->user_data);
             }
@@ -221,27 +215,13 @@ static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
     isensor_adc_t *obj = __containerof(self, isensor_adc_t, interface);
     const int32_t adc_rng = 2048;
 
-    int32_t av0 = avg_calc_int(&obj->raw_reads[0][0]);
-    int32_t av1 = avg_calc_int(&obj->raw_reads[1][0]);
-    int32_t av2 = avg_calc_int(&obj->raw_reads[2][0]);
-    int32_t av3 = avg_calc_int(&obj->raw_reads[3][0]);
+    int32_t f0 = obj->filtered_count[0];
+    int32_t f1 = obj->filtered_count[1];
+    int32_t f2 = obj->filtered_count[2];
+    int32_t f3 = obj->filtered_count[3];
 
-    esp_foc_critical_enter();
-    obj->currents[0] = (float)av0;
-    obj->currents[1] = (float)av1;
-    if (!obj->enable_analog_encoder) {
-        obj->currents[2] = (float)av2;
-        obj->currents[3] = (float)av3;
-    }
-    esp_foc_critical_leave();
-
-    raw_floats[0] = (float)av0;
-    raw_floats[1] = (float)av1;
-    raw_floats[2] = (float)av2;
-    raw_floats[3] = (float)av3;
-
-    int32_t d0 = av0 - (int32_t)lroundf(obj->offsets[0]);
-    int32_t d1 = av1 - (int32_t)lroundf(obj->offsets[1]);
+    int32_t d0 = f0 - (int32_t)lroundf(obj->offsets[0]);
+    int32_t d1 = f1 - (int32_t)lroundf(obj->offsets[1]);
     d0 = esp_foc_clamp_int32(d0, -adc_rng, adc_rng);
     d1 = esp_foc_clamp_int32(d1, -adc_rng, adc_rng);
 
@@ -255,8 +235,8 @@ static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
     values->iw_axis_0 = iw0;
 
     if (!obj->enable_analog_encoder) {
-        int32_t d2 = av2 - (int32_t)lroundf(obj->offsets[2]);
-        int32_t d3 = av3 - (int32_t)lroundf(obj->offsets[3]);
+        int32_t d2 = f2 - (int32_t)lroundf(obj->offsets[2]);
+        int32_t d3 = f3 - (int32_t)lroundf(obj->offsets[3]);
         d2 = esp_foc_clamp_int32(d2, -adc_rng, adc_rng);
         d3 = esp_foc_clamp_int32(d3, -adc_rng, adc_rng);
         q16_t iu1 = q16_mul(esp_foc_q16_from_adc_diff_clamped(d2, adc_rng), obj->adc_to_current_scale_q16);
@@ -296,16 +276,23 @@ static void calibrate_isensors (esp_foc_isensor_t *self, int calibration_rounds)
         self->sample_isensors(self);
         esp_foc_sleep_ms(10);
 
-        obj->offsets[0] += ((float)obj->raw_reads[0][0]);
-        obj->offsets[1] += ((float)obj->raw_reads[1][0]);
-        obj->offsets[2] += ((float)obj->raw_reads[2][0]);
-        obj->offsets[3] += ((float)obj->raw_reads[3][0]);
+        /* Use the unfiltered latest_raw value here on purpose: see the
+         * matching note in current_sensor_adc.c. */
+        obj->offsets[0] += ((float)obj->latest_raw[0]);
+        obj->offsets[1] += ((float)obj->latest_raw[1]);
+        obj->offsets[2] += ((float)obj->latest_raw[2]);
+        obj->offsets[3] += ((float)obj->latest_raw[3]);
     }
 
     obj->offsets[0] /= calibration_rounds;
     obj->offsets[1] /= calibration_rounds;
     obj->offsets[2] /= calibration_rounds;
     obj->offsets[3] /= calibration_rounds;
+
+    for (int i = 0; i < 4; ++i) {
+        esp_foc_biquad_q16_reset(&obj->bq[i]);
+        obj->filtered_count[i] = obj->latest_raw[i];
+    }
 
     ESP_LOGI(TAG, "ADC calibrated, phase current offsets are: %f, %f, %f, %f",
             obj->offsets[0], obj->offsets[1], obj->offsets[2], obj->offsets[3]);
@@ -333,13 +320,29 @@ static void set_callback(esp_foc_isensor_t *self, isensor_callback_t cb, void *a
     esp_foc_critical_leave();
 }
 
+static void set_filter_cutoff(esp_foc_isensor_t *self, float fc_hz, float fs_hz)
+{
+    isensor_adc_t *obj =
+        __containerof(self, isensor_adc_t, interface);
+
+    esp_foc_critical_enter();
+    for (int i = 0; i < 4; ++i) {
+        if (obj->enable_analog_encoder && i == 2) {
+            esp_foc_biquad_q16_set_bypass(&obj->bq[i]);
+            continue;
+        }
+        esp_foc_biquad_butterworth_lpf_design_q16(&obj->bq[i], fc_hz, fs_hz);
+    }
+    esp_foc_critical_leave();
+}
+
 static void set_to_zero(esp_foc_rotor_sensor_t *self)
 {
     isensor_adc_t *obj = __containerof(self, isensor_adc_t, encoder_interface);
 
     sample_isensors(&obj->interface);
     esp_foc_sleep_ms(10);
-    obj->encoder_zero_offset = obj->raw_reads[2][0];
+    obj->encoder_zero_offset = (uint16_t)obj->latest_raw[2];
     obj->encoder_prev_iq = (int32_t)obj->encoder_zero_offset;
 
     ESP_LOGI(TAG, "Setting %d [ticks] as offset.", obj->encoder_zero_offset);
@@ -355,7 +358,7 @@ static q16_t read_counts_encoder(esp_foc_rotor_sensor_t *self)
 {
     isensor_adc_t *obj = __containerof(self, isensor_adc_t, encoder_interface);
 
-    uint16_t raw = obj->raw_reads[2][0];
+    uint16_t raw = (uint16_t)obj->latest_raw[2];
     uint32_t ppr = obj->encoder_ppr_u32 ? obj->encoder_ppr_u32 : 1u;
     uint32_t wrap = ppr * 95u / 100u;
 
@@ -417,7 +420,13 @@ esp_foc_isensor_t *isensor_adc_oneshot_new(esp_foc_isensor_adc_oneshot_config_t 
     isensor_adc.interface.sample_isensors = sample_isensors;
     isensor_adc.interface.calibrate_isensors = calibrate_isensors;
     isensor_adc.interface.set_isensor_callback = set_callback;
+    isensor_adc.interface.set_filter_cutoff = set_filter_cutoff;
     isensor_adc.number_of_channels = config->number_of_channels;
+    /* Default to bypass on every channel; axis init dials a real
+     * cutoff in via set_filter_cutoff. */
+    for (int i = 0; i < 4; ++i) {
+        esp_foc_biquad_q16_set_bypass(&isensor_adc.bq[i]);
+    }
 
     isensor_adc.encoder_interface.get_counts_per_revolution = get_counts_per_revolution;
     isensor_adc.encoder_interface.read_counts = read_counts_encoder;

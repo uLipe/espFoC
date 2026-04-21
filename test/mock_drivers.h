@@ -62,6 +62,9 @@ typedef struct {
     int sample_count;
     int calibrate_count;
     int set_callback_count;
+    int set_filter_cutoff_count;
+    float last_filter_fc;
+    float last_filter_fs;
     isensor_callback_t saved_callback;
     void *saved_callback_param;
 } mock_isensor_t;
