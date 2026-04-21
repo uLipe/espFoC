@@ -82,6 +82,11 @@ static q16_t read_q16(const void *src)
     return (q16_t)u;
 }
 
+/* Forward declaration: tuner_log is defined further down but
+ * handle_write needs it for the LOG-channel breadcrumb on the
+ * current-filter cutoff write. */
+static void tuner_log(const char *msg);
+
 static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
                                  esp_foc_tuner_id_t id,
                                  void *response, size_t *response_len)
@@ -140,10 +145,11 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
 
     q16_t value = 0;
     switch (id) {
-    case ESP_FOC_TUNER_PARAM_KP_Q16:      value = kp;  break;
-    case ESP_FOC_TUNER_PARAM_KI_Q16:      value = ki;  break;
-    case ESP_FOC_TUNER_PARAM_INT_LIM_Q16: value = lim; break;
-    case ESP_FOC_TUNER_PARAM_V_MAX_Q16:   value = axis->max_voltage; break;
+    case ESP_FOC_TUNER_PARAM_KP_Q16:          value = kp;  break;
+    case ESP_FOC_TUNER_PARAM_KI_Q16:          value = ki;  break;
+    case ESP_FOC_TUNER_PARAM_INT_LIM_Q16:     value = lim; break;
+    case ESP_FOC_TUNER_PARAM_V_MAX_Q16:       value = axis->max_voltage; break;
+    case ESP_FOC_TUNER_PARAM_I_FILTER_FC_Q16: value = axis->current_filter_fc_hz_q16; break;
     default:
         return ESP_FOC_ERR_INVALID_ARG;
     }
@@ -176,6 +182,25 @@ static esp_foc_err_t handle_write(esp_foc_axis_t *axis,
         default: break;
         }
         return esp_foc_axis_set_current_pi_gains_q16(axis, kp, ki, lim);
+    }
+
+    /* Current-sense LPF cutoff. Re-runs the Butterworth designer on
+     * the per-channel biquads inside the isensor driver. fs comes
+     * from the value the axis captured at init (loop rate). */
+    if (id == ESP_FOC_TUNER_WRITE_I_FILTER_FC_Q16) {
+        if (axis->isensor_driver == NULL ||
+            axis->isensor_driver->set_filter_cutoff == NULL) {
+            return ESP_FOC_ERR_AXIS_INVALID_STATE;
+        }
+        float fc_hz = q16_to_float(v);
+        float fs_hz = q16_to_float(axis->current_filter_fs_hz_q16);
+        axis->isensor_driver->set_filter_cutoff(axis->isensor_driver,
+                                                fc_hz, fs_hz);
+        axis->current_filter_fc_hz_q16 = v;
+        char msg[48];
+        snprintf(msg, sizeof(msg), "current filter: fc = %.1f Hz", (double)fc_hz);
+        tuner_log(msg);
+        return ESP_FOC_OK;
     }
 
     /* Motion-target writes only land while the override is active.
@@ -285,10 +310,12 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
     if (id == ESP_FOC_TUNER_CMD_PERSIST_NVS) {
         /* Payload [R_q16, L_q16, bw_q16] — host knows the motor params
          * the user just typed in; firmware combines them with its own
-         * current Kp/Ki/integrator_limit before persisting. */
+         * current Kp/Ki/integrator_limit + the live current-filter
+         * cutoff before persisting. */
         esp_foc_calibration_data_t data = {0};
         esp_foc_axis_get_current_pi_gains_q16(axis, &data.kp, &data.ki,
                                               &data.integrator_limit);
+        data.current_filter_fc_hz = axis->current_filter_fc_hz_q16;
         if (payload != NULL && payload_len >= 12) {
             const uint8_t *p = (const uint8_t *)payload;
             data.motor_r_ohm = read_q16(p);
@@ -311,6 +338,15 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
         }
         err = esp_foc_axis_set_current_pi_gains_q16(axis, data.kp, data.ki,
                                                     data.integrator_limit);
+        if (err == ESP_FOC_OK && data.current_filter_fc_hz > 0 &&
+            axis->isensor_driver != NULL &&
+            axis->isensor_driver->set_filter_cutoff != NULL) {
+            float fc = q16_to_float(data.current_filter_fc_hz);
+            float fs = q16_to_float(axis->current_filter_fs_hz_q16);
+            axis->isensor_driver->set_filter_cutoff(axis->isensor_driver,
+                                                    fc, fs);
+            axis->current_filter_fc_hz_q16 = data.current_filter_fc_hz;
+        }
         tuner_log(err == ESP_FOC_OK
                   ? "calibration: NVS overlay applied"
                   : "calibration: apply failed");

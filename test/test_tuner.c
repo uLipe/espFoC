@@ -258,6 +258,43 @@ TEST_CASE("tuner: motion target writes refused while override is OFF",
             payload, sizeof(payload), NULL, &resp_len));
 }
 
+TEST_CASE("tuner: read I_FILTER_FC returns the value init programmed",
+          "[espFoC][tuner]")
+{
+    setup_attached_axis();
+    /* esp_foc_initialize_axis programs the cutoff via mock isensor's
+     * set_filter_cutoff and stores fc on the axis itself. */
+    TEST_ASSERT_TRUE(s_isensor.set_filter_cutoff_count >= 1);
+
+    uint8_t resp[4] = {0};
+    size_t rl = sizeof(resp);
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(
+        0, ESP_FOC_TUNER_OP_READ, ESP_FOC_TUNER_PARAM_I_FILTER_FC_Q16,
+        NULL, 0, resp, &rl));
+    TEST_ASSERT_EQUAL(4, rl);
+    q16_t fc = deserialize_q16_le(resp);
+    TEST_ASSERT_EQUAL_INT32(s_axis.current_filter_fc_hz_q16, fc);
+}
+
+TEST_CASE("tuner: write I_FILTER_FC re-runs the designer on the driver",
+          "[espFoC][tuner]")
+{
+    setup_attached_axis();
+    int before = s_isensor.set_filter_cutoff_count;
+
+    uint8_t pl[4];
+    q16_t new_fc = q16_from_float(700.0f);
+    serialize_q16_le(pl, new_fc);
+    size_t resp_len = 0;
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(
+        0, ESP_FOC_TUNER_OP_WRITE, ESP_FOC_TUNER_WRITE_I_FILTER_FC_Q16,
+        pl, sizeof(pl), NULL, &resp_len));
+
+    TEST_ASSERT_EQUAL(before + 1, s_isensor.set_filter_cutoff_count);
+    TEST_ASSERT_FLOAT_WITHIN(0.5f, 700.0f, s_isensor.last_filter_fc);
+    TEST_ASSERT_EQUAL_INT32(new_fc, s_axis.current_filter_fc_hz_q16);
+}
+
 TEST_CASE("tuner: motion writes land in shadow when override is ON",
           "[espFoC][tuner]")
 {
