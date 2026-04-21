@@ -50,14 +50,13 @@ static esp_foc_rotor_sensor_t *sensor;
 
 static esp_foc_axis_t axis;
 
-/* Same motor as legacy demos: QBL4208-64-013 */
+/* Reference motor: QBL4208-64-013. Gains come from the build-time MPZ
+ * autotuner (CONFIG_ESP_FOC_MOTOR_PROFILE) — there is no runtime motor
+ * R/L any more in 3.0. */
 static esp_foc_motor_control_settings_t settings = {
-    .motor_pole_pairs = 4,
-    .motor_inductance = 0,
-    .motor_resistance = 0,
-    .motor_inertia = 0,
+    .motor_pole_pairs  = 4,
     .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
-    .motor_unit = 0,
+    .motor_unit        = 0,
 };
 
 
@@ -192,21 +191,9 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "Initializing espFoC sensored axis (IQ31)");
 
-    /* Two equally valid options for the current-loop PI gains:
-     *
-     *   1) Provide motor R, L below. esp_foc_initialize_axis() will compute
-     *      Kp/Ki via the legacy continuous-time formula (default path).
-     *
-     *   2) Leave motor_resistance/motor_inductance at 0 and rely on the
-     *      build-time autotuner (CONFIG_ESP_FOC_USE_AUTOGEN_GAINS=y, default).
-     *      The MPZ-designed gains for the motor profile selected via
-     *      CONFIG_ESP_FOC_MOTOR_PROFILE (scripts/motors/<NAME>.json) are
-     *      injected at boot. Live retune is also available via
-     *      esp_foc_axis_retune_current_pi_q16(). */
-    settings.motor_inductance = q16_from_float(0.0018f);
-    settings.motor_resistance = q16_from_float(1.08f);
-    settings.motor_inertia = q16_from_float(0.0001f);
-
+    /* Gains are injected at boot from the MPZ autogen header for the
+     * motor profile selected via CONFIG_ESP_FOC_MOTOR_PROFILE. Use
+     * esp_foc_axis_retune_current_pi_q16() at runtime to override. */
     initialize_foc_drivers();
 
     esp_foc_err_t foc_err = esp_foc_initialize_axis(

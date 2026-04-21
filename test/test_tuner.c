@@ -30,9 +30,6 @@ static void setup_attached_axis(void)
     mock_isensor_init(&s_isensor);
     settings.natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW;
     settings.motor_pole_pairs = 7;
-    settings.motor_resistance = q16_from_float(1.0f);
-    settings.motor_inductance = q16_from_float(0.001f);
-    settings.motor_inertia = q16_from_float(0.0001f);
     settings.motor_unit = 0;
 
     TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_initialize_axis(

@@ -23,9 +23,6 @@ static void setup_sensored_mocks(void)
     mock_isensor_init(&mock_isensor);
     settings_q31.natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW;
     settings_q31.motor_pole_pairs = 7;
-    settings_q31.motor_resistance = q16_from_float(1.0f);
-    settings_q31.motor_inductance = q16_from_float(0.001f);
-    settings_q31.motor_inertia = q16_from_float(0.0001f);
     settings_q31.motor_unit = 0;
 }
 
@@ -127,19 +124,17 @@ TEST_CASE("axis api: set callback validates args and stores", "[espFoC][axis]")
     TEST_ASSERT_EQUAL(1, iq31_reg_cb_called);
 }
 
-TEST_CASE("axis api: edge near saturation settings", "[espFoC][axis]")
+TEST_CASE("axis api: high pole-pair count is accepted",
+          "[espFoC][axis]")
 {
     setup_sensored_mocks();
-    settings_q31.motor_resistance = q16_from_float(0.99f);
-    settings_q31.motor_inductance = q16_from_float(0.99f);
-    settings_q31.motor_inertia = q16_from_float(0.99f);
+    settings_q31.motor_pole_pairs = 21;
     TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_initialize_axis(
                                       &axis_q31,
                                       mock_inverter_interface(&mock_inv),
                                       mock_rotor_sensor_interface(&mock_rotor),
                                       mock_isensor_interface(&mock_isensor),
                                       settings_q31));
+    TEST_ASSERT_EQUAL(21, axis_q31.motor_pole_pairs);
     TEST_ASSERT_TRUE(axis_q31.max_voltage > 0);
-    TEST_ASSERT_TRUE(axis_q31.dt > 0);
-    TEST_ASSERT_TRUE(axis_q31.inv_dt > 0);
 }
