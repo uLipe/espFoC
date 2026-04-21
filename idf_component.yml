@@ -1,5 +1,11 @@
 dependencies:
   idf: '>=5.0'
+  espressif/esp_tinyusb:
+    # USB-CDC bridge (esp_foc_bridge_usbcdc.c) needs TinyUSB. Pulled in
+    # only on USB-capable targets so esp32 stays lightweight.
+    version: "^2.0.1~1"
+    rules:
+      - if: "idf_target in [esp32s2, esp32s3, esp32p4]"
 description: "Field Oriented Control (FOC) library for PMSM/BLDC motors on ESP32. Motor driving and torque loop; velocity/position loops are implemented by the application via regulation callback."
 version: "2.0.0"
 repository: "https://github.com/uLipe/espFoC.git"
