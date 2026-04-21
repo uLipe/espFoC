@@ -40,19 +40,28 @@ class ParamId(IntEnum):
     V_MAX_Q16       = 0x0013
     AXIS_STATE      = 0x0040
     AXIS_LAST_ERR   = 0x0041
+    NVS_PRESENT     = 0x0042
+    FIRMWARE_TYPE   = 0x0050
     # Gain writes (atomic swap)
     WRITE_KP        = 0x0020
     WRITE_KI        = 0x0021
     WRITE_INT_LIM   = 0x0022
     # Motion targets (only honored while override is on)
-    WRITE_TARGET_ID = 0x0050
-    WRITE_TARGET_IQ = 0x0051
-    WRITE_TARGET_UD = 0x0052
-    WRITE_TARGET_UQ = 0x0053
+    WRITE_TARGET_ID = 0x0060
+    WRITE_TARGET_IQ = 0x0061
+    WRITE_TARGET_UD = 0x0062
+    WRITE_TARGET_UQ = 0x0063
     # Commands (exec)
     CMD_RECOMPUTE_GAINS = 0x0080
     CMD_OVERRIDE_ON     = 0x00A0
     CMD_OVERRIDE_OFF    = 0x00A1
+    CMD_ALIGN_AXIS      = 0x00A2
+    CMD_PERSIST_NVS     = 0x00B0
+    CMD_LOAD_NVS        = 0x00B1
+    CMD_ERASE_NVS       = 0x00B2
+
+# 'TSGX' little-endian as a sentinel returned by tuner_studio_target.
+TUNER_FIRMWARE_TYPE_TSGX = 0x58475354
 
 
 class AxisStateFlag(IntFlag):

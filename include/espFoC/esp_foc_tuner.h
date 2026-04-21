@@ -51,6 +51,12 @@ typedef enum {
     ESP_FOC_TUNER_PARAM_V_MAX_Q16       = 0x0013, /* read q16 */
     ESP_FOC_TUNER_PARAM_AXIS_STATE      = 0x0040, /* read u8 bitmap */
     ESP_FOC_TUNER_PARAM_AXIS_LAST_ERR   = 0x0041, /* read i8 (esp_foc_err_t) */
+    ESP_FOC_TUNER_PARAM_NVS_PRESENT     = 0x0042, /* read u8 (0/1) */
+    ESP_FOC_TUNER_PARAM_FIRMWARE_TYPE   = 0x0050, /* read u32: 0 by default,
+                                                   * tuner_studio_target sets
+                                                   * 'TSGX' so the GUI can
+                                                   * surface its Generate App
+                                                   * tab on detection. */
 
     /* Write: gain swap (atomic) */
     ESP_FOC_TUNER_WRITE_KP_Q16          = 0x0020, /* write q16 */
@@ -58,15 +64,20 @@ typedef enum {
     ESP_FOC_TUNER_WRITE_INT_LIM_Q16     = 0x0022, /* write q16 */
 
     /* Write: tuner-driven motion targets (only honored while override active) */
-    ESP_FOC_TUNER_WRITE_TARGET_ID_Q16   = 0x0050, /* write q16 (current ref) */
-    ESP_FOC_TUNER_WRITE_TARGET_IQ_Q16   = 0x0051, /* write q16 (current ref) */
-    ESP_FOC_TUNER_WRITE_TARGET_UD_Q16   = 0x0052, /* write q16 (voltage ff) */
-    ESP_FOC_TUNER_WRITE_TARGET_UQ_Q16   = 0x0053, /* write q16 (voltage ff) */
+    ESP_FOC_TUNER_WRITE_TARGET_ID_Q16   = 0x0060, /* write q16 (current ref) */
+    ESP_FOC_TUNER_WRITE_TARGET_IQ_Q16   = 0x0061, /* write q16 (current ref) */
+    ESP_FOC_TUNER_WRITE_TARGET_UD_Q16   = 0x0062, /* write q16 (voltage ff) */
+    ESP_FOC_TUNER_WRITE_TARGET_UQ_Q16   = 0x0063, /* write q16 (voltage ff) */
 
     /* Commands (exec) */
     ESP_FOC_TUNER_CMD_RECOMPUTE_GAINS   = 0x0080, /* [R_q16,L_q16,bw_q16] */
     ESP_FOC_TUNER_CMD_OVERRIDE_ON       = 0x00A0, /* no payload */
     ESP_FOC_TUNER_CMD_OVERRIDE_OFF      = 0x00A1, /* no payload */
+    ESP_FOC_TUNER_CMD_ALIGN_AXIS        = 0x00A2, /* blocking; emits LOG progress */
+
+    ESP_FOC_TUNER_CMD_PERSIST_NVS       = 0x00B0, /* save current gains */
+    ESP_FOC_TUNER_CMD_LOAD_NVS          = 0x00B1, /* apply NVS overlay */
+    ESP_FOC_TUNER_CMD_ERASE_NVS         = 0x00B2, /* nuke calibration ns */
 } esp_foc_tuner_id_t;
 
 /* Bitmap returned by ESP_FOC_TUNER_PARAM_AXIS_STATE. */
@@ -141,6 +152,19 @@ void esp_foc_tuner_reactor_reset(void);
 void esp_foc_tuner_init_bus_callback(void);
 int  esp_foc_tuner_recv_callback(uint8_t *buf, size_t max);
 void esp_foc_tuner_send_callback(const uint8_t *buf, size_t len);
+
+/**
+ * @brief Identifier the host uses to recognise a specific firmware
+ *        variant (e.g. tuner_studio_target advertises 'TSGX' so
+ *        TunerStudio enables its Generate App tab).
+ *
+ * Default returns 0; override with a strong definition in your
+ * application to expose a different value.
+ */
+uint32_t esp_foc_tuner_firmware_type(void);
+
+#define ESP_FOC_TUNER_FIRMWARE_TYPE_GENERIC     0u
+#define ESP_FOC_TUNER_FIRMWARE_TYPE_TSGX        0x58475354u  /* 'TSGX' LE */
 
 #ifdef __cplusplus
 }

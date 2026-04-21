@@ -5,10 +5,12 @@
  */
 
 #include <string.h>
+#include <stdio.h>
 #include "espFoC/esp_foc_tuner.h"
 #include "espFoC/esp_foc_axis_tuning.h"
 #include "espFoC/esp_foc_axis.h"
 #include "espFoC/esp_foc_link.h"
+#include "espFoC/esp_foc_calibration.h"
 
 /* Per-axis registry. Pointers are only mutated from esp_foc_tuner_attach_axis,
  * which is expected to be called from a non-time-critical context. */
@@ -88,22 +90,49 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
-    /* AXIS_STATE / AXIS_LAST_ERR return a single byte; everything else 4. */
+    /* Single-byte responses */
     if (id == ESP_FOC_TUNER_PARAM_AXIS_STATE ||
-        id == ESP_FOC_TUNER_PARAM_AXIS_LAST_ERR) {
+        id == ESP_FOC_TUNER_PARAM_AXIS_LAST_ERR ||
+        id == ESP_FOC_TUNER_PARAM_NVS_PRESENT) {
         if (*response_len < 1) {
             return ESP_FOC_ERR_INVALID_ARG;
         }
         uint8_t *b = (uint8_t *)response;
-        b[0] = (id == ESP_FOC_TUNER_PARAM_AXIS_STATE)
-                 ? compute_axis_state(axis)
-                 : (uint8_t)(int8_t)axis->rotor_aligned;
+        switch (id) {
+        case ESP_FOC_TUNER_PARAM_AXIS_STATE:
+            b[0] = compute_axis_state(axis);
+            break;
+        case ESP_FOC_TUNER_PARAM_AXIS_LAST_ERR:
+            b[0] = (uint8_t)(int8_t)axis->rotor_aligned;
+            break;
+        case ESP_FOC_TUNER_PARAM_NVS_PRESENT:
+            /* axis->settings is not stored; use 0 as the axis_id slot
+             * the host most likely cares about (single-axis is the
+             * common case). Multi-axis hosts can still read the gains
+             * back to verify the overlay landed. */
+            b[0] = esp_foc_calibration_present(0) ? 1 : 0;
+            break;
+        default: break;
+        }
         *response_len = 1;
         return ESP_FOC_OK;
     }
 
     if (*response_len < 4) {
         return ESP_FOC_ERR_INVALID_ARG;
+    }
+
+    /* FIRMWARE_TYPE is a u32 magic — handled separately because it does
+     * not come from the axis. */
+    if (id == ESP_FOC_TUNER_PARAM_FIRMWARE_TYPE) {
+        uint32_t v = esp_foc_tuner_firmware_type();
+        uint8_t *b = (uint8_t *)response;
+        b[0] = (uint8_t)v;
+        b[1] = (uint8_t)(v >> 8);
+        b[2] = (uint8_t)(v >> 16);
+        b[3] = (uint8_t)(v >> 24);
+        *response_len = 4;
+        return ESP_FOC_OK;
     }
 
     q16_t kp = 0, ki = 0, lim = 0;
@@ -174,6 +203,30 @@ static esp_foc_err_t handle_write(esp_foc_axis_t *axis,
     return ESP_FOC_ERR_INVALID_ARG;
 }
 
+/* Send a one-line text message on the LOG link channel. Used by the
+ * blocking commands (alignment, persist) to surface progress without
+ * blocking the user behind a giant tuner-channel response. */
+static void tuner_log(const char *msg)
+{
+    if (msg == NULL) {
+        return;
+    }
+    size_t len = strlen(msg);
+    if (len == 0) {
+        return;
+    }
+    if (len > ESP_FOC_LINK_MAX_PAYLOAD) {
+        len = ESP_FOC_LINK_MAX_PAYLOAD;
+    }
+    uint8_t frame[ESP_FOC_LINK_MAX_FRAME];
+    size_t flen = 0;
+    if (esp_foc_link_encode(ESP_FOC_LINK_CH_LOG, 0,
+                            (const uint8_t *)msg, len,
+                            frame, sizeof(frame), &flen) == ESP_FOC_LINK_OK) {
+        esp_foc_tuner_send_callback(frame, flen);
+    }
+}
+
 static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
                                  esp_foc_tuner_id_t id,
                                  const void *payload, size_t payload_len)
@@ -210,6 +263,66 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
         axis->tuner_override.active = false;
         esp_foc_critical_leave();
         return ESP_FOC_OK;
+    }
+
+    if (id == ESP_FOC_TUNER_CMD_ALIGN_AXIS) {
+        /* Blocking — alignment takes ~3 s with the parking + probe +
+         * re-park sequence. The host should bump its timeout for this
+         * specific command (TunerStudio uses 6 s). LOG frames bracket
+         * the call so the GUI's progress dialog has something to show. */
+        tuner_log("alignment: started");
+        esp_foc_err_t err = esp_foc_align_axis(axis);
+        if (err == ESP_FOC_OK) {
+            tuner_log(axis->natural_direction == Q16_ONE
+                      ? "alignment: complete (direction = CW)"
+                      : "alignment: complete (direction = CCW)");
+        } else {
+            tuner_log("alignment: failed");
+        }
+        return err;
+    }
+
+    if (id == ESP_FOC_TUNER_CMD_PERSIST_NVS) {
+        /* Payload [R_q16, L_q16, bw_q16] — host knows the motor params
+         * the user just typed in; firmware combines them with its own
+         * current Kp/Ki/integrator_limit before persisting. */
+        esp_foc_calibration_data_t data = {0};
+        esp_foc_axis_get_current_pi_gains_q16(axis, &data.kp, &data.ki,
+                                              &data.integrator_limit);
+        if (payload != NULL && payload_len >= 12) {
+            const uint8_t *p = (const uint8_t *)payload;
+            data.motor_r_ohm = read_q16(p);
+            data.motor_l_h = read_q16(p + 4);
+            data.bandwidth_hz = read_q16(p + 8);
+        }
+        esp_foc_err_t err = esp_foc_calibration_save(0, &data);
+        tuner_log(err == ESP_FOC_OK
+                  ? "calibration: saved to NVS"
+                  : "calibration: save failed");
+        return err;
+    }
+
+    if (id == ESP_FOC_TUNER_CMD_LOAD_NVS) {
+        esp_foc_calibration_data_t data;
+        esp_foc_err_t err = esp_foc_calibration_load(0, &data);
+        if (err != ESP_FOC_OK) {
+            tuner_log("calibration: nothing to load");
+            return err;
+        }
+        err = esp_foc_axis_set_current_pi_gains_q16(axis, data.kp, data.ki,
+                                                    data.integrator_limit);
+        tuner_log(err == ESP_FOC_OK
+                  ? "calibration: NVS overlay applied"
+                  : "calibration: apply failed");
+        return err;
+    }
+
+    if (id == ESP_FOC_TUNER_CMD_ERASE_NVS) {
+        esp_foc_err_t err = esp_foc_calibration_erase();
+        tuner_log(err == ESP_FOC_OK
+                  ? "calibration: NVS namespace erased"
+                  : "calibration: erase failed");
+        return err;
     }
 
     return ESP_FOC_ERR_INVALID_ARG;
@@ -349,4 +462,9 @@ __attribute__((weak)) void esp_foc_tuner_send_callback(const uint8_t *buf, size_
 {
     (void)buf;
     (void)len;
+}
+
+__attribute__((weak)) uint32_t esp_foc_tuner_firmware_type(void)
+{
+    return ESP_FOC_TUNER_FIRMWARE_TYPE_GENERIC;
 }
