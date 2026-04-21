@@ -22,8 +22,8 @@ Targets: ESP32, ESP32-S3, ESP32-P4 (ESP-IDF v5+).
 > formula and the `motor_resistance / motor_inductance / motor_inertia`
 > fields are gone — gains come from the build-time autotuner or the
 > runtime tuner. The 3-PWM LEDC driver and the WIP `axis_sensorless`
-> example were also dropped. See [`CHANGELOG`](#changelog) below for
-> a full migration list.
+> example were also dropped. See [`changelog.txt`](changelog.txt) for
+> the full migration list.
 
 ---
 
@@ -236,28 +236,8 @@ espFoC/
 
 ## Changelog
 
-### 3.0
-
-* **Breaking:** `motor_resistance`, `motor_inductance` and
-  `motor_inertia` removed from `esp_foc_motor_control_settings_t`.
-  Gains come from the build-time autotuner or the runtime tuner.
-* **Breaking:** the 3-PWM LEDC inverter driver and
-  `CONFIG_ESP_FOC_ENABLE_LEGACY_LEDC_PWM` were dropped. Use the
-  3-PWM or 6-PWM MCPWM drivers.
-* **Breaking:** `examples/axis_sensorless` removed pending the
-  observer rework.
-* `esp_foc_align_axis()` now probes the rotor for its natural
-  direction and overrides the settings hint when the deflection is
-  conclusive.
-* New `esp_foc_calibration_*()` API and
-  `CONFIG_ESP_FOC_CALIBRATION_NVS` overlay calibration on top of
-  the autogen gains at boot, gated by a profile-hash for safety.
-* New tuner protocol commands: `CMD_ALIGN_AXIS`, `CMD_PERSIST_NVS`,
-  `CMD_LOAD_NVS`, `CMD_ERASE_NVS`, plus `PARAM_NVS_PRESENT` and
-  `PARAM_FIRMWARE_TYPE`.
-* New `examples/tuner_studio_target` service-mode firmware.
-* TunerStudio: alignment button, calibration save / load / erase,
-  LOG-channel viewer, Hardware tab and Generate App tab.
+Per-release notes live in [`changelog.txt`](changelog.txt) (consumed
+by the GitHub release notes generator).
 
 ---
 
