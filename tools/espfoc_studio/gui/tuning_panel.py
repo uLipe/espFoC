@@ -81,10 +81,13 @@ class TuningPanel(QWidget):
         for lbl in (self._kp_label, self._ki_label,
                     self._lim_label, self._vmax_label):
             lbl.setStyleSheet("font-family: monospace;")
+        self._fc_label = QLabel("-")
+        self._fc_label.setStyleSheet("font-family: monospace;")
         live_form.addRow("Kp [V/A]", self._kp_label)
         live_form.addRow("Ki [V/(A·s)]", self._ki_label)
         live_form.addRow("ILim [V]", self._lim_label)
         live_form.addRow("Vmax [V]", self._vmax_label)
+        live_form.addRow("I-LPF fc [Hz]", self._fc_label)
         root.addWidget(live_box)
 
         # --- Manual gain editor ---
@@ -115,12 +118,21 @@ class TuningPanel(QWidget):
                                 step=0.01, suffix=" mH")
         self._bw_spin = _spin(1.0, 5000.0, 1, self._last_bw,
                               step=10.0, suffix=" Hz")
+        # Current-sense LPF cutoff. Lives next to the recompute group
+        # because it is always the second knob the operator reaches for
+        # after dialling Kp / Ki.
+        self._fc_spin = _spin(10.0, 20000.0, 1, 300.0,
+                              step=10.0, suffix=" Hz")
         mfrm.addRow("R", self._r_spin)
         mfrm.addRow("L", self._l_mh_spin)
         mfrm.addRow("Bandwidth", self._bw_spin)
+        mfrm.addRow("I-LPF fc", self._fc_spin)
         btn_mpz = QPushButton("Recompute gains")
         btn_mpz.clicked.connect(self._on_mpz)
+        btn_fc = QPushButton("Apply current LPF cutoff")
+        btn_fc.clicked.connect(self._on_apply_fc)
         mfrm.addRow(btn_mpz)
+        mfrm.addRow(btn_fc)
         root.addWidget(mpz)
         # Push any initial model to the Analysis view.
         if self._on_params_changed is not None:
@@ -199,6 +211,7 @@ class TuningPanel(QWidget):
             ki = self._client.read_ki()
             lim = self._client.read_int_lim()
             vmax = self._client.read_v_max()
+            fc = self._client.read_current_filter_fc()
             state = self._client.read_axis_state()
             present = self._client.is_calibration_present()
         except TunerError as e:
@@ -209,6 +222,7 @@ class TuningPanel(QWidget):
         self._ki_label.setText(f"{ki:9.2f}")
         self._lim_label.setText(f"{lim:9.3f}")
         self._vmax_label.setText(f"{vmax:9.3f}")
+        self._fc_label.setText(f"{fc:9.1f}")
         self._state_label.setText(f"axis: {self._format_state(state)}")
         self._cal_present = present
         self._cal_label.setText("calibration: " +
@@ -234,6 +248,14 @@ class TuningPanel(QWidget):
             return
         self._status.setText("")
         self._notify_params_changed()
+
+    def _on_apply_fc(self) -> None:
+        try:
+            self._client.write_current_filter_fc(self._fc_spin.value())
+        except TunerError as e:
+            self._status.setText(str(e))
+            return
+        self._status.setText("")
 
     def _on_mpz(self) -> None:
         motor_l_h = self._l_mh_spin.value() * 1e-3  # mH -> H

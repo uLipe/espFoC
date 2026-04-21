@@ -112,6 +112,7 @@ class GenerateAppPanel(QWidget):
             kp = self._client.read_kp()
             ki = self._client.read_ki()
             ilim = self._client.read_int_lim()
+            fc_hz = self._client.read_current_filter_fc()
         except TunerError as e:
             self._append(f"error: failed to read live gains: {e}")
             return
@@ -124,7 +125,8 @@ class GenerateAppPanel(QWidget):
                 app_name=app_name,
                 output_dir=out_dir,
                 kp=kp, ki=ki, ilim=ilim,
-                r_ohm=r_ohm, l_h=l_h, bw_hz=bw_hz)
+                r_ohm=r_ohm, l_h=l_h, bw_hz=bw_hz,
+                current_filter_fc_hz=fc_hz)
         except ValueError as e:
             self._append(f"error: {e}")
             return

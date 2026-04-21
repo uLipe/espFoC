@@ -136,6 +136,17 @@ def cmd_erase(args) -> int:
     return 0
 
 
+def cmd_cutoff(args) -> int:
+    cli = _make_client(args)
+    if args.set is not None:
+        cli.write_current_filter_fc(args.set)
+        print(f"current-filter cutoff set to {args.set:.1f} Hz")
+        return 0
+    fc = cli.read_current_filter_fc()
+    print(f"current-filter cutoff = {fc:.1f} Hz")
+    return 0
+
+
 def cmd_firmware_type(args) -> int:
     cli = _make_client(args)
     fw = cli.read_firmware_type()
@@ -188,6 +199,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("load", help="apply NVS overlay live").set_defaults(func=cmd_load)
     sub.add_parser("erase", help="erase calibration namespace").set_defaults(func=cmd_erase)
+
+    pc = sub.add_parser("cutoff",
+                        help="read or set the current-sense low-pass cutoff (Hz)")
+    pc.add_argument("--set", type=float, default=None,
+                    help="if given, programs the new cutoff; otherwise reads it back")
+    pc.set_defaults(func=cmd_cutoff)
+
     sub.add_parser("firmware-type",
                    help="show the firmware-type magic the target reports"
                   ).set_defaults(func=cmd_firmware_type)
