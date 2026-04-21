@@ -4,6 +4,38 @@ This file is used to generate GitHub releases. All versions from 2.0.0 onward ar
 
 ---
 
+## 3.0.0
+
+### BREAKING CHANGES (major)
+
+- **Settings struct slimmed down:** `motor_resistance`, `motor_inductance` and `motor_inertia` were removed from `esp_foc_motor_control_settings_t`. Current-loop gains come from the build-time MPZ autotuner (selected via `CONFIG_ESP_FOC_MOTOR_PROFILE`), the new NVS calibration overlay, or the runtime tuner. The old continuous-time formula was the maybe-good-maybe-not codepath and is gone.
+- **Legacy LEDC PWM driver removed:** `inverter_3pwm_ledc.[ch]` and `CONFIG_ESP_FOC_ENABLE_LEGACY_LEDC_PWM` are gone. Use the 3-PWM or 6-PWM MCPWM drivers.
+- **Sensorless example removed:** `examples/axis_sensorless/` was a placeholder behind a compile guard while the rotor-observer integration is reworked. It will return when the observer chain is wired into the axis again.
+- **Tuner motion-target IDs renumbered:** moved 0x0050..0x0053 → 0x0060..0x0063 to make room for `PARAM_FIRMWARE_TYPE` (0x0050). Affects only consumers that hardcode the wire IDs; the C symbols and the Python protocol mirror are updated in lockstep.
+
+### Features
+
+- **NVS calibration overlay** (`esp_foc_calibration_*` API). Tune live, save once, every subsequent boot comes up already tuned with no host attached. Each blob carries an FNV-1a profile hash of `<motor_profile>:<schema_version>` so a calibration tuned on motor A can never be silently loaded on motor B. Wire format: `[magic=0xE5F0CC11][version=1][profile_hash:u32][crc32:u32][payload_len:u16][pad][payload bytes]`. Gated by `CONFIG_ESP_FOC_CALIBRATION_NVS` (default y when the tuner backend is enabled).
+- **Auto natural-direction probe in `esp_foc_align_axis()`.** After the initial parking, the routine drives a short positive `Vq` pulse and watches the encoder delta to decide whether the encoder counts up or down on physical forward motion. `settings.natural_direction` becomes a hint used only when the rotor refuses to deflect (load-stuck, open phase, dead encoder).
+- **`tuner_studio_target` service-mode firmware** (`examples/tuner_studio_target`). Boots, parks the motor, attaches the axis to the runtime tuner, advertises `'TSGX'` through the new `esp_foc_tuner_firmware_type()` weak hook so TunerStudio recognises the target on connect. USB-CDC default on S3/P4, UART on plain ESP32.
+- **Tuner protocol additions:** `CMD_ALIGN_AXIS`, `CMD_PERSIST_NVS`, `CMD_LOAD_NVS`, `CMD_ERASE_NVS`, `PARAM_NVS_PRESENT`, `PARAM_FIRMWARE_TYPE`. Blocking commands stream progress on the LOG link channel so the GUI's log viewer / CLI can surface alignment and persistence status.
+- **TunerStudio:** Align button, Save / Load / Erase calibration buttons, calibration status indicator, LOG-channel viewer in the Tuning panel; new Hardware tab with target-aware GPIO / ADC dropdowns; new Generate App tab that renders a self-contained IDF project from the live tuning state plus the Hardware tab values, with a bit-exact `nvs_calibration.bin` when `nvs_partition_gen.py` is on `$IDF_PATH`. The Generate App tab is conditional on `firmware_type == 'TSGX'`.
+- **`tunerctl` CLI:** `align`, `persist`, `load`, `erase`, `firmware-type` subcommands.
+- **CI:** new `python_tests` job runs the host suite (link codec, tuner protocol, analysis, codegen, GUI smoke under `QT_QPA_PLATFORM=offscreen`); `tuner_studio_target` is built for esp32s3 (USB-CDC) + esp32 (UART) on every push.
+
+### Bug fixes
+
+- `idf_component.yml` `esp_tinyusb` rule used the wrong key (`idf_target` instead of `target`); the dependency was never auto-fetched on USB-capable targets. Fixed.
+- QEMU runner timed out flakily because Unity's prompt was raced; runner now expects `"Enter test for running"` explicitly and uses a 300 s timeout.
+- LinkReader / LoopbackTransport busy-looped reading 0 bytes when the demo firmware had nothing to send, starving the Qt event loop down to ~10 FPS. Switched to `threading.Condition` so reads block efficiently.
+
+### Other
+
+- Docs revamp: README is now concise and TunerStudio-first; deep tuning reference lives in `doc/TUNING.md`.
+- Internal: `esp_foc_initialize_axis()` lost ~35 lines of duplicated `#if` branching once the float fallback was deleted.
+
+---
+
 ## 2.0.0
 
 ### BREAKING CHANGES (major)
