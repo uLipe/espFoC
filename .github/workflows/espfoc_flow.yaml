@@ -63,16 +63,12 @@ jobs:
         pushd examples/tuner_studio_target
         # Default sdkconfig drives USB-CDC; valid on S3/P4. We exercise
         # both paths so a CDC-only or UART-only regression is caught.
+        # The ESP32-specific overrides live in sdkconfig.defaults.esp32
+        # (auto-loaded by IDF on set-target esp32).
         idf.py set-target esp32s3
         idf.py build
         rm -rf build sdkconfig
-        # Plain ESP32 has no USB-CDC; switch the bridge to UART before
-        # building. -D forces a Kconfig override on top of the defaults.
-        idf.py set-target esp32 \
-               -DCONFIG_ESP_FOC_BRIDGE_USBCDC=n \
-               -DCONFIG_ESP_FOC_BRIDGE_UART=y \
-               -DCONFIG_TINYUSB_CDC_ENABLED=n
-        idf.py reconfigure
+        idf.py set-target esp32
         idf.py build
         popd
         pushd examples/test_drivers/test_current_sense

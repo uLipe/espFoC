@@ -1,0 +1,7 @@
+# Plain ESP32 has no USB-CDC peripheral, switch the tuner bridge to
+# UART. ESP-IDF auto-loads this file on top of sdkconfig.defaults
+# whenever `idf.py set-target esp32` is run.
+
+CONFIG_ESP_FOC_BRIDGE_USBCDC=n
+CONFIG_ESP_FOC_BRIDGE_UART=y
+CONFIG_TINYUSB_CDC_ENABLED=n
