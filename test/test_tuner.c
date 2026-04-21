@@ -163,6 +163,145 @@ TEST_CASE("tuner: exec with short payload is rejected", "[espFoC][tuner]")
         payload, sizeof(payload), NULL, &resp_len));
 }
 
+/* --- magic / state query / motion / override --------------------------- */
+
+TEST_CASE("tuner: attach refuses an axis with no magic",
+          "[espFoC][tuner]")
+{
+    esp_foc_axis_t bogus;
+    memset(&bogus, 0, sizeof(bogus));
+    TEST_ASSERT_EQUAL(ESP_FOC_ERR_AXIS_INVALID_STATE,
+                      esp_foc_tuner_attach_axis(1, &bogus));
+}
+
+TEST_CASE("tuner: attach with NULL detaches without error",
+          "[espFoC][tuner]")
+{
+    setup_attached_axis();
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_attach_axis(0, NULL));
+    /* After detach all requests on this axis must be rejected. */
+    uint8_t resp = 0;
+    size_t resp_len = sizeof(resp);
+    TEST_ASSERT_EQUAL(ESP_FOC_ERR_INVALID_ARG, esp_foc_tuner_handle_request(
+        0, ESP_FOC_TUNER_OP_READ, ESP_FOC_TUNER_PARAM_AXIS_STATE,
+        NULL, 0, &resp, &resp_len));
+}
+
+TEST_CASE("tuner: read AXIS_STATE returns initialized + (un)aligned",
+          "[espFoC][tuner]")
+{
+    setup_attached_axis();
+    uint8_t resp = 0;
+    size_t resp_len = sizeof(resp);
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(
+        0, ESP_FOC_TUNER_OP_READ, ESP_FOC_TUNER_PARAM_AXIS_STATE,
+        NULL, 0, &resp, &resp_len));
+    TEST_ASSERT_EQUAL_UINT(1, resp_len);
+    /* Axis was initialized but not aligned/run nor under override yet. */
+    TEST_ASSERT_TRUE(resp & ESP_FOC_AXIS_STATE_INITIALIZED);
+    TEST_ASSERT_FALSE(resp & ESP_FOC_AXIS_STATE_ALIGNED);
+    TEST_ASSERT_FALSE(resp & ESP_FOC_AXIS_STATE_RUNNING);
+    TEST_ASSERT_FALSE(resp & ESP_FOC_AXIS_STATE_TUNER_OVERRIDE);
+}
+
+TEST_CASE("tuner: override ON refused on un-aligned axis",
+          "[espFoC][tuner]")
+{
+    setup_attached_axis();
+    /* Fresh axis is not aligned yet; override must be rejected to keep the
+     * motor safe. */
+    size_t resp_len = 0;
+    TEST_ASSERT_EQUAL(ESP_FOC_ERR_NOT_ALIGNED, esp_foc_tuner_handle_request(
+        0, ESP_FOC_TUNER_OP_EXEC, ESP_FOC_TUNER_CMD_OVERRIDE_ON,
+        NULL, 0, NULL, &resp_len));
+}
+
+TEST_CASE("tuner: override ON then OFF flips state bit",
+          "[espFoC][tuner]")
+{
+    setup_attached_axis();
+    /* Manually mark the axis aligned (bypass real alignment for this unit
+     * test; align_axis needs hardware sequence). */
+    s_axis.rotor_aligned = ESP_FOC_OK;
+
+    size_t resp_len = 0;
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(
+        0, ESP_FOC_TUNER_OP_EXEC, ESP_FOC_TUNER_CMD_OVERRIDE_ON,
+        NULL, 0, NULL, &resp_len));
+    uint8_t state = 0;
+    size_t rl = sizeof(state);
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(
+        0, ESP_FOC_TUNER_OP_READ, ESP_FOC_TUNER_PARAM_AXIS_STATE,
+        NULL, 0, &state, &rl));
+    TEST_ASSERT_TRUE(state & ESP_FOC_AXIS_STATE_TUNER_OVERRIDE);
+
+    resp_len = 0;
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(
+        0, ESP_FOC_TUNER_OP_EXEC, ESP_FOC_TUNER_CMD_OVERRIDE_OFF,
+        NULL, 0, NULL, &resp_len));
+    rl = sizeof(state);
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(
+        0, ESP_FOC_TUNER_OP_READ, ESP_FOC_TUNER_PARAM_AXIS_STATE,
+        NULL, 0, &state, &rl));
+    TEST_ASSERT_FALSE(state & ESP_FOC_AXIS_STATE_TUNER_OVERRIDE);
+}
+
+TEST_CASE("tuner: motion target writes refused while override is OFF",
+          "[espFoC][tuner]")
+{
+    setup_attached_axis();
+    s_axis.rotor_aligned = ESP_FOC_OK;
+    /* override is OFF (default). Writing a motion target must fail. */
+    uint8_t payload[4];
+    serialize_q16_le(payload, q16_from_float(2.5f));
+    size_t resp_len = 0;
+    TEST_ASSERT_EQUAL(ESP_FOC_ERR_AXIS_INVALID_STATE,
+        esp_foc_tuner_handle_request(0, ESP_FOC_TUNER_OP_WRITE,
+            ESP_FOC_TUNER_WRITE_TARGET_IQ_Q16,
+            payload, sizeof(payload), NULL, &resp_len));
+}
+
+TEST_CASE("tuner: motion writes land in shadow when override is ON",
+          "[espFoC][tuner]")
+{
+    setup_attached_axis();
+    s_axis.rotor_aligned = ESP_FOC_OK;
+
+    size_t resp_len = 0;
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(
+        0, ESP_FOC_TUNER_OP_EXEC, ESP_FOC_TUNER_CMD_OVERRIDE_ON,
+        NULL, 0, NULL, &resp_len));
+
+    q16_t targets[4] = {
+        q16_from_float(0.10f),  /* id */
+        q16_from_float(2.50f),  /* iq */
+        q16_from_float(0.30f),  /* ud */
+        q16_from_float(4.00f),  /* uq */
+    };
+    esp_foc_tuner_id_t ids[4] = {
+        ESP_FOC_TUNER_WRITE_TARGET_ID_Q16,
+        ESP_FOC_TUNER_WRITE_TARGET_IQ_Q16,
+        ESP_FOC_TUNER_WRITE_TARGET_UD_Q16,
+        ESP_FOC_TUNER_WRITE_TARGET_UQ_Q16,
+    };
+    for (int i = 0; i < 4; ++i) {
+        uint8_t pl[4];
+        serialize_q16_le(pl, targets[i]);
+        resp_len = 0;
+        TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(
+            0, ESP_FOC_TUNER_OP_WRITE, ids[i],
+            pl, sizeof(pl), NULL, &resp_len));
+    }
+
+    TEST_ASSERT_EQUAL_INT32(targets[0], s_axis.tuner_override.target_id);
+    TEST_ASSERT_EQUAL_INT32(targets[1], s_axis.tuner_override.target_iq);
+    TEST_ASSERT_EQUAL_INT32(targets[2], s_axis.tuner_override.target_ud);
+    TEST_ASSERT_EQUAL_INT32(targets[3], s_axis.tuner_override.target_uq);
+    /* Public targets stay zero — nothing happened to axis->target_* yet. */
+    TEST_ASSERT_EQUAL_INT32(0, s_axis.target_i_d.raw);
+    TEST_ASSERT_EQUAL_INT32(0, s_axis.target_i_q.raw);
+}
+
 #else
 
 /* Tuner disabled: keep this TU non-empty so the test build stays consistent. */

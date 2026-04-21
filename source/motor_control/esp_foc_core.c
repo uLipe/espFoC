@@ -39,9 +39,31 @@ static void do_foc_outer_loop(void *arg)
 
     while (1) {
         esp_foc_wait_notifier();
-        if (axis->regulator_cb) {
-            axis->regulator_cb(axis, &axis->target_i_d, &axis->target_i_q, &axis->target_u_d, &axis->target_u_q);
+        if (axis->regulator_cb == NULL) {
+            continue;
         }
+#if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
+        if (axis->tuner_override.active) {
+            /* Drain the user callback into shadow refs so its side effects
+             * (logging, sensor reads, state machines) keep firing — but the
+             * actual axis targets are owned by the tuner. Bumpless transfer
+             * back to user control happens automatically when the override
+             * flag clears. */
+            esp_foc_d_current_q16_t shadow_id;
+            esp_foc_q_current_q16_t shadow_iq;
+            esp_foc_d_voltage_q16_t shadow_ud;
+            esp_foc_q_voltage_q16_t shadow_uq;
+            axis->regulator_cb(axis, &shadow_id, &shadow_iq,
+                                     &shadow_ud, &shadow_uq);
+            axis->target_i_d.raw = axis->tuner_override.target_id;
+            axis->target_i_q.raw = axis->tuner_override.target_iq;
+            axis->target_u_d.raw = axis->tuner_override.target_ud;
+            axis->target_u_q.raw = axis->tuner_override.target_uq;
+            continue;
+        }
+#endif
+        axis->regulator_cb(axis, &axis->target_i_d, &axis->target_i_q,
+                                 &axis->target_u_d, &axis->target_u_q);
     }
 }
 
@@ -62,6 +84,15 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         ESP_LOGE(tag, "invalid args for axis initialization");
         return ESP_FOC_ERR_INVALID_ARG;
     }
+
+#if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
+    axis->magic = ESP_FOC_AXIS_MAGIC;
+    axis->tuner_override.active = false;
+    axis->tuner_override.target_id = 0;
+    axis->tuner_override.target_iq = 0;
+    axis->tuner_override.target_ud = 0;
+    axis->tuner_override.target_uq = 0;
+#endif
 
     axis->rotor_aligned = ESP_FOC_ERR_AXIS_INVALID_STATE;
     axis->inverter_driver = inverter;

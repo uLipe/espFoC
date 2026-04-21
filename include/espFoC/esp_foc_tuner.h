@@ -45,19 +45,35 @@ typedef enum {
 
 typedef enum {
     /* Read-only parameters */
-    ESP_FOC_TUNER_PARAM_KP_Q16          = 0x0010, /* read */
-    ESP_FOC_TUNER_PARAM_KI_Q16          = 0x0011, /* read */
-    ESP_FOC_TUNER_PARAM_INT_LIM_Q16     = 0x0012, /* read */
-    ESP_FOC_TUNER_PARAM_V_MAX_Q16       = 0x0013, /* read */
+    ESP_FOC_TUNER_PARAM_KP_Q16          = 0x0010, /* read q16 */
+    ESP_FOC_TUNER_PARAM_KI_Q16          = 0x0011, /* read q16 */
+    ESP_FOC_TUNER_PARAM_INT_LIM_Q16     = 0x0012, /* read q16 */
+    ESP_FOC_TUNER_PARAM_V_MAX_Q16       = 0x0013, /* read q16 */
+    ESP_FOC_TUNER_PARAM_AXIS_STATE      = 0x0040, /* read u8 bitmap */
+    ESP_FOC_TUNER_PARAM_AXIS_LAST_ERR   = 0x0041, /* read i8 (esp_foc_err_t) */
 
-    /* Write triggers an atomic gain swap on the target axis */
+    /* Write: gain swap (atomic) */
     ESP_FOC_TUNER_WRITE_KP_Q16          = 0x0020, /* write q16 */
     ESP_FOC_TUNER_WRITE_KI_Q16          = 0x0021, /* write q16 */
     ESP_FOC_TUNER_WRITE_INT_LIM_Q16     = 0x0022, /* write q16 */
 
-    /* Commands */
-    ESP_FOC_TUNER_CMD_RECOMPUTE_GAINS   = 0x0080, /* exec [R_q16,L_q16,bw_q16] */
+    /* Write: tuner-driven motion targets (only honored while override active) */
+    ESP_FOC_TUNER_WRITE_TARGET_ID_Q16   = 0x0050, /* write q16 (current ref) */
+    ESP_FOC_TUNER_WRITE_TARGET_IQ_Q16   = 0x0051, /* write q16 (current ref) */
+    ESP_FOC_TUNER_WRITE_TARGET_UD_Q16   = 0x0052, /* write q16 (voltage ff) */
+    ESP_FOC_TUNER_WRITE_TARGET_UQ_Q16   = 0x0053, /* write q16 (voltage ff) */
+
+    /* Commands (exec) */
+    ESP_FOC_TUNER_CMD_RECOMPUTE_GAINS   = 0x0080, /* [R_q16,L_q16,bw_q16] */
+    ESP_FOC_TUNER_CMD_OVERRIDE_ON       = 0x00A0, /* no payload */
+    ESP_FOC_TUNER_CMD_OVERRIDE_OFF      = 0x00A1, /* no payload */
 } esp_foc_tuner_id_t;
+
+/* Bitmap returned by ESP_FOC_TUNER_PARAM_AXIS_STATE. */
+#define ESP_FOC_AXIS_STATE_INITIALIZED    (1u << 0)
+#define ESP_FOC_AXIS_STATE_ALIGNED        (1u << 1)
+#define ESP_FOC_AXIS_STATE_RUNNING        (1u << 2)
+#define ESP_FOC_AXIS_STATE_TUNER_OVERRIDE (1u << 3)
 
 /**
  * @brief Register an axis under a stable id so the host can address it.

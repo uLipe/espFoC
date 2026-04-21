@@ -3,6 +3,8 @@
  */
 #pragma once
 
+#include <stdbool.h>
+#include <sdkconfig.h>
 #include "espFoC/esp_foc_units_q16.h"
 #include "espFoC/utils/pid_controller.h"
 #include "espFoC/utils/ema_low_pass_filter.h"
@@ -11,6 +13,11 @@
 #include "espFoC/drivers/current_sensor_interface.h"
 #include "espFoC/drivers/rotor_sensor_interface.h"
 #include "espFoC/osal/os_interface.h"
+
+/* Magic number used to validate axis pointers handed to the runtime tuner.
+ * Lives only when CONFIG_ESP_FOC_TUNER_ENABLE is set so nano builds pay
+ * zero overhead. Set in esp_foc_initialize_axis(). */
+#define ESP_FOC_AXIS_MAGIC ((uint32_t)0xF0CA1515)
 
 typedef struct esp_foc_axis_s esp_foc_axis_t;
 
@@ -33,7 +40,24 @@ typedef struct {
     int motor_unit;
 } esp_foc_motor_control_settings_t;
 
+#if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
+typedef struct {
+    bool active;
+    q16_t target_id;
+    q16_t target_iq;
+    q16_t target_ud;
+    q16_t target_uq;
+} esp_foc_tuner_override_t;
+#endif
+
 struct esp_foc_axis_s {
+#if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
+    /* Validates this struct came from esp_foc_initialize_axis() before any
+     * tuner-driven mutation. Defends against stale or wild axis pointers. */
+    uint32_t magic;
+    esp_foc_tuner_override_t tuner_override;
+#endif
+
     q16_t i_u;
     q16_t i_v;
     q16_t i_w;
