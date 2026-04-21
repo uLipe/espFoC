@@ -1,18 +1,19 @@
 """Space-vector PWM hexagon view.
 
-Reads the first three channels emitted by the firmware scope
-(u_u / u_v / u_w) and draws:
+Reads channels 0/1/2 (u_u, u_v, u_w) from the firmware scope stream
+and shows:
 
-* the active voltage vector (Vα, Vβ) as it moves inside the SVPWM
-  hexagon, with a fading trail of recent positions;
-* the three-phase time-series below the hexagon so you can correlate
-  the waveform shape with the rotating vector.
+* three fixed phase axes (A/B/C at 0°/120°/240°) with a colored
+  "phase projection" vector each — their length is the instantaneous
+  u_u / u_v / u_w, so you see the three components animate along
+  their axes as the electrical angle sweeps;
+* the resultant V_αβ vector (Clarke sum of the three phases) with a
+  fading trail so the rotation on the hexagon is visible at a glance;
+* the three-phase time-series underneath, colored identically to the
+  scope tab's channels 0/1/2.
 
-Like ScopePanel, this view buffers frames in an inbox on the reader
-thread and renders them on a QTimer so the GUI stays responsive even
-when the firmware emits a burst of samples after a current step. The
-SVM redraw is intentionally slower than the scope's (smooth enough
-for the eye, light on CPU when the motor is running).
+Rendering is buffered on the reader side and flushed at 20 FPS so
+scope bursts after a current step do not stall the Qt loop.
 """
 
 from __future__ import annotations
@@ -88,16 +89,6 @@ class SvmPanel(QWidget):
         self._last_ab: tuple[float, float] = (0.0, 0.0)
 
         root = QVBoxLayout(self)
-        info = QLabel(
-            "Space-vector PWM hexagon — reads channels 0/1/2 as "
-            "u_u / u_v / u_w. The active vector (orange) and its fading "
-            "trail (cyan) are computed on the fly from those three "
-            "phases; the time-series below shows the waveform feeding "
-            "the hexagon. Refresh rate is deliberately lower than the "
-            "scope so the Qt event loop stays snappy during bursts.")
-        info.setWordWrap(True)
-        info.setAlignment(Qt.AlignLeft)
-        root.addWidget(info)
 
         # --- Top half: hexagon + readout column --------------------------
         top_row = QHBoxLayout()
@@ -119,6 +110,20 @@ class SvmPanel(QWidget):
             pen=pg.mkPen(QColor(_VERTEX_COLOR)),
             brush=pg.mkBrush(QColor(_VERTEX_COLOR)))
         self._plot.addItem(self._vertex_scatter)
+
+        # Three static phase axes (A at 0°, B at 120°, C at 240°) — the
+        # "rails" along which the instantaneous phase values project.
+        self._phase_axis_curves = tuple(
+            self._plot.plot(pen=pg.mkPen(QColor(c), width=1,
+                                          style=Qt.DashLine))
+            for c in _PHASE_COLORS)
+        # Dynamic phase projection vectors: length = u_u / u_v / u_w,
+        # direction = phase-axis unit vector. Drawn under the resultant
+        # so the orange arrow stays on top.
+        self._phase_vec_curves = tuple(
+            self._plot.plot(pen=pg.mkPen(QColor(c), width=2))
+            for c in _PHASE_COLORS)
+
         self._trail_curve = self._plot.plot(
             pen=pg.mkPen(QColor(_TRAIL_COLOR), width=1))
         self._arrow_curve = self._plot.plot(
@@ -233,7 +238,18 @@ class SvmPanel(QWidget):
             self._hex_radius = target
         self._redraw_hexagon()
 
-        # Trail + arrow in the hexagon.
+        # Phase projection arrows (u_u along A axis, u_v along B, u_w
+        # along C). The three arrow tips sum (scaled by 2/3) to the
+        # resultant V — a live Clarke transform in picture form.
+        if self._uu_buf and self._uv_buf and self._uw_buf:
+            phases = (self._uu_buf[-1],
+                      self._uv_buf[-1],
+                      self._uw_buf[-1])
+            for curve, (dx, dy), mag in zip(self._phase_vec_curves,
+                                            self._PHASE_DIRS, phases):
+                curve.setData([0.0, mag * dx], [0.0, mag * dy])
+
+        # Trail + resultant arrow (drawn on top).
         t_a = np.fromiter(self._alpha_buf, dtype=float,
                           count=len(self._alpha_buf))
         t_b = np.fromiter(self._beta_buf, dtype=float,
@@ -273,6 +289,15 @@ class SvmPanel(QWidget):
 
     # --- Static geometry --------------------------------------------------
 
+    # Phase-axis unit vectors (A=0°, B=120°, C=240°). Dashed rails in the
+    # static layer; phase projection arrows in the dynamic layer sit on
+    # these directions with length = instantaneous u_u / u_v / u_w.
+    _PHASE_DIRS = (
+        (1.0, 0.0),
+        (-0.5, 0.86602540378),       # cos(120°), sin(120°)
+        (-0.5, -0.86602540378),      # cos(240°), sin(240°)
+    )
+
     def _redraw_hexagon(self) -> None:
         R = self._hex_radius
         angles = np.arange(7) * (np.pi / 3.0)  # close the polygon
@@ -285,3 +310,7 @@ class SvmPanel(QWidget):
         vx = R * np.cos(angles[:-1])
         vy = R * np.sin(angles[:-1])
         self._vertex_scatter.setData(pos=np.column_stack((vx, vy)))
+        # Phase axes span -R .. +R along each direction; the negative
+        # half shows projection when a phase goes below zero.
+        for curve, (dx, dy) in zip(self._phase_axis_curves, self._PHASE_DIRS):
+            curve.setData([-R * dx, R * dx], [-R * dy, R * dy])
