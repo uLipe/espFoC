@@ -20,4 +20,5 @@ examples/unit_test_runner/__pycache__/
 **/esp_foc_autotuned_report.txt
 scripts/motors/*.generated.json
 scripts/__pycache__/
+**/__pycache__/
 .cursor/

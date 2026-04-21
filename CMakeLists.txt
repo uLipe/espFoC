@@ -1,6 +1,7 @@
 set(srcs    "source/motor_control/esp_foc_core.c"
             "source/motor_control/control_strategy/esp_foc_control_current_mode_sensored.c"
             "source/motor_control/esp_foc_design_mpz.c"
+            "source/motor_control/esp_foc_link.c"
             "source/motor_control/esp_foc_axis_tuning.c"
             "source/motor_control/esp_foc_injection.c"
             "source/motor_control/esp_foc_scope.c"
