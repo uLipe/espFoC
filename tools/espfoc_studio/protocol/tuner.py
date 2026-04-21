@@ -38,6 +38,7 @@ class ParamId(IntEnum):
     KI_Q16          = 0x0011
     INT_LIM_Q16     = 0x0012
     V_MAX_Q16       = 0x0013
+    I_FILTER_FC     = 0x0014
     AXIS_STATE      = 0x0040
     AXIS_LAST_ERR   = 0x0041
     NVS_PRESENT     = 0x0042
@@ -46,6 +47,7 @@ class ParamId(IntEnum):
     WRITE_KP        = 0x0020
     WRITE_KI        = 0x0021
     WRITE_INT_LIM   = 0x0022
+    WRITE_I_FILTER_FC = 0x0023
     # Motion targets (only honored while override is on)
     WRITE_TARGET_ID = 0x0060
     WRITE_TARGET_IQ = 0x0061
@@ -242,6 +244,15 @@ class TunerClient:
 
     def write_ki(self, ki: float) -> None:
         self._write_q16(ParamId.WRITE_KI, ki)
+
+    def read_current_filter_fc(self) -> float:
+        """Cutoff (Hz) of the per-phase Butterworth in the isensor driver."""
+        return self._read_q16(ParamId.I_FILTER_FC)
+
+    def write_current_filter_fc(self, fc_hz: float) -> None:
+        """Re-design the per-phase biquad with the supplied cutoff (Hz).
+        fs is fixed by the firmware to the loop rate captured at init."""
+        self._write_q16(ParamId.WRITE_I_FILTER_FC, fc_hz)
 
     def write_int_lim(self, lim: float) -> None:
         self._write_q16(ParamId.WRITE_INT_LIM, lim)

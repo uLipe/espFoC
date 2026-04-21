@@ -73,6 +73,10 @@ class DemoFirmware(threading.Thread):
         # Pretend to be a tuner_studio_target firmware so the GUI's
         # Generate App tab shows up in --demo mode.
         self.firmware_type = TUNER_FIRMWARE_TYPE_TSGX
+        # Current-sense low-pass cutoff (matches the firmware Kconfig
+        # default). The demo doesn't actually run a biquad; we just
+        # round-trip the value through the protocol.
+        self.current_filter_fc = 300.0
         # In-memory NVS overlay; populated by CMD_PERSIST_NVS, cleared
         # by CMD_ERASE_NVS, applied by CMD_LOAD_NVS.
         self.nvs_overlay: Optional[dict] = None
@@ -251,6 +255,8 @@ class DemoFirmware(threading.Thread):
             self._send_response(seq, OK, bytes([int(flags)]))
         elif pid == int(ParamId.AXIS_LAST_ERR):
             self._send_response(seq, OK, struct.pack("<b", 0))
+        elif pid == int(ParamId.I_FILTER_FC):
+            self._send_response(seq, OK, _q16_to_bytes(self.current_filter_fc))
         elif pid == int(ParamId.NVS_PRESENT):
             self._send_response(seq, OK,
                                 bytes([1 if self.nvs_overlay else 0]))
@@ -273,6 +279,10 @@ class DemoFirmware(threading.Thread):
             self._send_response(seq, OK)
         elif pid == int(ParamId.WRITE_INT_LIM):
             self.lim = v
+            self._send_response(seq, OK)
+        elif pid == int(ParamId.WRITE_I_FILTER_FC):
+            self.current_filter_fc = v
+            self._log(f"current filter: fc = {v:.1f} Hz")
             self._send_response(seq, OK)
         elif pid in (int(ParamId.WRITE_TARGET_ID),
                      int(ParamId.WRITE_TARGET_IQ),
@@ -336,6 +346,7 @@ class DemoFirmware(threading.Thread):
             self.nvs_overlay = {
                 "kp": self.kp, "ki": self.ki, "lim": self.lim,
                 "r": r, "l": l, "bw": bw,
+                "fc": self.current_filter_fc,
             }
             self._log("calibration: saved to NVS")
             self._send_response(seq, OK)
@@ -347,6 +358,9 @@ class DemoFirmware(threading.Thread):
             self.kp = self.nvs_overlay["kp"]
             self.ki = self.nvs_overlay["ki"]
             self.lim = self.nvs_overlay["lim"]
+            stored_fc = self.nvs_overlay.get("fc", 0.0)
+            if stored_fc > 0:
+                self.current_filter_fc = stored_fc
             self._log("calibration: NVS overlay applied")
             self._send_response(seq, OK)
         elif pid == int(ParamId.CMD_ERASE_NVS):

@@ -53,9 +53,11 @@ def test_fnv1a_32_known_vector():
 def test_pack_calibration_blob_roundtrip():
     blob = _pack_calibration_blob(
         0x12345678, 0x77777777, 0x00010000,
-        0x10000, 0x20000, 0x30000,
+        0x10000, 0x20000, 0x30000, 0x12C0000,
         0xDEADBEEF)
-    # Header (20) + payload (6 q16 + 16-byte reserved = 40) = 60 bytes.
+    # Header (20) + payload (7 q16 + 12-byte reserved = 40) = 60 bytes.
+    # Payload size stays at 40 because the new fc field claims 4 of the
+    # original 16 reserved bytes; schema version unchanged at 1.
     assert len(blob) == 60
     magic, version, _pad, profile, crc, plen, _pad2 = struct.unpack_from(
         "<IB3sIIHH", blob, 0)
@@ -65,6 +67,10 @@ def test_pack_calibration_blob_roundtrip():
     assert plen == 40
     payload = blob[20:]
     assert _crc32_ieee(payload) == crc
+    # Spot-check the fc field landed where C expects it (offset 24 in
+    # the payload: 6 leading q16s = 24 bytes).
+    fc_q16, = struct.unpack_from("<i", payload, 24)
+    assert fc_q16 == 0x12C0000
 
 
 @_test

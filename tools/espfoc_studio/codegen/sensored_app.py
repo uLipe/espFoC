@@ -48,14 +48,16 @@ def _crc32_ieee(data: bytes) -> int:
 
 def _pack_calibration_blob(kp_q16: int, ki_q16: int, ilim_q16: int,
                            r_q16: int, l_q16: int, bw_q16: int,
+                           fc_q16: int,
                            profile_hash: int) -> bytes:
     """Reproduces espfoc_cal_blob_t exactly so the generated image
     is bit-for-bit equivalent to one written at runtime by
     esp_foc_calibration_save()."""
-    payload = struct.pack("<6i16s",
+    payload = struct.pack("<7i12s",
                           kp_q16, ki_q16, ilim_q16,
                           r_q16, l_q16, bw_q16,
-                          b"\x00" * 16)
+                          fc_q16,
+                          b"\x00" * 12)
     crc = _crc32_ieee(payload)
     header = struct.pack("<IB3sIIHH",
                          _BLOB_MAGIC,
@@ -145,7 +147,9 @@ def generate_sensored_app(cfg: HardwareConfig,
                           kp: float, ki: float, ilim: float,
                           r_ohm: float = 0.0,
                           l_h: float = 0.0,
-                          bw_hz: float = 0.0) -> GenerationResult:
+                          bw_hz: float = 0.0,
+                          current_filter_fc_hz: float = 300.0
+                          ) -> GenerationResult:
     """Render the templates and return a summary. Raises ValueError if
     the output directory already contains files (we never overwrite)."""
 
@@ -185,6 +189,7 @@ def generate_sensored_app(cfg: HardwareConfig,
         "r_ohm": r_ohm,
         "l_h": l_h,
         "bw_hz": bw_hz,
+        "current_filter_fc_hz": current_filter_fc_hz,
         "timestamp_iso": _dt.datetime.now().replace(microsecond=0).isoformat(),
     }
 
@@ -204,6 +209,7 @@ def generate_sensored_app(cfg: HardwareConfig,
     blob = _pack_calibration_blob(
         _q16(kp), _q16(ki), _q16(ilim),
         _q16(r_ohm), _q16(l_h), _q16(bw_hz),
+        _q16(current_filter_fc_hz),
         profile_hash)
     nvs_image, nvs_skip = _try_make_nvs_image(output_dir, blob)
 
