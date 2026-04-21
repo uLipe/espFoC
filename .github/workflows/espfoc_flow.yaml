@@ -60,6 +60,21 @@ jobs:
         idf.py set-target esp32
         idf.py build
         popd
+        pushd examples/tuner_studio_target
+        # Default sdkconfig drives USB-CDC; valid on S3/P4. We exercise
+        # both paths so a CDC-only or UART-only regression is caught.
+        idf.py set-target esp32s3
+        idf.py build
+        rm -rf build sdkconfig
+        # Plain ESP32 has no USB-CDC; switch the bridge to UART before
+        # building. -D forces a Kconfig override on top of the defaults.
+        idf.py set-target esp32 \
+               -DCONFIG_ESP_FOC_BRIDGE_USBCDC=n \
+               -DCONFIG_ESP_FOC_BRIDGE_UART=y \
+               -DCONFIG_TINYUSB_CDC_ENABLED=n
+        idf.py reconfigure
+        idf.py build
+        popd
         pushd examples/test_drivers/test_current_sense
         idf.py set-target esp32s3
         idf.py build
@@ -76,6 +91,35 @@ jobs:
         idf.py set-target esp32s3
         idf.py build
         popd
+
+  python_tests:
+    name: TunerStudio host tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install host deps
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libegl1 libxkbcommon0 libdbus-1-3
+        python -m pip install --upgrade pip
+        pip install -r tools/espfoc_studio/requirements.txt
+
+    - name: Run host test suite
+      env:
+        QT_QPA_PLATFORM: offscreen
+        PYTHONPATH: ${{ github.workspace }}/tools
+      run: |
+        for t in tools/espfoc_studio/tests/test_*.py; do
+          echo "=== $(basename $t) ==="
+          python "$t"
+        done
 
   unit_tests:
     name: Unit tests (build and run on QEMU)
