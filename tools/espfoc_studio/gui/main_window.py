@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from ..protocol import TunerClient
 from .analysis_panel import AnalysisPanel
 from .scope_panel import ScopePanel
+from .svm_panel import SvmPanel
 from .tuning_panel import TuningPanel
 
 
@@ -35,9 +36,11 @@ class MainWindow(QMainWindow):
         root.addWidget(splitter, 1)
 
         self._analysis = AnalysisPanel()
-        # The scope listens on the shared LinkReader for SCOPE frames;
-        # no more poll-based shim.
+        # The scope and the SVM hexagon both subscribe to the same shared
+        # LinkReader. ch0/1/2 are (by convention) the three-phase SVPWM
+        # voltages, which the SVM panel reads exclusively.
         self._scope = ScopePanel(reader=client.reader)
+        self._svm = SvmPanel(reader=client.reader)
 
         # Analysis plots are expensive (step sim + bode + root locus).
         # Debounce spinbox storms so one nudge of the mouse wheel doesn't
@@ -56,6 +59,7 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         tabs.addTab(self._analysis, "Analysis")
         tabs.addTab(self._scope, "Scope")
+        tabs.addTab(self._svm, "SVM Hexagon")
         splitter.addWidget(tabs)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)

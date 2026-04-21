@@ -91,28 +91,43 @@ class DemoFirmware(threading.Thread):
 
     def _scope_frame_csv(self) -> bytes:
         """Reproduce the firmware's esp_foc_scope.c payload format:
-        comma-separated floats terminated with a newline. The number of
-        fields drives how many channels the GUI will display."""
-        alpha = 0.0
-        beta = 0.0
-        # Mimic a typical SVPWM triplet driven off the current u_q/u_d
-        # estimate. We cheat with a steady angle (0 rad) because this is a
-        # demo — the scope just needs realistic-looking waveforms.
+        comma-separated floats terminated with a newline.
+
+        Channel convention (shared with the real firmware):
+          ch0 = u_u, ch1 = u_v, ch2 = u_w  (SVPWM three-phase, for the
+                                            Hexagon view)
+          ch3 = target_iq, ch4 = i_q meas, ch5 = u_q command
+
+        The SVM panel reads channels 0/1/2 exclusively; ordering them
+        first gives the hexagon view a stable contract no matter how
+        many extra channels the application adds later.
+
+        On a real motor the SVPWM voltage vector keeps rotating at the
+        electrical speed even at steady state (back-EMF soaks up u_q).
+        Our demo plant has no mechanical model, so we synthesise a
+        visible steady-state magnitude from the active set-point to
+        mimic that rotation — otherwise the hexagon view would collapse
+        to the origin as soon as i_q reached its reference."""
         import math
         angle = (time.monotonic() * 2.0 * math.pi * 4.0) % (2.0 * math.pi)
-        u_q = self.kp * (self.target_iq - self._i_actual)
-        u_q = max(-self.motor.v_max, min(self.motor.v_max, u_q))
-        s = math.sin(angle)
-        c = math.cos(angle)
-        u_u = u_q * s
-        u_v = u_q * math.sin(angle - 2.0 * math.pi / 3.0)
-        u_w = u_q * math.sin(angle + 2.0 * math.pi / 3.0)
-        fields = (self.target_iq,  # ch0: ref
-                  self._i_actual,  # ch1: i_q measured
-                  u_q,             # ch2: u_q command
-                  u_u,             # ch3: SVPWM phase U
-                  u_v,             # ch4: SVPWM phase V
-                  u_w)             # ch5: SVPWM phase W
+        u_q_cmd = self.kp * (self.target_iq - self._i_actual)
+        u_q_cmd = max(-self.motor.v_max, min(self.motor.v_max, u_q_cmd))
+        # Visible magnitude: either the active loop effort or a fraction
+        # of the target current, whichever is larger. The sign tracks the
+        # reference so reversing iq swaps the vector direction.
+        floor = 0.3 * abs(self.target_iq) if self.override else 0.0
+        display_mag = max(abs(u_q_cmd), floor)
+        if self.target_iq < 0:
+            display_mag = -display_mag
+        u_u = display_mag * math.sin(angle)
+        u_v = display_mag * math.sin(angle - 2.0 * math.pi / 3.0)
+        u_w = display_mag * math.sin(angle + 2.0 * math.pi / 3.0)
+        fields = (u_u,             # ch0: SVPWM phase U (for hexagon)
+                  u_v,             # ch1: SVPWM phase V
+                  u_w,             # ch2: SVPWM phase W
+                  self.target_iq,  # ch3: current ref
+                  self._i_actual,  # ch4: i_q measured
+                  u_q_cmd)         # ch5: u_q command
         text = ",".join(f"{v:.6f}" for v in fields) + "\n"
         return text.encode("ascii")
 

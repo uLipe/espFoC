@@ -40,7 +40,7 @@ class LinkReader:
 
         self._lock = threading.Lock()
         self._tuner_waiters: Dict[int, Queue] = {}
-        self._scope_cb: Optional[ScopeCallback] = None
+        self._scope_cbs: list[ScopeCallback] = []
         self._log_cb: Optional[LogCallback] = None
 
     # --- Lifecycle -------------------------------------------------------
@@ -73,9 +73,20 @@ class LinkReader:
 
     # --- Consumer registration ------------------------------------------
 
-    def register_scope_callback(self, cb: Optional[ScopeCallback]) -> None:
+    def register_scope_callback(self, cb: ScopeCallback) -> None:
+        """Append a scope handler; all subscribers are broadcast to."""
+        if cb is None:
+            return
         with self._lock:
-            self._scope_cb = cb
+            if cb not in self._scope_cbs:
+                self._scope_cbs.append(cb)
+
+    def unregister_scope_callback(self, cb: ScopeCallback) -> None:
+        with self._lock:
+            try:
+                self._scope_cbs.remove(cb)
+            except ValueError:
+                pass
 
     def register_log_callback(self, cb: Optional[LogCallback]) -> None:
         with self._lock:
@@ -123,8 +134,8 @@ class LinkReader:
             return
         if channel == int(Channel.SCOPE):
             with self._lock:
-                cb = self._scope_cb
-            if cb is not None:
+                cbs = list(self._scope_cbs)
+            for cb in cbs:
                 try:
                     cb(channel, seq, payload)
                 except Exception:
