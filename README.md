@@ -76,7 +76,10 @@ single window you get:
 - predicted step response, Bode, pole-zero and root-locus plots;
 - firmware scope stream with per-channel colour, toggle and cursor;
 - SVPWM hexagon with the three phase projections and the resultant
-  voltage vector rotating as the motor is driven.
+  voltage vector rotating as the motor is driven:
+
+![TunerStudio SVPWM Analyzer](doc/images/tuner_svpwm.png)
+
 
 ### Try it without hardware
 
