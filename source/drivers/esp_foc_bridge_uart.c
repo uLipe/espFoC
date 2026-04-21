@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "driver/uart.h"
+#include "espFoC/esp_foc_link.h"
 #include "espFoC/esp_foc_tuner.h"
 #include "espFoC/esp_foc_bridge_uart.h"
 
@@ -91,6 +92,42 @@ void esp_foc_tuner_send_callback(const uint8_t *buf, size_t len)
     }
     uart_write_bytes(UART_NUM, (const char *)buf, len);
 }
+
+#if defined(CONFIG_ESP_FOC_SCOPE)
+/* Shared code path with USB-CDC: wrap the scope's CSV payload in a
+ * SCOPE-channel link frame so the host can demux it alongside tuner
+ * responses on the same bus. seq rolls independently of the tuner. */
+static uint8_t s_scope_seq = 0;
+
+void esp_foc_init_bus_callback(void)
+{
+    /* Make sure the tuner path has initialised the UART. Idempotent. */
+    esp_foc_tuner_init_bus_callback();
+}
+
+void esp_foc_send_buffer_callback(const uint8_t *buffer, int size)
+{
+    if (buffer == NULL || size <= 0) {
+        return;
+    }
+    if ((size_t)size > ESP_FOC_LINK_MAX_PAYLOAD) {
+        /* Scope CSV overflowed the link MTU — drop the sample rather
+         * than risk splitting a CSV line across two frames. */
+        ESP_LOGW(TAG, "scope CSV %d > max %u, dropped",
+                 size, (unsigned)ESP_FOC_LINK_MAX_PAYLOAD);
+        return;
+    }
+    uint8_t frame[ESP_FOC_LINK_MAX_FRAME];
+    size_t frame_len = 0;
+    esp_foc_link_status_t st = esp_foc_link_encode(
+        ESP_FOC_LINK_CH_SCOPE, s_scope_seq++, buffer, (size_t)size,
+        frame, sizeof(frame), &frame_len);
+    if (st != ESP_FOC_LINK_OK) {
+        return;
+    }
+    uart_write_bytes(UART_NUM, (const char *)frame, frame_len);
+}
+#endif
 
 void esp_foc_bridge_uart_link_anchor(void)
 {

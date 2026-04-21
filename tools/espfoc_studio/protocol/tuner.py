@@ -13,16 +13,14 @@ fixed-point format used everywhere in the firmware.
 from __future__ import annotations
 
 import struct
-import time
 from dataclasses import dataclass
 from enum import IntEnum, IntFlag
-from typing import Optional
+from queue import Empty
+from typing import Optional, Union
 
 from ..link import (
     Channel,
-    Decoder,
-    LinkError,
-    Status,
+    LinkReader,
     Transport,
     encode,
 )
@@ -116,15 +114,35 @@ def q16_to_float(v: int) -> float:
 
 
 class TunerClient:
-    """Send tuner requests over a Transport and wait for matching responses."""
+    """Send tuner requests over a Transport and wait for matching responses.
+
+    Under the hood every client shares a LinkReader with the rest of the
+    app (scope panel, log viewer, ...). Each round-trip parks itself on
+    a per-seq Queue, so concurrent scope traffic on the same bus can't
+    starve a pending tuner response.
+    """
 
     DEFAULT_TIMEOUT = 0.5  # seconds per round-trip
 
-    def __init__(self, transport: Transport, axis: int = 0) -> None:
-        self._t = transport
+    def __init__(self, transport_or_reader: Union[Transport, LinkReader],
+                 axis: int = 0) -> None:
         self._axis = axis
         self._seq = 0
-        self._dec = Decoder()
+        if isinstance(transport_or_reader, LinkReader):
+            self._reader = transport_or_reader
+            self._owns_reader = False
+        else:
+            self._reader = LinkReader(transport_or_reader)
+            self._reader.start()
+            self._owns_reader = True
+
+    @property
+    def reader(self) -> LinkReader:
+        return self._reader
+
+    def close(self) -> None:
+        if self._owns_reader:
+            self._reader.stop()
 
     def _next_seq(self) -> int:
         self._seq = (self._seq + 1) & 0xFF
@@ -139,32 +157,24 @@ class TunerClient:
             int(id_) & 0xFF, (int(id_) >> 8) & 0xFF,
             self._axis & 0xFF,
         ]) + cmd_payload
-        frame = encode(Channel.TUNER, seq, app)
-        self._t.send_bytes(frame)
-
-        deadline = time.monotonic() + (timeout if timeout is not None
-                                       else self.DEFAULT_TIMEOUT)
-        self._dec.reset()
-        while time.monotonic() < deadline:
-            data = self._t.read_bytes(64, timeout=0.05)
-            if not data:
-                continue
-            for b in data:
-                st = self._dec.push(b)
-                if st == Status.OK:
-                    if (self._dec.channel == int(Channel.TUNER) and
-                            self._dec.seq == seq):
-                        body = bytes(self._dec.payload)
-                        if len(body) < 2:
-                            raise TunerError(
-                                f"response too short ({len(body)} bytes)")
-                        status = struct.unpack("<b", body[:1])[0]
-                        return TunerResponse(status=status, payload=body[2:])
-                    # Frame for somebody else: keep looking
-                    self._dec.reset()
-                elif st < 0 and st != Status.NEED_MORE:
-                    raise TunerError(f"link decode error: {st.name}")
-        raise TunerError(f"timeout waiting for response (seq={seq})")
+        q = self._reader.register_tuner_waiter(seq)
+        try:
+            frame = encode(Channel.TUNER, seq, app)
+            self._reader.transport.send_bytes(frame)
+            try:
+                body = q.get(timeout=timeout if timeout is not None
+                             else self.DEFAULT_TIMEOUT)
+            except Empty:
+                raise TunerError(f"timeout waiting for response (seq={seq})")
+            if body is None:
+                raise TunerError("reader stopped")
+            if len(body) < 2:
+                raise TunerError(
+                    f"response too short ({len(body)} bytes)")
+            status = struct.unpack("<b", body[:1])[0]
+            return TunerResponse(status=status, payload=body[2:])
+        finally:
+            self._reader.unregister_tuner_waiter(seq)
 
     # --- High-level helpers -------------------------------------------------
 

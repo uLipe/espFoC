@@ -14,6 +14,7 @@
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
 #include "tinyusb_cdc_acm.h"
+#include "espFoC/esp_foc_link.h"
 #include "espFoC/esp_foc_tuner.h"
 #include "espFoC/esp_foc_bridge_usbcdc.h"
 
@@ -96,6 +97,39 @@ void esp_foc_tuner_send_callback(const uint8_t *buf, size_t len)
      * slow to drain its endpoint we drop newer bytes rather than stall. */
     (void)tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(20));
 }
+
+#if defined(CONFIG_ESP_FOC_SCOPE)
+/* Mirror of the UART bridge: wrap scope CSV in a SCOPE-channel link
+ * frame so the host sees both streams demuxed on the same USB pipe. */
+static uint8_t s_scope_seq = 0;
+
+void esp_foc_init_bus_callback(void)
+{
+    esp_foc_tuner_init_bus_callback();
+}
+
+void esp_foc_send_buffer_callback(const uint8_t *buffer, int size)
+{
+    if (buffer == NULL || size <= 0) {
+        return;
+    }
+    if ((size_t)size > ESP_FOC_LINK_MAX_PAYLOAD) {
+        ESP_LOGW(TAG, "scope CSV %d > max %u, dropped",
+                 size, (unsigned)ESP_FOC_LINK_MAX_PAYLOAD);
+        return;
+    }
+    uint8_t frame[ESP_FOC_LINK_MAX_FRAME];
+    size_t frame_len = 0;
+    esp_foc_link_status_t st = esp_foc_link_encode(
+        ESP_FOC_LINK_CH_SCOPE, s_scope_seq++, buffer, (size_t)size,
+        frame, sizeof(frame), &frame_len);
+    if (st != ESP_FOC_LINK_OK) {
+        return;
+    }
+    tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, frame, frame_len);
+    (void)tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(20));
+}
+#endif
 
 void esp_foc_bridge_usbcdc_link_anchor(void) { }
 

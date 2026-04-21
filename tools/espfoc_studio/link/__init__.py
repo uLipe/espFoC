@@ -17,6 +17,7 @@ from .codec import (
     Decoder,
 )
 from .transport import Transport, LoopbackTransport
+from .reader import LinkReader
 
 __all__ = [
     "SYNC",
@@ -32,4 +33,5 @@ __all__ = [
     "Decoder",
     "Transport",
     "LoopbackTransport",
+    "LinkReader",
 ]
