@@ -7,7 +7,7 @@
 #include <sdkconfig.h>
 #include "espFoC/esp_foc_units_q16.h"
 #include "espFoC/utils/pid_controller.h"
-#include "espFoC/utils/ema_low_pass_filter.h"
+#include "espFoC/utils/biquad_q16.h"
 #include "espFoC/esp_foc_injection.h"
 #include "espFoC/drivers/inverter_interface.h"
 #include "espFoC/drivers/current_sensor_interface.h"
@@ -99,8 +99,12 @@ struct esp_foc_axis_s {
 
     esp_foc_err_t rotor_aligned;
     esp_foc_pid_controller_t torque_controller[2];
-    esp_foc_lp_filter_t velocity_filter;
-    esp_foc_lp_filter_t current_filters[2];
+    /* Velocity smoothing biquad. Cutoff dialled at init from
+     * CONFIG_ESP_FOC_VELOCITY_FILTER_CUTOFF_HZ. The current i_q / i_d
+     * filtering used to live here as well; it now sits inside the
+     * isensor driver (per-phase, on raw ADC counts), which is the
+     * only placement that survives the move into the PWM ISR. */
+    esp_foc_biquad_q16_t velocity_filter;
 
     esp_foc_injection_t injection;
 

@@ -134,6 +134,26 @@ menu "espFoC Settings"
             at boot — protects you from silently loading a gimbal
             calibration onto a scooter motor.
 
+    config ESP_FOC_CURRENT_FILTER_CUTOFF_HZ
+        int "Current sense low-pass cutoff [Hz]"
+        default 300
+        help
+            Cutoff frequency of the 2nd-order Butterworth filter that
+            sits inside the isensor ADC driver, applied per-phase to
+            raw counts before the gain conversion. 300 Hz is a sane
+            default for a current loop targeting ~150 Hz bandwidth
+            (filter at 2x bandwidth keeps phase margin healthy).
+            Overridable at runtime via the tuner protocol; persisted
+            in NVS calibration when CONFIG_ESP_FOC_CALIBRATION_NVS=y.
+
+    config ESP_FOC_VELOCITY_FILTER_CUTOFF_HZ
+        int "Velocity estimate low-pass cutoff [Hz]"
+        default 50
+        help
+            Cutoff of the biquad smoothing the encoder-derived speed.
+            Matches the 2.x EMA default to keep behaviour the same
+            after the EMA -> biquad swap.
+
     config ESP_FOC_INJECTION_ENABLE
         bool "Enable signal injection on the q-axis current reference"
         default n

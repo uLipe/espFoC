@@ -155,16 +155,20 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
      * the same starting gains; the runtime tuner can rewrite either one
      * later with esp_foc_axis_set_current_pi_gains_q16(). */
     float loop_dt_s = dt_f * (float)ESP_FOC_LOW_SPEED_DOWNSAMPLING;
+    float loop_fs_hz = (loop_dt_s > 1e-9f) ? (1.0f / loop_dt_s) : 0.0f;
     q16_t loop_dt = q16_from_float(loop_dt_s);
-    q16_t loop_inv_dt = q16_from_float((loop_dt_s > 1e-9f) ? (1.0f / loop_dt_s) : 0.0f);
+    q16_t loop_inv_dt = q16_from_float(loop_fs_hz);
     for (int i = 0; i < 2; ++i) {
         axis->torque_controller[i].dt = loop_dt;
         axis->torque_controller[i].inv_dt = loop_inv_dt;
         apply_autogen_gains(&axis->torque_controller[i], axis->max_voltage);
-        esp_foc_low_pass_filter_set_cutoff(&axis->current_filters[i],
-                                           0.1f * q16_to_float(loop_inv_dt),
-                                           q16_to_float(loop_inv_dt));
     }
+
+    /* Resolve the current-sensor low-pass cutoff. Precedence at boot:
+     *   1. NVS calibration overlay (when its current_filter_fc != 0).
+     *   2. CONFIG_ESP_FOC_CURRENT_FILTER_CUTOFF_HZ (default 300 Hz).
+     * The runtime tuner can override later via the protocol. */
+    float current_filter_fc_hz = (float)CONFIG_ESP_FOC_CURRENT_FILTER_CUTOFF_HZ;
 
     /* If a tuned calibration exists for this axis AND it was made for
      * the same motor profile, override the autogen seed gains. NVS
@@ -180,19 +184,31 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                 axis->torque_controller[i].integrator_limit =
                     cal.integrator_limit;
             }
+            if (cal.current_filter_fc_hz > 0) {
+                current_filter_fc_hz = q16_to_float(cal.current_filter_fc_hz);
+            }
             ESP_LOGI(tag,
                      "axis %d: NVS calibration overlay applied "
-                     "(Kp=%.4f Ki=%.2f)",
+                     "(Kp=%.4f Ki=%.2f fc=%.1fHz)",
                      settings.motor_unit,
                      (double)q16_to_float(cal.kp),
-                     (double)q16_to_float(cal.ki));
+                     (double)q16_to_float(cal.ki),
+                     (double)current_filter_fc_hz);
         }
+    }
+
+    if (isensor != NULL && axis->isensor_driver->set_filter_cutoff != NULL) {
+        axis->isensor_driver->set_filter_cutoff(axis->isensor_driver,
+                                                current_filter_fc_hz,
+                                                loop_fs_hz);
     }
 
     axis->motor_pole_pairs = settings.motor_pole_pairs;
 
-    esp_foc_low_pass_filter_set_cutoff(&axis->velocity_filter, 50.0f,
-                                       q16_to_float(loop_inv_dt));
+    esp_foc_biquad_butterworth_lpf_design_q16(
+        &axis->velocity_filter,
+        (float)CONFIG_ESP_FOC_VELOCITY_FILTER_CUTOFF_HZ,
+        loop_fs_hz);
 
     /* settings.natural_direction is a hint; esp_foc_align_axis() probes
      * the rotor and overrides this once the motor is energised. */
