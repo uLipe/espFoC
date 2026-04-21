@@ -44,25 +44,38 @@ def test_mainwindow_demo_boots_polls_and_streams_scope():
         apply_dark_theme(app)
         w = MainWindow(client, title="espFoC smoke")
         w.show()
+        # Engage the override and push a non-zero iq so the demo plant
+        # actually modulates — otherwise the SVM hexagon just sees zero
+        # vectors and looks idle.
+        client.override_on()
+        client.write_target_iq(1.5)
         # 1) the tuning panel must get a gain readout within a few ticks;
         # 2) the scope panel must see the CSV stream the demo firmware
         #    pushes (6 channels today), so its channel count grows
         #    beyond zero within a few scope frames.
-        deadline = time.monotonic() + 3.0
+        # 3) the SVM panel must collect enough alpha/beta samples to
+        #    draw at least a short trail.
+        deadline = time.monotonic() + 4.0
         tuning_seen = False
         scope_seen = False
+        svm_seen = False
         while time.monotonic() < deadline:
             app.processEvents()
             if w._tuning._kp_label.text().strip() not in ("-", ""):
                 tuning_seen = True
             if w._scope._n_channels > 0:
                 scope_seen = True
-            if tuning_seen and scope_seen:
+            if len(w._svm._alpha_buf) >= 5:
+                svm_seen = True
+            if tuning_seen and scope_seen and svm_seen:
                 break
             time.sleep(0.05)
         assert tuning_seen, "tuning panel never received a gain update"
         assert scope_seen, (
             "scope panel never received any SCOPE-channel frame"
+        )
+        assert svm_seen, (
+            "SVM panel never received enough samples to draw a trail"
         )
         w.close()
     finally:
