@@ -220,6 +220,8 @@ bool esp_foc_calibration_present(uint8_t axis_id)
 
 #else /* CONFIG_ESP_FOC_CALIBRATION_NVS not set — stub everything. */
 
+#include "espFoC/esp_foc_calibration.h"
+
 uint32_t esp_foc_calibration_profile_hash(void) { return 0u; }
 
 esp_foc_err_t esp_foc_calibration_save(uint8_t axis_id,

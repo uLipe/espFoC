@@ -14,8 +14,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..protocol import TunerClient
+from ..protocol import TunerClient, TunerError
+from ..protocol.tuner import TUNER_FIRMWARE_TYPE_TSGX
 from .analysis_panel import AnalysisPanel
+from .generate_app_panel import GenerateAppPanel
 from .hardware_panel import HardwarePanel
 from .scope_panel import ScopePanel
 from .svm_panel import SvmPanel
@@ -64,6 +66,16 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._scope, "Scope")
         tabs.addTab(self._svm, "SVM Hexagon")
         tabs.addTab(self._hardware, "Hardware")
+
+        # Generate App is shown only when the firmware identifies itself
+        # as TunerStudio target (or in --demo mode where the demo also
+        # advertises TSGX). Anything else risks generating apps with the
+        # wrong calibration on a stranger firmware.
+        if self._is_tuner_studio_target(client):
+            self._generate = GenerateAppPanel(
+                client, self._hardware, self._current_motor_params)
+            tabs.addTab(self._generate, "Generate App")
+
         splitter.addWidget(tabs)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -95,3 +107,15 @@ class MainWindow(QMainWindow):
         r, l, bw, kp, ki = self._analysis_pending
         self._analysis_pending = None
         self._analysis.update_model(r, l, bw, kp, ki)
+
+    @staticmethod
+    def _is_tuner_studio_target(client: TunerClient) -> bool:
+        try:
+            return client.read_firmware_type() == TUNER_FIRMWARE_TYPE_TSGX
+        except TunerError:
+            return False
+
+    def _current_motor_params(self) -> tuple[float, float, float]:
+        return (self._tuning._r_spin.value(),
+                self._tuning._l_mh_spin.value() * 1e-3,
+                self._tuning._bw_spin.value())
