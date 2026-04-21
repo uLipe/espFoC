@@ -29,9 +29,11 @@ directory** (never the source tree — `.gitignore` and a path guard in
 the script keep it that way).
 
 The generated header is consumed by `esp_foc_initialize_axis()`
-unconditionally — every axis boots with the autotuned gains. Override
-at runtime with `esp_foc_axis_retune_current_pi_q16()` or by writing
-through the tuner protocol.
+unconditionally — every axis boots with the autotuned gains.
+Override at runtime with `esp_foc_axis_retune_current_pi_q16()`
+or by writing through the tuner protocol; persist the result with
+`esp_foc_calibration_save()` so subsequent boots come up already
+tuned (see *NVS calibration overlay* below).
 
 Example run on the reference gimbal profile:
 
@@ -133,9 +135,120 @@ python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 \
 python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 override on
 python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 set-target iq 1.5
 python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 override off
+
+# alignment + calibration round-trip
+python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 align
+python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 \
+      persist --r 1.08 --l 0.0018 --bw 150
+python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 firmware-type
 ```
 
 Set `PYTHONPATH=tools` if you have not installed the package.
+
+## Alignment with natural-direction probe
+
+`esp_foc_align_axis()` parks the rotor at electrical 0, zeroes the
+encoder, then drives a short positive `Vq` pulse (≈30 % of `V_max`
+for 300 ms) and watches the raw encoder count to decide which way
+the motor turned:
+
+* delta ≥ +50 raw counts → `natural_direction = CW`
+* delta ≤ −50 raw counts → `natural_direction = CCW`
+* anything in between → keep the value passed in `settings`,
+  log a warning. A stuck rotor (mechanical brake, open phase,
+  dead encoder) lands here.
+
+The probe is always on; the `settings.natural_direction` field
+becomes a hint used only when the probe is inconclusive. Progress
+shows up on the `LOG` link channel as
+`alignment: started` → `alignment: complete (direction = ...)`,
+which the TunerStudio Tuning panel echoes in its log viewer and
+the CLI surfaces through `axis-state`.
+
+## NVS calibration overlay
+
+Once the loop is dialled in, persist the gains:
+
+```c
+#include "espFoC/esp_foc_calibration.h"
+
+esp_foc_calibration_data_t cal = {
+    .kp = my_kp_q16, .ki = my_ki_q16,
+    .integrator_limit = my_lim_q16,
+    .motor_r_ohm = q16_from_float(R),
+    .motor_l_h   = q16_from_float(L),
+    .bandwidth_hz = q16_from_float(BW),
+};
+esp_foc_calibration_save(0 /* axis_id */, &cal);
+```
+
+Or click **Save to NVS** in TunerStudio, or run
+`tunerctl persist --r ... --l ... --bw ...`.
+
+Every blob is tagged with a *profile hash*:
+
+```
+profile_hash = FNV-1a("<CONFIG_ESP_FOC_MOTOR_PROFILE>:<CONFIG_ESP_FOC_PROFILE_VERSION>")
+```
+
+`esp_foc_initialize_axis()` loads the overlay at boot only when the
+stored hash matches the build's hash. Bumping
+`CONFIG_ESP_FOC_PROFILE_VERSION` invalidates every persisted blob —
+the guard rail that prevents loading gimbal calibration on a
+scooter motor by accident.
+
+The on-flash format is documented in
+`source/motor_control/esp_foc_calibration.c`:
+
+```
+[magic=0xE5F0CC11][version=1][reserved][profile_hash:u32]
+[crc32:u32][payload_len:u16][pad][payload bytes]
+```
+
+## TunerStudio target firmware
+
+`examples/tuner_studio_target` is a service-mode firmware that does
+nothing except host TunerStudio: it boots, parks the motor at zero
+current, attaches the axis to the runtime tuner and waits. It also
+overrides the weak `esp_foc_tuner_firmware_type()` hook to return
+`'TSGX'` so the GUI can detect the target on connect and surface
+the **Generate App** tab.
+
+Pin map lives entirely in `Kconfig.projbuild`:
+
+```
+TUNER_TARGET_PWM_U_HI / V_HI / W_HI    high-side pins
+TUNER_TARGET_PWM_U_LO / V_LO / W_LO    low-side pins
+TUNER_TARGET_PWM_FREQ_HZ               PWM rate
+TUNER_TARGET_DC_LINK_V                 link voltage
+TUNER_TARGET_ENC_SDA / SCL             AS5600 I2C
+TUNER_TARGET_POLE_PAIRS                motor identity
+```
+
+USB-CDC is the default transport on S2 / S3 / P4; switch to UART
+under `Component config → espFoC Settings → Tuner transport bridge`
+when targeting plain ESP32.
+
+## Generate App from TunerStudio
+
+The **Hardware** and **Generate App** tabs together turn a
+TunerStudio session into a production-ready IDF project. Workflow:
+
+1. Connect to the bring-up board running `tuner_studio_target`.
+2. Use the Tuning + Analysis tabs to dial Kp/Ki/integrator_limit in.
+3. Click **Save to NVS** so the bring-up board itself remembers
+   the calibration (handy if you keep iterating).
+4. Open the **Hardware** tab and fill in the production pin map.
+5. Open the **Generate App** tab, type a project name, optionally
+   override the output directory, click **Generate**.
+
+The generator under `tools/espfoc_studio/codegen/sensored_app.py`
+walks the `templates/sensored_app/*.tmpl` tree, substitutes the
+live gains + Hardware values, and writes a self-contained IDF
+project plus, when `nvs_partition_gen.py` is on `$IDF_PATH`, a
+bit-exact `nvs_calibration.bin` you can flash into the production
+NVS partition. The generated app keeps the runtime tuner enabled
+so the operator can re-tune later without rebuilding firmware.
 
 ## Cross-validation Python ↔ C
 
