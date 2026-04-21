@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -48,6 +50,8 @@ class TuningPanel(QWidget):
     All slots reach out to a TunerClient directly. We keep every
     round-trip short so the UI does not feel janky even on real serial."""
 
+    _logFromReader = Signal(str)
+
     def __init__(self, client: TunerClient,
                  on_params_changed: Optional[Callable[[float, float, float,
                                                        float, float], None]] = None) -> None:
@@ -57,6 +61,7 @@ class TuningPanel(QWidget):
         self._last_motor_r = 1.08
         self._last_motor_l = 0.0018
         self._last_bw = 150.0
+        self._cal_present = False
 
         root = QVBoxLayout(self)
 
@@ -145,6 +150,40 @@ class TuningPanel(QWidget):
         ovr_layout.addLayout(target_form)
         root.addWidget(ovr)
 
+        # --- Alignment + calibration ---
+        align = QGroupBox("Alignment & calibration")
+        align_layout = QVBoxLayout(align)
+        btn_align = QPushButton("Align axis")
+        btn_align.clicked.connect(self._on_align)
+        align_layout.addWidget(btn_align)
+        self._cal_label = QLabel("calibration: -")
+        self._cal_label.setStyleSheet("font-family: monospace; color: #9aa0a6;")
+        align_layout.addWidget(self._cal_label)
+        cal_btns = QHBoxLayout()
+        for label, slot in (("Save to NVS", self._on_persist),
+                            ("Load NVS",    self._on_load),
+                            ("Erase",       self._on_erase)):
+            b = QPushButton(label)
+            b.clicked.connect(slot)
+            cal_btns.addWidget(b)
+        align_layout.addLayout(cal_btns)
+        root.addWidget(align)
+
+        # --- Log channel viewer ---
+        self._log_view = QPlainTextEdit()
+        self._log_view.setReadOnly(True)
+        self._log_view.setMaximumBlockCount(80)
+        self._log_view.setMaximumHeight(110)
+        f = QFont("monospace")
+        f.setPointSize(9)
+        self._log_view.setFont(f)
+        root.addWidget(self._log_view)
+        self._logFromReader.connect(self._append_log)
+        try:
+            self._client.reader.register_log_callback(self._on_log_reader)
+        except Exception:
+            pass
+
         # --- Status / errors bar ---
         self._status = QLabel("")
         self._status.setStyleSheet("color: #c62828;")
@@ -161,6 +200,7 @@ class TuningPanel(QWidget):
             lim = self._client.read_int_lim()
             vmax = self._client.read_v_max()
             state = self._client.read_axis_state()
+            present = self._client.is_calibration_present()
         except TunerError as e:
             self._status.setText(str(e))
             return
@@ -170,6 +210,10 @@ class TuningPanel(QWidget):
         self._lim_label.setText(f"{lim:9.3f}")
         self._vmax_label.setText(f"{vmax:9.3f}")
         self._state_label.setText(f"axis: {self._format_state(state)}")
+        self._cal_present = present
+        self._cal_label.setText("calibration: " +
+                                ("\u2713 present in NVS" if present
+                                 else "\u2717 none stored"))
         # Keep the override checkbox in sync without re-emitting signals.
         override_active = bool(state & AxisStateFlag.TUNER_OVERRIDE)
         self._override_box.blockSignals(True)
@@ -247,6 +291,55 @@ class TuningPanel(QWidget):
             self._client.write_target_id(value)
         except TunerError as e:
             self._status.setText(str(e))
+
+    def _on_align(self) -> None:
+        self._append_log("> alignment requested")
+        try:
+            self._client.align_axis()
+        except TunerError as e:
+            self._status.setText(str(e))
+            return
+        self._status.setText("")
+
+    def _on_persist(self) -> None:
+        try:
+            self._client.persist_calibration(
+                motor_r=self._r_spin.value(),
+                motor_l=self._l_mh_spin.value() * 1e-3,
+                bandwidth_hz=self._bw_spin.value())
+        except TunerError as e:
+            self._status.setText(str(e))
+            return
+        self._status.setText("")
+
+    def _on_load(self) -> None:
+        try:
+            self._client.load_calibration()
+        except TunerError as e:
+            self._status.setText(str(e))
+            return
+        self.poll()
+
+    def _on_erase(self) -> None:
+        try:
+            self._client.erase_calibration()
+        except TunerError as e:
+            self._status.setText(str(e))
+            return
+        self.poll()
+
+    # --- LOG channel viewer --------------------------------------------
+
+    def _on_log_reader(self, seq: int, payload: bytes) -> None:
+        """Reader thread context — bounce to the Qt thread."""
+        try:
+            self._logFromReader.emit(payload.decode("ascii", errors="replace"))
+        except Exception:
+            pass
+
+    def _append_log(self, line: str) -> None:
+        if line:
+            self._log_view.appendPlainText(line.rstrip("\n"))
 
     def _notify_params_changed(self) -> None:
         if self._on_params_changed is None:

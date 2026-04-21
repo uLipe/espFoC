@@ -24,6 +24,7 @@ from typing import Optional
 from ..link import Channel, Decoder, LoopbackTransport, MAX_PAYLOAD, Status, encode
 from ..model import MotorParams, PiGains, mpz_design
 from ..protocol import AxisStateFlag, Op, ParamId
+from ..protocol.tuner import TUNER_FIRMWARE_TYPE_TSGX
 
 # Mirror of ESP_FOC_* status codes.
 OK = 0
@@ -68,6 +69,13 @@ class DemoFirmware(threading.Thread):
         self.target_iq = 0.0
         self.target_ud = 0.0
         self.target_uq = 0.0
+
+        # Pretend to be a tuner_studio_target firmware so the GUI's
+        # Generate App tab shows up in --demo mode.
+        self.firmware_type = TUNER_FIRMWARE_TYPE_TSGX
+        # In-memory NVS overlay; populated by CMD_PERSIST_NVS, cleared
+        # by CMD_ERASE_NVS, applied by CMD_LOAD_NVS.
+        self.nvs_overlay: Optional[dict] = None
 
         # Plant state.
         self._i_actual = 0.0
@@ -243,6 +251,12 @@ class DemoFirmware(threading.Thread):
             self._send_response(seq, OK, bytes([int(flags)]))
         elif pid == int(ParamId.AXIS_LAST_ERR):
             self._send_response(seq, OK, struct.pack("<b", 0))
+        elif pid == int(ParamId.NVS_PRESENT):
+            self._send_response(seq, OK,
+                                bytes([1 if self.nvs_overlay else 0]))
+        elif pid == int(ParamId.FIRMWARE_TYPE):
+            self._send_response(seq, OK,
+                                struct.pack("<I", self.firmware_type))
         else:
             self._send_response(seq, ERR_INVALID_ARG)
 
@@ -306,5 +320,47 @@ class DemoFirmware(threading.Thread):
             self.ki = g.ki
             self.lim = g.int_lim
             self._send_response(seq, OK)
+        elif pid == int(ParamId.CMD_ALIGN_AXIS):
+            # Demo: no real motor, just announce success after a tiny
+            # synthetic pause so the host's progress dialog has something
+            # to show.
+            self._log("alignment: started")
+            time.sleep(0.4)
+            self.aligned = True
+            self._log("alignment: complete (direction = CW)")
+            self._send_response(seq, OK)
+        elif pid == int(ParamId.CMD_PERSIST_NVS):
+            r = _q16_from_bytes(cmd[0:4]) if len(cmd) >= 4 else 0.0
+            l = _q16_from_bytes(cmd[4:8]) if len(cmd) >= 8 else 0.0
+            bw = _q16_from_bytes(cmd[8:12]) if len(cmd) >= 12 else 0.0
+            self.nvs_overlay = {
+                "kp": self.kp, "ki": self.ki, "lim": self.lim,
+                "r": r, "l": l, "bw": bw,
+            }
+            self._log("calibration: saved to NVS")
+            self._send_response(seq, OK)
+        elif pid == int(ParamId.CMD_LOAD_NVS):
+            if not self.nvs_overlay:
+                self._log("calibration: nothing to load")
+                self._send_response(seq, -3)  # AXIS_INVALID_STATE
+                return
+            self.kp = self.nvs_overlay["kp"]
+            self.ki = self.nvs_overlay["ki"]
+            self.lim = self.nvs_overlay["lim"]
+            self._log("calibration: NVS overlay applied")
+            self._send_response(seq, OK)
+        elif pid == int(ParamId.CMD_ERASE_NVS):
+            self.nvs_overlay = None
+            self._log("calibration: NVS namespace erased")
+            self._send_response(seq, OK)
         else:
             self._send_response(seq, ERR_INVALID_ARG)
+
+    # --- LOG channel helper ------------------------------------------------
+
+    def _log(self, msg: str) -> None:
+        try:
+            self._t.send_bytes(encode(Channel.LOG, 0,
+                                      msg.encode("ascii", errors="replace")))
+        except Exception:
+            pass

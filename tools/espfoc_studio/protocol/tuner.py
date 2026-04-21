@@ -202,8 +202,9 @@ class TunerClient:
             raise TunerError(
                 f"write {id_.name}={value_float} failed: {_err_name(r.status)}")
 
-    def _exec(self, id_: ParamId, payload: bytes = b"") -> None:
-        r = self._round_trip(Op.EXEC, id_, payload)
+    def _exec(self, id_: ParamId, payload: bytes = b"",
+              timeout: Optional[float] = None) -> None:
+        r = self._round_trip(Op.EXEC, id_, payload, timeout=timeout)
         if r.status != ESP_FOC_OK:
             raise TunerError(f"exec {id_.name} failed: {_err_name(r.status)}")
 
@@ -268,3 +269,42 @@ class TunerClient:
 
     def override_off(self) -> None:
         self._exec(ParamId.CMD_OVERRIDE_OFF)
+
+    def read_firmware_type(self) -> int:
+        r = self._round_trip(Op.READ, ParamId.FIRMWARE_TYPE)
+        if r.status != ESP_FOC_OK:
+            raise TunerError(
+                f"read firmware_type failed: {_err_name(r.status)}")
+        if len(r.payload) != 4:
+            raise TunerError(
+                f"firmware_type response has {len(r.payload)} bytes, want 4")
+        return struct.unpack("<I", r.payload)[0]
+
+    def is_calibration_present(self) -> bool:
+        r = self._round_trip(Op.READ, ParamId.NVS_PRESENT)
+        if r.status != ESP_FOC_OK:
+            raise TunerError(
+                f"read nvs_present failed: {_err_name(r.status)}")
+        return bool(r.payload[0]) if r.payload else False
+
+    def align_axis(self, timeout: float = 8.0) -> None:
+        """Triggers blocking alignment on the firmware. Bumps the
+        round-trip timeout because the firmware sequence takes ~3 s
+        and we want comfortable headroom on a slow link."""
+        self._exec(ParamId.CMD_ALIGN_AXIS, timeout=timeout)
+
+    def persist_calibration(self, motor_r: float = 0.0,
+                            motor_l: float = 0.0,
+                            bandwidth_hz: float = 0.0) -> None:
+        """Saves current axis gains plus the host-supplied motor
+        params (recorded for audit / GUI display) to NVS."""
+        payload = (struct.pack("<i", q16_from_float(motor_r))
+                   + struct.pack("<i", q16_from_float(motor_l))
+                   + struct.pack("<i", q16_from_float(bandwidth_hz)))
+        self._exec(ParamId.CMD_PERSIST_NVS, payload)
+
+    def load_calibration(self) -> None:
+        self._exec(ParamId.CMD_LOAD_NVS)
+
+    def erase_calibration(self) -> None:
+        self._exec(ParamId.CMD_ERASE_NVS)
