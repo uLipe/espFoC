@@ -13,10 +13,17 @@ sensing, rotor feedback and the Id/Iq torque loop. Velocity and
 position loops live in the application's regulation callback; the
 library stays focused and the hot path runs without floating-point
 math. Gains can be synthesised at build time, retuned live from the
-firmware API, or dialled in interactively through the bundled
-TunerStudio GUI.
+firmware API, persisted to NVS, or dialled in interactively through
+the bundled TunerStudio GUI.
 
 Targets: ESP32, ESP32-S3, ESP32-P4 (ESP-IDF v5+).
+
+> **3.0 is a breaking release.** The legacy continuous-time PI
+> formula and the `motor_resistance / motor_inductance / motor_inertia`
+> fields are gone — gains come from the build-time autotuner or the
+> runtime tuner. The 3-PWM LEDC driver and the WIP `axis_sensorless`
+> example were also dropped. See [`CHANGELOG`](#changelog) below for
+> a full migration list.
 
 ---
 
@@ -57,8 +64,8 @@ PWM-synchronised and the Id/Iq loop runs in a deterministic task.
 
 Inverter and rotor drivers are pluggable:
 
-- Inverters: 3-PWM LEDC, 3-PWM MCPWM, 6-PWM MCPWM (hardware dead-time).
-- Rotor sensors: AS5600, AS5048, quadrature via PCNT, open-loop.
+- Inverters: 3-PWM MCPWM, 6-PWM MCPWM (hardware dead-time).
+- Rotor sensors: AS5600, AS5048A, quadrature via PCNT, open-loop.
 - Current sensing: ADC shunt (continuous or one-shot).
 
 ---
@@ -73,10 +80,15 @@ single window you get:
 
 - live axis state and gain readout with in-place editing;
 - MPZ recompute from motor R/L/bandwidth on the fly;
+- one-click rotor alignment with auto-detected natural direction;
+- save / load / erase calibration to NVS so the next boot comes up
+  already tuned;
 - predicted step response, Bode, pole-zero and root-locus plots;
 - firmware scope stream with per-channel colour, toggle and cursor;
 - SVPWM hexagon with the three phase projections and the resultant
-  voltage vector rotating as the motor is driven.
+  voltage vector rotating as the motor is driven;
+- a Hardware tab plus a Generate App tab that turn the live tuning
+  state into a ready-to-build IDF project for production.
 
 ### Try it without hardware
 
@@ -91,12 +103,26 @@ boards attached.
 
 ### Talk to a real target
 
-Enable a transport bridge in `menuconfig`:
+Two paths:
 
-- `CONFIG_ESP_FOC_BRIDGE_UART` — works on every ESP32 variant.
-- `CONFIG_ESP_FOC_BRIDGE_USBCDC` — S2 / S3 / P4; same cable as flashing.
+1. **`tuner_studio_target` (recommended for bring-up).** A dedicated
+   service-mode firmware that boots, parks the motor, and waits for
+   the GUI. Advertises a `TSGX` firmware-type so the Generate App tab
+   lights up automatically.
 
-Flash a firmware that has `CONFIG_ESP_FOC_TUNER_ENABLE=y`, then:
+   ```bash
+   cd examples/tuner_studio_target
+   idf.py set-target esp32s3        # USB-CDC default
+   idf.py menuconfig                # adjust the pin map
+   idf.py build flash monitor
+   ```
+
+2. **Your own firmware.** Enable a transport bridge in `menuconfig`
+   (`CONFIG_ESP_FOC_BRIDGE_UART` for plain ESP32,
+   `CONFIG_ESP_FOC_BRIDGE_USBCDC` for S2/S3/P4) and set
+   `CONFIG_ESP_FOC_TUNER_ENABLE=y`.
+
+Then:
 
 ```bash
 PYTHONPATH=tools python3 -m espfoc_studio.gui --port /dev/ttyACM0
@@ -165,6 +191,8 @@ void app_main(void)
 ## Examples
 
 - `examples/axis_sensored` — reference bring-up (sensored current mode).
+- `examples/tuner_studio_target` — service-mode firmware for live
+  tuning + Generate App.
 - `examples/tuner_demo` — runs in QEMU, exercises autogen gains,
   runtime retune, the tuner protocol and signal injection.
 - `examples/unit_test_runner` — Unity suite for CI / QEMU.
@@ -189,18 +217,47 @@ espFoC/
 ├── doc/
 │   ├── images/         # architecture, TunerStudio screenshot, demo gif
 │   └── TUNING.md       # deep dive: autogen, runtime API, protocol, CLI
-├── examples/           # axis_sensored / tuner_demo / unit_test_runner / ...
+├── examples/           # axis_sensored / tuner_studio_target /
+│                       # tuner_demo / unit_test_runner / ...
 ├── include/espFoC/     # public API
 ├── scripts/
 │   ├── gen_pi_gains.py # build-time MPZ autotuner
 │   └── motors/*.json   # motor profiles consumed by the autotuner
 ├── source/
 │   ├── drivers/        # platform drivers (inverters, encoders, shunts)
-│   ├── motor_control/  # axis core, MPZ design, tuner, injection, link codec
+│   ├── motor_control/  # axis core, MPZ design, calibration, tuner,
+│   │                   # injection, link codec
 │   └── osal/           # OS abstraction
 ├── test/               # Unity unit tests (run via examples/unit_test_runner)
-└── tools/espfoc_studio # PySide6 + pyqtgraph GUI and CLI
+└── tools/espfoc_studio # PySide6 + pyqtgraph GUI, CLI, codegen, templates
 ```
+
+---
+
+## Changelog
+
+### 3.0
+
+* **Breaking:** `motor_resistance`, `motor_inductance` and
+  `motor_inertia` removed from `esp_foc_motor_control_settings_t`.
+  Gains come from the build-time autotuner or the runtime tuner.
+* **Breaking:** the 3-PWM LEDC inverter driver and
+  `CONFIG_ESP_FOC_ENABLE_LEGACY_LEDC_PWM` were dropped. Use the
+  3-PWM or 6-PWM MCPWM drivers.
+* **Breaking:** `examples/axis_sensorless` removed pending the
+  observer rework.
+* `esp_foc_align_axis()` now probes the rotor for its natural
+  direction and overrides the settings hint when the deflection is
+  conclusive.
+* New `esp_foc_calibration_*()` API and
+  `CONFIG_ESP_FOC_CALIBRATION_NVS` overlay calibration on top of
+  the autogen gains at boot, gated by a profile-hash for safety.
+* New tuner protocol commands: `CMD_ALIGN_AXIS`, `CMD_PERSIST_NVS`,
+  `CMD_LOAD_NVS`, `CMD_ERASE_NVS`, plus `PARAM_NVS_PRESENT` and
+  `PARAM_FIRMWARE_TYPE`.
+* New `examples/tuner_studio_target` service-mode firmware.
+* TunerStudio: alignment button, calibration save / load / erase,
+  LOG-channel viewer, Hardware tab and Generate App tab.
 
 ---
 
