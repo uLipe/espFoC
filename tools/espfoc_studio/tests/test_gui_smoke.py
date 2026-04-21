@@ -27,39 +27,51 @@ from PySide6.QtWidgets import QApplication
 
 from espfoc_studio.gui.demo_firmware import DemoFirmware
 from espfoc_studio.gui.main_window import MainWindow
-from espfoc_studio.link import LoopbackTransport
+from espfoc_studio.gui.theme import apply_dark_theme
+from espfoc_studio.link import LinkReader, LoopbackTransport
 from espfoc_studio.protocol import TunerClient
 
 
-def test_mainwindow_demo_boots_and_polls():
+def test_mainwindow_demo_boots_polls_and_streams_scope():
     host_t, fw_t = LoopbackTransport.pair()
     fw = DemoFirmware(fw_t)
     fw.start()
+    reader = LinkReader(host_t)
+    reader.start()
     try:
-        client = TunerClient(host_t)
+        client = TunerClient(reader)
         app = QApplication.instance() or QApplication(sys.argv)
-        w = MainWindow(client, scope_source=fw.snapshot_plant,
-                       title="espFoC smoke")
+        apply_dark_theme(app)
+        w = MainWindow(client, title="espFoC smoke")
         w.show()
-        # Sanity: the initial gain readouts should materialize within a
-        # couple of timer ticks (200 ms). We drive the event loop manually
-        # so the test runs in ~1 s and exits.
-        deadline = time.monotonic() + 2.0
+        # 1) the tuning panel must get a gain readout within a few ticks;
+        # 2) the scope panel must see the CSV stream the demo firmware
+        #    pushes (6 channels today), so its channel count grows
+        #    beyond zero within a few scope frames.
+        deadline = time.monotonic() + 3.0
+        tuning_seen = False
+        scope_seen = False
         while time.monotonic() < deadline:
             app.processEvents()
-            # Stop as soon as the Kp label has been populated.
             if w._tuning._kp_label.text().strip() not in ("-", ""):
+                tuning_seen = True
+            if w._scope._n_channels > 0:
+                scope_seen = True
+            if tuning_seen and scope_seen:
                 break
             time.sleep(0.05)
-        assert w._tuning._kp_label.text().strip() not in ("-", ""), (
-            "tuning panel never received a gain update")
+        assert tuning_seen, "tuning panel never received a gain update"
+        assert scope_seen, (
+            "scope panel never received any SCOPE-channel frame"
+        )
         w.close()
     finally:
         fw.stop()
+        reader.stop()
 
 
 def main() -> int:
-    tests = [test_mainwindow_demo_boots_and_polls]
+    tests = [test_mainwindow_demo_boots_polls_and_streams_scope]
     failed = 0
     for t in tests:
         try:

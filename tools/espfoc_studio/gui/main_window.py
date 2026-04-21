@@ -3,16 +3,14 @@ and owns the single polling timer that keeps the live panels fresh."""
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Optional
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
-    QLabel,
     QMainWindow,
     QSplitter,
     QTabWidget,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -24,9 +22,6 @@ from .tuning_panel import TuningPanel
 
 class MainWindow(QMainWindow):
     def __init__(self, client: TunerClient,
-                 scope_source: Optional[Callable[[],
-                                                 tuple[float, float, float]]]
-                 = None,
                  title: str = "espFoC TunerStudio") -> None:
         super().__init__()
         self.setWindowTitle(title)
@@ -40,7 +35,9 @@ class MainWindow(QMainWindow):
         root.addWidget(splitter, 1)
 
         self._analysis = AnalysisPanel()
-        self._scope = ScopePanel(scope_source)
+        # The scope listens on the shared LinkReader for SCOPE frames;
+        # no more poll-based shim.
+        self._scope = ScopePanel(reader=client.reader)
 
         # Analysis plots are expensive (step sim + bode + root locus).
         # Debounce spinbox storms so one nudge of the mouse wheel doesn't
@@ -72,12 +69,6 @@ class MainWindow(QMainWindow):
         self._timer.setInterval(500)
         self._timer.timeout.connect(self._poll)
         self._timer.start()
-
-        # Scope samples at ~50 FPS for smooth waveforms in --demo mode.
-        self._scope_timer = QTimer(self)
-        self._scope_timer.setInterval(20)
-        self._scope_timer.timeout.connect(self._scope.poll)
-        self._scope_timer.start()
 
         # Prime the analysis view with the initial spinbox values.
         self._tuning._notify_params_changed()

@@ -14,11 +14,12 @@ from __future__ import annotations
 import argparse
 import signal
 import sys
-from typing import Callable, Optional
+from typing import Optional
 
-from ..link import LoopbackTransport
+from ..link import LinkReader, LoopbackTransport
 from ..protocol import TunerClient
 from .main_window import MainWindow
+from .theme import apply_dark_theme
 
 
 def _parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
@@ -36,24 +37,37 @@ def _parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _setup_demo() -> tuple[TunerClient, Callable[[], tuple[float, float, float]],
-                           Callable[[], None]]:
+def _setup_demo() -> tuple[TunerClient, Callable[[], None]]:
     from .demo_firmware import DemoFirmware
     host_t, fw_t = LoopbackTransport.pair()
     fw = DemoFirmware(fw_t)
     fw.start()
-    client = TunerClient(host_t)
-    return client, fw.snapshot_plant, fw.stop
+    # One reader, shared by the TunerClient and the ScopePanel (attached
+    # inside MainWindow). DemoFirmware streams scope frames over the
+    # same bus via the SCOPE channel.
+    reader = LinkReader(host_t)
+    reader.start()
+    client = TunerClient(reader)
+
+    def shutdown() -> None:
+        fw.stop()
+        reader.stop()
+
+    return client, shutdown
 
 
 def _setup_serial(port: str, baud: int, axis: int
-                  ) -> tuple[TunerClient, None, Callable[[], None]]:
+                  ) -> tuple[TunerClient, Callable[[], None]]:
     from ..link.transport_serial import SerialTransport
     transport = SerialTransport(port=port, baud=baud)
-    client = TunerClient(transport, axis=axis)
-    def _close() -> None:
-        transport.close()
-    return client, None, _close
+    reader = LinkReader(transport)
+    reader.start()
+    client = TunerClient(reader, axis=axis)
+
+    def shutdown() -> None:
+        reader.stop()
+
+    return client, shutdown
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -65,15 +79,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     from PySide6.QtWidgets import QApplication
 
     if args.demo:
-        client, scope_source, shutdown = _setup_demo()
+        client, shutdown = _setup_demo()
         title = "espFoC TunerStudio — DEMO (simulated firmware)"
     else:
-        client, scope_source, shutdown = _setup_serial(args.port, args.baud,
-                                                       args.axis)
+        client, shutdown = _setup_serial(args.port, args.baud, args.axis)
         title = f"espFoC TunerStudio — {args.port} @ {args.baud}"
 
     app = QApplication.instance() or QApplication(sys.argv)
-    window = MainWindow(client, scope_source=scope_source, title=title)
+    apply_dark_theme(app)
+    window = MainWindow(client, title=title)
     window.show()
 
     # Allow Ctrl-C in the terminal to close the window.
