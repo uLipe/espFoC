@@ -63,7 +63,9 @@ TEST_CASE("axis align: enable and set_voltages sequence", "[espFoC][axis_flow]")
     TEST_ASSERT_EQUAL(ESP_FOC_OK, axis.rotor_aligned);
     TEST_ASSERT_EQUAL(enable_before + 1, mock_inv.enable_count);
     TEST_ASSERT_TRUE(mock_inv.set_voltages_count > set_voltages_before);
-    TEST_ASSERT_EQUAL(set_to_zero_before + 1, mock_rotor.set_to_zero_count);
+    /* New alignment zeroes the encoder twice: once after the initial
+     * parking and once after the natural-direction probe. */
+    TEST_ASSERT_EQUAL(set_to_zero_before + 2, mock_rotor.set_to_zero_count);
 }
 
 TEST_CASE("axis init: invalid args return error", "[espFoC][axis_flow]")
