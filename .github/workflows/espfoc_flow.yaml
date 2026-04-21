@@ -62,10 +62,15 @@ jobs:
         popd
         pushd examples/tuner_studio_target
         # Default sdkconfig drives USB-CDC; valid on S3/P4. We exercise
-        # both paths so a CDC-only or UART-only regression is caught.
+        # all three paths so a CDC-only or UART-only regression on any
+        # target is caught — and so the ESP32-P4 one-shot ADC current
+        # sensor branch also sees compiler eyes on every PR.
         # The ESP32-specific overrides live in sdkconfig.defaults.esp32
         # (auto-loaded by IDF on set-target esp32).
         idf.py set-target esp32s3
+        idf.py build
+        rm -rf build sdkconfig
+        idf.py set-target esp32p4
         idf.py build
         rm -rf build sdkconfig
         idf.py set-target esp32

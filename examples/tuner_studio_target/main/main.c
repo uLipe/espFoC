@@ -22,7 +22,14 @@
 #include "espFoC/esp_foc_tuner.h"
 #include "espFoC/inverter_6pwm_mcpwm.h"
 #include "espFoC/rotor_sensor_as5600.h"
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+/* Continuous-mode ADC driver has known issues on ESP32-P4
+ * (HW path differs and the existing driver does not yet cover it).
+ * Use the one-shot driver until the continuous path is fixed. */
+#include "espFoC/current_sensor_adc_one_shot.h"
+#else
 #include "espFoC/current_sensor_adc.h"
+#endif
 #include "espFoC/utils/esp_foc_q16.h"
 
 static const char *TAG = "tuner-target";
@@ -101,7 +108,24 @@ void app_main(void)
     /* Current sensor is mandatory: the Id/Iq PI loop has no closed
      * form without measured currents and the whole point of this
      * firmware is to tune that loop. Pin assignments come from
-     * Kconfig (TUNER_TARGET_ISENSE_*). */
+     * Kconfig (TUNER_TARGET_ISENSE_*).
+     *
+     * ESP32-P4 picks the one-shot ADC driver because the continuous
+     * driver does not yet cover its HW path; every other target
+     * uses the continuous (PWM-synchronised) variant. */
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    esp_foc_isensor_adc_oneshot_config_t shunt_cfg = {
+        .axis_channels = {(adc_channel_t)CONFIG_TUNER_TARGET_ISENSE_CH_U,
+                          (adc_channel_t)CONFIG_TUNER_TARGET_ISENSE_CH_V},
+        .units         = {(adc_unit_t)(CONFIG_TUNER_TARGET_ISENSE_ADC_UNIT - 1),
+                          (adc_unit_t)(CONFIG_TUNER_TARGET_ISENSE_ADC_UNIT - 1)},
+        .amp_gain      = (float)CONFIG_TUNER_TARGET_ISENSE_AMP_GAIN_X100 / 100.0f,
+        .shunt_resistance = (float)CONFIG_TUNER_TARGET_ISENSE_SHUNT_MOHM / 1000.0f,
+        .number_of_channels = 2,
+        .enable_analog_encoder = false,
+    };
+    s_shunts = isensor_adc_oneshot_new(&shunt_cfg, NULL);
+#else
     esp_foc_isensor_adc_config_t shunt_cfg = {
         .axis_channels = {(adc_channel_t)CONFIG_TUNER_TARGET_ISENSE_CH_U,
                           (adc_channel_t)CONFIG_TUNER_TARGET_ISENSE_CH_V},
@@ -112,6 +136,7 @@ void app_main(void)
         .number_of_channels = 2,
     };
     s_shunts = isensor_adc_new(&shunt_cfg);
+#endif
     if (s_shunts == NULL) {
         ESP_LOGE(TAG, "current sensor init failed — current PI cannot run");
         return;
