@@ -105,6 +105,45 @@ def cmd_set_target(args) -> int:
     return 0
 
 
+def cmd_align(args) -> int:
+    cli = _make_client(args)
+    print("aligning... (blocking on firmware)")
+    cli.align_axis(timeout=args.timeout)
+    state = cli.read_axis_state()
+    print(f"alignment complete: {_format_state(state)}")
+    return 0
+
+
+def cmd_persist(args) -> int:
+    cli = _make_client(args)
+    cli.persist_calibration(motor_r=args.r or 0.0,
+                            motor_l=args.l or 0.0,
+                            bandwidth_hz=args.bw or 0.0)
+    print(f"axis {args.axis}: calibration saved to NVS")
+    return 0
+
+
+def cmd_load(args) -> int:
+    cli = _make_client(args)
+    cli.load_calibration()
+    return cmd_read(args)
+
+
+def cmd_erase(args) -> int:
+    cli = _make_client(args)
+    cli.erase_calibration()
+    print("calibration namespace erased")
+    return 0
+
+
+def cmd_firmware_type(args) -> int:
+    cli = _make_client(args)
+    fw = cli.read_firmware_type()
+    fourcc = fw.to_bytes(4, "little").decode("ascii", errors="replace")
+    print(f"firmware_type = 0x{fw:08x}  (\"{fourcc}\")")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="tunerctl", description=__doc__)
     p.add_argument("--port", required=True, help="serial port (e.g. /dev/ttyACM0)")
@@ -135,6 +174,23 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("target", choices=["id", "iq", "ud", "uq"])
     ps.add_argument("value", type=float)
     ps.set_defaults(func=cmd_set_target)
+
+    pa = sub.add_parser("align", help="run the alignment routine on the firmware")
+    pa.add_argument("--timeout", type=float, default=8.0,
+                    help="seconds to wait for alignment to complete")
+    pa.set_defaults(func=cmd_align)
+
+    pp = sub.add_parser("persist", help="save current gains to NVS")
+    pp.add_argument("--r",  type=float, help="phase resistance recorded with the blob [ohm]")
+    pp.add_argument("--l",  type=float, help="phase inductance recorded with the blob [H]")
+    pp.add_argument("--bw", type=float, help="bandwidth recorded with the blob [Hz]")
+    pp.set_defaults(func=cmd_persist)
+
+    sub.add_parser("load", help="apply NVS overlay live").set_defaults(func=cmd_load)
+    sub.add_parser("erase", help="erase calibration namespace").set_defaults(func=cmd_erase)
+    sub.add_parser("firmware-type",
+                   help="show the firmware-type magic the target reports"
+                  ).set_defaults(func=cmd_firmware_type)
 
     return p
 
