@@ -9,7 +9,7 @@
 #include <sys/cdefs.h>
 #include "esp_attr.h"
 #include "esp_log.h"
-#include "espFoC/utils/ema_low_pass_filter.h"
+#include "espFoC/utils/biquad_q16.h"
 #include "espFoC/utils/esp_foc_iq31_q16_bridge.h"
 #include "espFoC/observer/esp_foc_observer_interface.h"
 #include "espFoC/observer/esp_foc_kf_observer.h"
@@ -22,7 +22,7 @@ typedef struct {
     iq31_t theta_est;
     iq31_t omega_est;
     iq31_t theta_err_emf_q31;
-    esp_foc_lp_filter_t current_filters[2];
+    esp_foc_biquad_q16_t current_filters[2];
     iq31_t e_alpha;
     iq31_t e_beta;
     iq31_t i_alpha_prev;
@@ -52,11 +52,11 @@ static int kf_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs_
     angle_estimator_kf_t *est = __containerof(self, angle_estimator_kf_t, interface);
 
     iq31_t ia_f = esp_foc_q16_per_unit_to_iq31(
-        esp_foc_low_pass_filter_update(&est->current_filters[0],
-                                       esp_foc_iq31_per_unit_to_q16(in->i_alpha_beta[0])));
+        esp_foc_biquad_q16_update(&est->current_filters[0],
+                                  esp_foc_iq31_per_unit_to_q16(in->i_alpha_beta[0])));
     iq31_t ib_f = esp_foc_q16_per_unit_to_iq31(
-        esp_foc_low_pass_filter_update(&est->current_filters[1],
-                                       esp_foc_iq31_per_unit_to_q16(in->i_alpha_beta[1])));
+        esp_foc_biquad_q16_update(&est->current_filters[1],
+                                  esp_foc_iq31_per_unit_to_q16(in->i_alpha_beta[1])));
 
     iq31_t delta_ia = iq31_sub(ia_f, est->i_alpha_prev);
     iq31_t delta_ib = iq31_sub(ib_f, est->i_beta_prev);
@@ -176,8 +176,13 @@ esp_foc_observer_t *kf_observer_new(int unit, esp_foc_kf_observer_settings_t s)
     est->k_theta_q31 = iq31_from_float((ESP_FOC_OBS_OMEGA_MAX_RAD_S * s.dt) / (2.0f * (float)M_PI));
 
     const float frac = (s.current_lpf_frac_fs > 0.0f) ? s.current_lpf_frac_fs : 0.2f;
-    esp_foc_low_pass_filter_set_cutoff(&est->current_filters[0], frac * (1.0f / s.dt), 1.0f / s.dt);
-    esp_foc_low_pass_filter_set_cutoff(&est->current_filters[1], frac * (1.0f / s.dt), 1.0f / s.dt);
+    {
+        float fs_hz = 1.0f / s.dt;
+        esp_foc_biquad_butterworth_lpf_design_q16(&est->current_filters[0],
+                                                  frac * fs_hz, fs_hz);
+        esp_foc_biquad_butterworth_lpf_design_q16(&est->current_filters[1],
+                                                  frac * fs_hz, fs_hz);
+    }
 
     est->eps_q31 = iq31_from_float(0.05f);
     est->mag_eps_q31 = iq31_from_float(1e-3f);

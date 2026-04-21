@@ -12,7 +12,7 @@
 #include "espFoC/utils/foc_math_q16.h"
 #include "espFoC/utils/modulator.h"
 #include "espFoC/utils/pid_controller.h"
-#include "espFoC/utils/ema_low_pass_filter.h"
+#include "espFoC/utils/biquad_q16.h"
 #include "espFoC/utils/space_vector_modulator.h"
 
 #ifndef M_PI
@@ -224,42 +224,8 @@ TEST_CASE("PID q16: alternating sign error stays bounded", "[espFoC][q16][stabil
     }
 }
 
-/* ----- EMA low-pass filter stability ----- */
-
-TEST_CASE("EMA q16: step response converges", "[espFoC][q16][stability]")
-{
-    esp_foc_lp_filter_t filt;
-    esp_foc_low_pass_filter_set_cutoff(&filt, 100.0f, 10000.0f);
-
-    q16_t step = q16_from_float(1.0f);
-    q16_t out = 0;
-    for (int i = 0; i < 500; i++) {
-        out = esp_foc_low_pass_filter_update(&filt, step);
-    }
-    TEST_ASSERT_FLOAT_WITHIN(0.05f, 1.0f, q16_to_float(out));
-}
-
-TEST_CASE("EMA q16: zero input stays zero", "[espFoC][q16][stability]")
-{
-    esp_foc_lp_filter_t filt;
-    esp_foc_low_pass_filter_set_cutoff(&filt, 100.0f, 10000.0f);
-    for (int i = 0; i < 1000; i++) {
-        q16_t out = esp_foc_low_pass_filter_update(&filt, 0);
-        TEST_ASSERT_EQUAL_INT32(0, out);
-    }
-}
-
-TEST_CASE("EMA q16: oscillating input stays bounded", "[espFoC][q16][stability]")
-{
-    esp_foc_lp_filter_t filt;
-    esp_foc_low_pass_filter_set_cutoff(&filt, 50.0f, 10000.0f);
-    for (int i = 0; i < 2000; i++) {
-        q16_t x = (i & 1) ? q16_from_float(0.9f) : q16_from_float(-0.9f);
-        q16_t out = esp_foc_low_pass_filter_update(&filt, x);
-        float f = q16_to_float(out);
-        TEST_ASSERT_TRUE(f >= -1.0f && f <= 1.0f);
-    }
-}
+/* (EMA-specific stability cases removed when the helper was retired
+ * — equivalent coverage now lives in test_biquad_q16.c.) */
 
 /* ----- SVPWM duty bounding ----- */
 
@@ -285,13 +251,13 @@ TEST_CASE("SVPWM q16: extreme inputs produce bounded duties", "[espFoC][q16][sta
 TEST_CASE("full pipeline q16: 10000 steps bounded and deterministic", "[espFoC][q16][stability]")
 {
     esp_foc_pid_controller_t pid_d = {0}, pid_q = {0};
-    esp_foc_lp_filter_t filt_d, filt_q;
+    esp_foc_biquad_q16_t filt_d, filt_q;
 
     const float dt = 1.0f / 20000.0f;
     esp_foc_pid_init_from_float(&pid_d, 0.4f, 60.0f, 0.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
     esp_foc_pid_init_from_float(&pid_q, 0.4f, 60.0f, 0.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
-    esp_foc_low_pass_filter_set_cutoff(&filt_d, 60.0f, 20000.0f);
-    esp_foc_low_pass_filter_set_cutoff(&filt_q, 60.0f, 20000.0f);
+    esp_foc_biquad_butterworth_lpf_design_q16(&filt_d, 60.0f, 20000.0f);
+    esp_foc_biquad_butterworth_lpf_design_q16(&filt_q, 60.0f, 20000.0f);
 
     const int N = 10000;
     const q16_t vmax = q16_from_float(0.7f);
@@ -311,9 +277,9 @@ TEST_CASE("full pipeline q16: 10000 steps bounded and deterministic", "[espFoC][
         esp_foc_get_dq_currents(sq, cq, iu, iv, iw, &ia, &ib, &iq, &id);
 
         q16_t uq = esp_foc_pid_update(&pid_q, q16_from_float(0.2f),
-                                       esp_foc_low_pass_filter_update(&filt_q, iq));
+                                       esp_foc_biquad_q16_update(&filt_q, iq));
         q16_t ud = esp_foc_pid_update(&pid_d, 0,
-                                       esp_foc_low_pass_filter_update(&filt_d, id));
+                                       esp_foc_biquad_q16_update(&filt_d, id));
 
         q16_t ua, ub, du, dv, dw;
         esp_foc_modulate_dq_voltage(sq, cq, ud, uq, &ua, &ub, &du, &dv, &dw, vmax, norm);

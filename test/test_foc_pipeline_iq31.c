@@ -9,7 +9,7 @@
 #include "espFoC/utils/foc_math_q16.h"
 #include "espFoC/utils/modulator.h"
 #include "espFoC/utils/pid_controller.h"
-#include "espFoC/utils/ema_low_pass_filter.h"
+#include "espFoC/utils/biquad_q16.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -22,8 +22,8 @@ static void run_q16_pipeline_step(float angle_rad,
                                    float id_ref, float iq_ref,
                                    esp_foc_pid_controller_t *pid_d,
                                    esp_foc_pid_controller_t *pid_q,
-                                   esp_foc_lp_filter_t *filt_d,
-                                   esp_foc_lp_filter_t *filt_q,
+                                   esp_foc_biquad_q16_t *filt_d,
+                                   esp_foc_biquad_q16_t *filt_q,
                                    q16_t *du, q16_t *dv, q16_t *dw)
 {
     q16_t sq = q16_sin(q16_from_float(angle_rad));
@@ -41,10 +41,10 @@ static void run_q16_pipeline_step(float angle_rad,
                                  &ia_q, &ib_q, &iq_q, &id_q);
     uq_q = esp_foc_pid_update(pid_q,
                                    q16_from_float(iq_ref),
-                                   esp_foc_low_pass_filter_update(filt_q, iq_q));
+                                   esp_foc_biquad_q16_update(filt_q, iq_q));
     ud_q = esp_foc_pid_update(pid_d,
                                    q16_from_float(id_ref),
-                                   esp_foc_low_pass_filter_update(filt_d, id_q));
+                                   esp_foc_biquad_q16_update(filt_d, id_q));
 
     esp_foc_modulate_dq_voltage(sq, cq, ud_q, uq_q,
                                      &ua_q, &ub_q, du, dv, dw,
@@ -53,15 +53,15 @@ static void run_q16_pipeline_step(float angle_rad,
 
 static void setup_pid_filters(esp_foc_pid_controller_t *pid_d,
                               esp_foc_pid_controller_t *pid_q,
-                              esp_foc_lp_filter_t *filt_d,
-                              esp_foc_lp_filter_t *filt_q)
+                              esp_foc_biquad_q16_t *filt_d,
+                              esp_foc_biquad_q16_t *filt_q)
 {
     const float dt = 1.0f / 2000.0f;
     esp_foc_pid_init_from_float(pid_d, 0.4f, 60.0f, 0.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
     esp_foc_pid_init_from_float(pid_q, 0.4f, 60.0f, 0.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
 
-    esp_foc_low_pass_filter_set_cutoff(filt_d, 60.0f, 2000.0f);
-    esp_foc_low_pass_filter_set_cutoff(filt_q, 60.0f, 2000.0f);
+    esp_foc_biquad_butterworth_lpf_design_q16(filt_d, 60.0f, 2000.0f);
+    esp_foc_biquad_butterworth_lpf_design_q16(filt_q, 60.0f, 2000.0f);
 }
 
 TEST_CASE("golden pipeline q16: deterministic run and bounded duties", "[espFoC][iq31][golden]")
@@ -72,7 +72,7 @@ TEST_CASE("golden pipeline q16: deterministic run and bounded duties", "[espFoC]
     for (int pass = 0; pass < 2; pass++) {
         esp_foc_pid_controller_t pid_d = {0};
         esp_foc_pid_controller_t pid_q = {0};
-        esp_foc_lp_filter_t filt_d, filt_q;
+        esp_foc_biquad_q16_t filt_d, filt_q;
         setup_pid_filters(&pid_d, &pid_q, &filt_d, &filt_q);
 
         for (int k = 0; k < N_PIPELINE_STEPS; k++) {
