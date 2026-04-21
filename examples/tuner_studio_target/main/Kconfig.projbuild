@@ -53,4 +53,36 @@ menu "TunerStudio target — pin map"
         range 1 64
         default 7
 
+    comment "ADC shunt current sensing"
+
+    config TUNER_TARGET_ISENSE_ADC_UNIT
+        int "ADC unit (1 or 2)"
+        range 1 2
+        default 1
+
+    config TUNER_TARGET_ISENSE_CH_U
+        int "ADC channel for phase U shunt"
+        range 0 9
+        default 1
+
+    config TUNER_TARGET_ISENSE_CH_V
+        int "ADC channel for phase V shunt"
+        range 0 9
+        default 5
+
+    config TUNER_TARGET_ISENSE_AMP_GAIN_X100
+        int "Current amplifier gain (V/V) x100"
+        range 1 100000
+        default 5000
+        help
+            Stored x100 because Kconfig int does not accept floats.
+            Default 5000 -> 50.0 V/V (typical INA240A2).
+
+    config TUNER_TARGET_ISENSE_SHUNT_MOHM
+        int "Shunt resistance (milli-ohm)"
+        range 1 10000
+        default 10
+        help
+            10 mOhm matches the SimpleFOCShield-style boards.
+
 endmenu

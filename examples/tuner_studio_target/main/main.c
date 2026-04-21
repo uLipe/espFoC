@@ -22,6 +22,7 @@
 #include "espFoC/esp_foc_tuner.h"
 #include "espFoC/inverter_6pwm_mcpwm.h"
 #include "espFoC/rotor_sensor_as5600.h"
+#include "espFoC/current_sensor_adc.h"
 #include "espFoC/utils/esp_foc_q16.h"
 
 static const char *TAG = "tuner-target";
@@ -29,6 +30,7 @@ static const char *TAG = "tuner-target";
 static esp_foc_axis_t s_axis;
 static esp_foc_inverter_t *s_inverter;
 static esp_foc_rotor_sensor_t *s_rotor;
+static esp_foc_isensor_t *s_shunts;
 
 /* Advertise as a TunerStudio target so the GUI can light up its
  * Generate App tab on connect. */
@@ -96,19 +98,33 @@ void app_main(void)
         return;
     }
 
+    /* Current sensor is mandatory: the Id/Iq PI loop has no closed
+     * form without measured currents and the whole point of this
+     * firmware is to tune that loop. Pin assignments come from
+     * Kconfig (TUNER_TARGET_ISENSE_*). */
+    esp_foc_isensor_adc_config_t shunt_cfg = {
+        .axis_channels = {(adc_channel_t)CONFIG_TUNER_TARGET_ISENSE_CH_U,
+                          (adc_channel_t)CONFIG_TUNER_TARGET_ISENSE_CH_V},
+        .units         = {(adc_unit_t)(CONFIG_TUNER_TARGET_ISENSE_ADC_UNIT - 1),
+                          (adc_unit_t)(CONFIG_TUNER_TARGET_ISENSE_ADC_UNIT - 1)},
+        .amp_gain      = (float)CONFIG_TUNER_TARGET_ISENSE_AMP_GAIN_X100 / 100.0f,
+        .shunt_resistance = (float)CONFIG_TUNER_TARGET_ISENSE_SHUNT_MOHM / 1000.0f,
+        .number_of_channels = 2,
+    };
+    s_shunts = isensor_adc_new(&shunt_cfg);
+    if (s_shunts == NULL) {
+        ESP_LOGE(TAG, "current sensor init failed — current PI cannot run");
+        return;
+    }
+
     esp_foc_motor_control_settings_t settings = {
         .motor_pole_pairs  = CONFIG_TUNER_TARGET_POLE_PAIRS,
         .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
         .motor_unit        = 0,
     };
 
-    /* Current sensor wiring is left out of this service firmware on
-     * purpose: voltage-mode tuning is enough to dial the loop in,
-     * and shipping a fixed shunt config would clash with whatever
-     * board the operator is using. The Generate App flow lets the
-     * user pick the ADC mode for the production firmware. */
     esp_foc_err_t err = esp_foc_initialize_axis(&s_axis, s_inverter,
-                                                s_rotor, NULL, settings);
+                                                s_rotor, s_shunts, settings);
     if (err != ESP_FOC_OK) {
         ESP_LOGE(TAG, "axis init failed: %d", err);
         return;

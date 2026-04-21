@@ -10,10 +10,17 @@ at zero current and waits for the host to drive everything else
 ```bash
 cd examples/tuner_studio_target
 idf.py set-target esp32s3        # or esp32 / esp32p4
-idf.py menuconfig                # adjust the pin map under
+idf.py menuconfig                # adjust the pin map AND the ADC
+                                 # shunt config under
                                  # "TunerStudio target — pin map"
 idf.py build flash monitor
 ```
+
+The current sensor is mandatory: the Id/Iq PI loop has nothing to
+close on without measured currents, and the whole point of this
+firmware is to tune that loop. Defaults match the SimpleFOCShield
+(INA240A2 amp, 10 mΩ shunt, ADC1 channels 1 & 5) — adjust for
+your board before flashing.
 
 USB-CDC is the default transport (S2/S3/P4 only). On the original
 ESP32, switch to UART under `Component config` →
