@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from ..protocol import TunerClient
 from .analysis_panel import AnalysisPanel
+from .hardware_panel import HardwarePanel
 from .scope_panel import ScopePanel
 from .svm_panel import SvmPanel
 from .tuning_panel import TuningPanel
@@ -56,10 +57,13 @@ class MainWindow(QMainWindow):
         self._tuning = TuningPanel(client, on_params_changed=self._on_params)
         splitter.addWidget(self._tuning)
 
+        self._hardware = HardwarePanel()
+
         tabs = QTabWidget()
         tabs.addTab(self._analysis, "Analysis")
         tabs.addTab(self._scope, "Scope")
         tabs.addTab(self._svm, "SVM Hexagon")
+        tabs.addTab(self._hardware, "Hardware")
         splitter.addWidget(tabs)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
