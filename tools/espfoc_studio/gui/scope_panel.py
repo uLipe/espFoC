@@ -115,14 +115,23 @@ class ScopePanel(QWidget):
         scroll.setWidget(gutter)
         root.addWidget(scroll)
 
-        # Plot.
+        # Plot. Roll mode: x axis is "seconds before now" so the live
+        # cursor always sits at x = 0 on the right edge and old data
+        # falls off to the left. The X-data values themselves are
+        # recomputed every render as (sample_time - t_now), so even
+        # with autoRange off after a manual pan/zoom the visible window
+        # stays bounded — no more "scope ran off the right edge of the
+        # universe" after zooming out for a few minutes.
         self._plot = pg.PlotWidget(title="Scope — firmware CSV stream")
         self._plot.setLabel('left', "amplitude")
         self._plot.setLabel('bottom', "time", units='s')
         self._plot.showGrid(x=True, y=True, alpha=0.3)
+        self._plot.setMinimumHeight(380)
+        self._plot.setXRange(-self.WINDOW_S, 0.0, padding=0)
+        self._plot.enableAutoRange(axis='x', enable=False)
         self._crosshair = attach_crosshair(
             self._plot,
-            fmt=lambda x, y: f"t = {x:.3f} s\ny = {y:+.4g}")
+            fmt=lambda x, y: f"t = {x:+.3f} s\ny = {y:+.4g}")
         root.addWidget(self._plot, 1)
 
         # Render timer keeps the Qt thread independent from the reader
@@ -149,9 +158,9 @@ class ScopePanel(QWidget):
         reader.register_scope_callback(self._on_frame_reader_thread)
 
     def autoset(self) -> None:
-        """Drop history, rebase time to 'now' and re-enable autorange.
-        Recovers from manual zoom / pan that parked the viewport off
-        the live cursor."""
+        """Drop history, rebase time to 'now' and snap the viewport
+        back to the rolling window. Recovers from manual zoom / pan
+        that parked the viewport off the live cursor."""
         with self._inbox_lock:
             self._inbox.clear()
         self._t0 = time.monotonic()
@@ -160,9 +169,11 @@ class ScopePanel(QWidget):
             buf.clear()
         for curve in self._curves:
             curve.setData([], [])
-        # Re-enable autorange on both axes; pyqtgraph turns it off
-        # silently the first time the user pans or zooms.
-        self._plot.enableAutoRange(axis='x', enable=True)
+        # X is the canonical "seconds before now" range; reset it
+        # explicitly so any user zoom is undone. Y goes back to
+        # autorange because the firmware may have switched to a
+        # different signal scale since the last manual zoom.
+        self._plot.setXRange(-self.WINDOW_S, 0.0, padding=0)
         self._plot.enableAutoRange(axis='y', enable=True)
 
     # --- Frame path -------------------------------------------------------
@@ -207,9 +218,13 @@ class ScopePanel(QWidget):
             for buf in self._channel_bufs:
                 buf.popleft()
 
-        # Single redraw per timer tick.
+        # Roll-mode display: shift every sample's X by -t_now_rel so
+        # the live cursor sits at x = 0 and old data trails off to
+        # the left. Recomputed every render so nothing drifts off the
+        # right edge regardless of how long the panel has been alive.
+        t_now_rel = time.monotonic() - self._t0
         t_arr = np.fromiter(self._time_buf, dtype=float,
-                            count=len(self._time_buf))
+                            count=len(self._time_buf)) - t_now_rel
         for i, curve in enumerate(self._curves):
             if self._checkboxes[i].isChecked():
                 y_arr = np.fromiter(self._channel_bufs[i], dtype=float,

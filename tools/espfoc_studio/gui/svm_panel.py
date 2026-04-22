@@ -107,6 +107,7 @@ class SvmPanel(QWidget):
         self._plot.setLabel('left', "β", units='V')
         self._plot.setLabel('bottom', "α", units='V')
         self._plot.showGrid(x=True, y=True, alpha=0.15)
+        self._plot.setMinimumHeight(380)
         self._hex_crosshair = attach_crosshair(
             self._plot,
             fmt=lambda x, y: f"α = {x:+.3f}\nβ = {y:+.3f}")
@@ -181,14 +182,20 @@ class SvmPanel(QWidget):
         top_row.addLayout(side, 0)
 
         # --- Bottom half: three-phase waveform ---------------------------
+        # Roll mode like the Scope tab: x = "seconds before now",
+        # bounded to [-WAVEFORM_WINDOW_S, 0]. Live cursor sits on the
+        # right edge, old data falls off on the left, no drift.
         self._wave_plot = pg.PlotWidget(title="Three-phase output")
         self._wave_plot.setLabel('left', "voltage", units='V')
         self._wave_plot.setLabel('bottom', "time", units='s')
         self._wave_plot.showGrid(x=True, y=True, alpha=0.2)
+        self._wave_plot.setMinimumHeight(220)
+        self._wave_plot.setXRange(-self.WAVEFORM_WINDOW_S, 0.0, padding=0)
+        self._wave_plot.enableAutoRange(axis='x', enable=False)
         self._wave_plot.addLegend()
         self._wave_crosshair = attach_crosshair(
             self._wave_plot,
-            fmt=lambda x, y: f"t = {x:.4f} s\nu = {y:+.3f} V")
+            fmt=lambda x, y: f"t = {x:+.4f} s\nu = {y:+.3f} V")
         self._uu_curve = self._wave_plot.plot(
             pen=pg.mkPen(QColor(_PHASE_COLORS[0]), width=2), name="u_u (ch0)")
         self._uv_curve = self._wave_plot.plot(
@@ -220,8 +227,9 @@ class SvmPanel(QWidget):
 
     def autoset(self) -> None:
         """Drop trail / waveform history, rebase time to 'now' and
-        re-enable autorange on both plots. Hex radius reverts to its
-        initial guess so the auto-scale EWMA can re-converge cleanly."""
+        snap both plots back to their canonical viewports. Hex radius
+        reverts to its initial guess so the auto-scale EWMA can
+        re-converge cleanly."""
         with self._inbox_lock:
             self._inbox.clear()
         self._t0 = time.monotonic()
@@ -235,7 +243,11 @@ class SvmPanel(QWidget):
         self._head_scatter.setData(pos=np.array([[0.0, 0.0]]))
         for curve in (self._uu_curve, self._uv_curve, self._uw_curve):
             curve.setData([], [])
-        self._wave_plot.enableAutoRange(axis='x', enable=True)
+        # Waveform plot returns to the rolling [-WINDOW, 0] window;
+        # hexagon plot returns to autorange (the EWMA radius drives
+        # the layer below, but pyqtgraph's view also autoranges off
+        # the live data).
+        self._wave_plot.setXRange(-self.WAVEFORM_WINDOW_S, 0.0, padding=0)
         self._wave_plot.enableAutoRange(axis='y', enable=True)
         self._plot.enableAutoRange(axis='x', enable=True)
         self._plot.enableAutoRange(axis='y', enable=True)
@@ -316,9 +328,12 @@ class SvmPanel(QWidget):
         self._arrow_curve.setData([0.0, a], [0.0, b])
         self._head_scatter.setData(pos=np.array([[a, b]]))
 
-        # Three-phase waveform.
-        t_arr = np.fromiter(self._time_buf, dtype=float,
-                            count=len(self._time_buf))
+        # Three-phase waveform: roll-mode display, same recipe as
+        # ScopePanel — sample times become "seconds before now" so the
+        # rightmost edge always shows the live cursor.
+        t_now_rel = time.monotonic() - self._t0
+        t_arr = (np.fromiter(self._time_buf, dtype=float,
+                             count=len(self._time_buf)) - t_now_rel)
         self._uu_curve.setData(t_arr,
                                np.fromiter(self._uu_buf, dtype=float,
                                            count=len(self._uu_buf)))
