@@ -8,7 +8,9 @@ from typing import Optional
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QLabel,
     QMainWindow,
+    QSizePolicy,
     QSplitter,
     QTabWidget,
     QWidget,
@@ -20,14 +22,30 @@ from .analysis_panel import AnalysisPanel
 from .generate_app_panel import GenerateAppPanel
 from .scope_panel import ScopePanel
 from .svm_panel import SvmPanel
+from .theme import make_badge_qss
 from .tuning_panel import TuningPanel
+
+
+# Number of consecutive failed polls before flipping the link badge to
+# NO LINK. Two polls = ~1 s with the default 500 ms timer; that absorbs
+# isolated round-trip jitter on a real serial link without strobing.
+_LINK_DOWN_THRESHOLD = 2
 
 
 class MainWindow(QMainWindow):
     def __init__(self, client: TunerClient,
-                 title: str = "espFoC TunerStudio") -> None:
+                 title: str = "espFoC TunerStudio",
+                 link_mode: str = "hw",
+                 link_descr: str = "") -> None:
+        """link_mode is "hw" for any real transport (serial, USB-CDC, ...)
+        and "demo" for the in-process Python DemoFirmware. link_descr is
+        an optional human-readable detail string shown next to the
+        badge in the status bar (e.g. "/dev/ttyACM0 @ 921600")."""
         super().__init__()
         self.setWindowTitle(title)
+        self._link_mode = link_mode
+        self._link_descr = link_descr
+        self._link_fail_streak = 0
         # 900 px of vertical room is what fits the SVM hexagon (380)
         # plus its three-phase waveform (220) plus axis labels and tab
         # chrome without clipping. The Scope tab is more forgiving but
@@ -83,6 +101,17 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([380, 900])
 
+        # Status bar: link-state badge on the left, optional human-
+        # readable descriptor (port name / demo backend) on the right.
+        self._link_badge = QLabel()
+        self._link_badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self._link_descr_label = QLabel(self._link_descr)
+        sb = self.statusBar()
+        sb.addPermanentWidget(QLabel("Link:"))
+        sb.addPermanentWidget(self._link_badge)
+        sb.addPermanentWidget(self._link_descr_label)
+        self._set_link_badge("LINK_DEMO" if link_mode == "demo" else "LINK_WAIT")
+
         # Live gains readout — every 500 ms is plenty for human perception
         # and leaves headroom for the 50 FPS scope. Each poll issues five
         # short tuner round-trips; 0.5 s keeps CPU usage near the noise
@@ -110,6 +139,26 @@ class MainWindow(QMainWindow):
 
     def _poll(self) -> None:
         self._tuning.poll()
+        self._update_link_badge(self._tuning.last_poll_ok)
+
+    def _set_link_badge(self, key: str) -> None:
+        label, qss = make_badge_qss(key)
+        self._link_badge.setText(label)
+        self._link_badge.setStyleSheet(qss)
+
+    def _update_link_badge(self, last_ok: bool) -> None:
+        # The DEMO badge stays sticky — the in-process firmware never
+        # "drops" the link in any meaningful way, so flicking the badge
+        # to NO LINK on a transient debounced poll would be confusing.
+        if self._link_mode == "demo":
+            return
+        if last_ok:
+            self._link_fail_streak = 0
+            self._set_link_badge("LINK_OK")
+            return
+        self._link_fail_streak += 1
+        if self._link_fail_streak >= _LINK_DOWN_THRESHOLD:
+            self._set_link_badge("LINK_DOWN")
 
     def _on_params(self, r: float, l: float, bw: float,
                    kp: float, ki: float) -> None:

@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import signal
 import sys
-from typing import Optional
+from typing import Callable, Optional
 
 from ..link import LinkReader, LoopbackTransport
 from ..protocol import TunerClient
@@ -37,7 +37,7 @@ def _parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _setup_demo() -> tuple[TunerClient, Callable[[], None]]:
+def _setup_demo() -> tuple[TunerClient, Callable[[], None], str, str]:
     from .demo_firmware import DemoFirmware
     host_t, fw_t = LoopbackTransport.pair()
     fw = DemoFirmware(fw_t)
@@ -53,11 +53,12 @@ def _setup_demo() -> tuple[TunerClient, Callable[[], None]]:
         fw.stop()
         reader.stop()
 
-    return client, shutdown
+    return client, shutdown, "demo", "in-process Python firmware"
+
 
 
 def _setup_serial(port: str, baud: int, axis: int
-                  ) -> tuple[TunerClient, Callable[[], None]]:
+                  ) -> tuple[TunerClient, Callable[[], None], str, str]:
     from ..link.transport_serial import SerialTransport
     transport = SerialTransport(port=port, baud=baud)
     reader = LinkReader(transport)
@@ -67,7 +68,8 @@ def _setup_serial(port: str, baud: int, axis: int
     def shutdown() -> None:
         reader.stop()
 
-    return client, shutdown
+    return client, shutdown, "hw", f"{port} @ {baud}"
+
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -79,15 +81,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     from PySide6.QtWidgets import QApplication
 
     if args.demo:
-        client, shutdown = _setup_demo()
+        client, shutdown, link_mode, link_descr = _setup_demo()
         title = "espFoC TunerStudio — DEMO (simulated firmware)"
     else:
-        client, shutdown = _setup_serial(args.port, args.baud, args.axis)
+        client, shutdown, link_mode, link_descr = _setup_serial(
+            args.port, args.baud, args.axis)
         title = f"espFoC TunerStudio — {args.port} @ {args.baud}"
 
     app = QApplication.instance() or QApplication(sys.argv)
     apply_dark_theme(app)
-    window = MainWindow(client, title=title)
+    window = MainWindow(client, title=title,
+                        link_mode=link_mode, link_descr=link_descr)
     window.show()
 
     # Allow Ctrl-C in the terminal to close the window.

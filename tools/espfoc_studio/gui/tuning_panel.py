@@ -65,6 +65,11 @@ class TuningPanel(QWidget):
         self._last_motor_l = 0.0018
         self._last_bw = 150.0
         self._cal_present = False
+        # Set by poll(): True when the latest round-trip succeeded,
+        # False when it raised TunerError. MainWindow consults this to
+        # drive the connection-state badge in the status bar without
+        # issuing extra round-trips.
+        self.last_poll_ok: bool = False
 
         # The whole panel sits inside a QScrollArea so a small window
         # gets a vertical scroll bar instead of clipping content. Keeps
@@ -250,8 +255,10 @@ class TuningPanel(QWidget):
             present = self._client.is_calibration_present()
         except TunerError as e:
             self._status.setText(str(e))
+            self.last_poll_ok = False
             return
         self._status.setText("")
+        self.last_poll_ok = True
         self._kp_label.setText(f"{kp:9.4f}")
         self._ki_label.setText(f"{ki:9.2f}")
         self._lim_label.setText(f"{lim:9.3f}")

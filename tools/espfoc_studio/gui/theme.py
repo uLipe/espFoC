@@ -28,11 +28,18 @@ _ERROR = "#ef5350"
 # of the old "+INITIALIZED -ALIGNED -RUNNING -TUNER_OVERRIDE" text. Keep
 # the foreground / background pair high-contrast on the dark theme.
 BADGE_STYLES = {
-    "OFFLINE":  ("OFFLINE",  "#0b0c0d", "#6c757d"),
-    "INIT":     ("INIT",     "#0b0c0d", "#ffb300"),
-    "ALIGNED":  ("ALIGNED",  "#0b0c0d", _ACCENT),
-    "RUNNING":  ("RUNNING",  "#0b0c0d", "#66bb6a"),
-    "OVERRIDE": ("OVERRIDE", "#ffffff", "#ab47bc"),
+    # Axis state.
+    "OFFLINE":   ("OFFLINE",   "#0b0c0d", "#6c757d"),
+    "INIT":      ("INIT",      "#0b0c0d", "#ffb300"),
+    "ALIGNED":   ("ALIGNED",   "#0b0c0d", _ACCENT),
+    "RUNNING":   ("RUNNING",   "#0b0c0d", "#66bb6a"),
+    "OVERRIDE":  ("OVERRIDE",  "#ffffff", "#ab47bc"),
+    # Link / transport state. Same QSS shape as the axis badge so the
+    # status bar pill and the tuning-tab pill match visually.
+    "LINK_DEMO": ("DEMO",      "#0b0c0d", "#ab47bc"),
+    "LINK_OK":   ("CONNECTED", "#0b0c0d", "#66bb6a"),
+    "LINK_WAIT": ("CONNECTING","#0b0c0d", "#ffb300"),
+    "LINK_DOWN": ("NO LINK",   "#ffffff", _ERROR),
 }
 
 

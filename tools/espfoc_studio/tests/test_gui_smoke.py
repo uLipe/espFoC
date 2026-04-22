@@ -228,13 +228,68 @@ def test_scope_panel_roll_mode_x_axis_stays_bounded():
         "X values escaped the rolling window")
 
 
+def test_link_badge_state_machine():
+    """The status-bar link badge must:
+     * show DEMO and stay sticky while link_mode='demo' (the in-process
+       firmware never genuinely drops),
+     * flip to CONNECTED on the first successful poll while link_mode
+       ='hw',
+     * tolerate a single transient round-trip failure without flicking
+       to NO LINK,
+     * commit to NO LINK after _LINK_DOWN_THRESHOLD consecutive
+       failures."""
+    from espfoc_studio.gui import main_window as mw_mod
+    host_t, fw_t = LoopbackTransport.pair()
+    fw = DemoFirmware(fw_t)
+    fw.start()
+    reader = LinkReader(host_t)
+    reader.start()
+    try:
+        client = TunerClient(reader)
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        # Demo mode is sticky.
+        w_demo = mw_mod.MainWindow(client, title="t-demo", link_mode="demo")
+        w_demo.show()
+        assert w_demo._link_badge.text() == "DEMO"
+        w_demo._update_link_badge(False)  # any number of false reports
+        w_demo._update_link_badge(False)
+        w_demo._update_link_badge(False)
+        assert w_demo._link_badge.text() == "DEMO"
+        w_demo.close()
+
+        # HW mode starts CONNECTING, advances to CONNECTED on success,
+        # then NO LINK after the threshold of consecutive failures.
+        w_hw = mw_mod.MainWindow(client, title="t-hw", link_mode="hw",
+                                 link_descr="/dev/test")
+        w_hw.show()
+        assert w_hw._link_badge.text() == "CONNECTING"
+        w_hw._update_link_badge(True)
+        assert w_hw._link_badge.text() == "CONNECTED"
+        # One failure shouldn't bump the badge yet (jitter resistance).
+        w_hw._update_link_badge(False)
+        assert w_hw._link_badge.text() == "CONNECTED"
+        # Reaching the threshold flips it.
+        for _ in range(mw_mod._LINK_DOWN_THRESHOLD):
+            w_hw._update_link_badge(False)
+        assert w_hw._link_badge.text() == "NO LINK"
+        # Single recovery brings it back.
+        w_hw._update_link_badge(True)
+        assert w_hw._link_badge.text() == "CONNECTED"
+        w_hw.close()
+    finally:
+        fw.stop()
+        reader.stop()
+
+
 def main() -> int:
     tests = [test_mainwindow_demo_boots_polls_and_streams_scope,
              test_scope_panel_wallclock_and_autoset,
              test_scope_panel_roll_mode_x_axis_stays_bounded,
              test_generate_app_embeds_hardware_section,
              test_build_worker_idf_path_helper,
-             test_generate_app_build_mode_toggle]
+             test_generate_app_build_mode_toggle,
+             test_link_badge_state_machine]
     failed = 0
     for t in tests:
         try:
