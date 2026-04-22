@@ -81,16 +81,23 @@ IRAM_ATTR static void foc_hot_isr(void *data)
     axis->i_q.raw = i_q;
     axis->rotor_elec_angle = theta_e;
 
-    /* 6) Current PI (or override / open-loop voltage). */
+    /* 6) Current PI (or open-loop voltage).
+     *
+     * The outer-loop arbiter in esp_foc_core.c is the single source of
+     * truth for target_i_d/i_q/u_d/u_q: it calls the user regulation
+     * callback, then — if tuner_override is active — overwrites the
+     * four target_* fields with the override payload. From this ISR's
+     * point of view there is no difference between "override" and
+     * "normal", both produce the same target_* values. The earlier
+     * "bypass the PI when override is active" branch silently ignored
+     * target_i_q writes coming from TunerStudio under ISR_HOT_PATH
+     * and only honoured target_uq, which left the loop parked unless
+     * the operator commanded voltages directly.
+     *
+     * skip_torque_control remains the documented escape hatch for a
+     * pure open-loop voltage step. */
     q16_t u_d, u_q;
 
-#if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
-    if (axis->tuner_override.active) {
-        /* Tuner has the steering wheel — bypass the PI completely. */
-        u_d = axis->tuner_override.target_ud;
-        u_q = axis->tuner_override.target_uq;
-    } else
-#endif
     if (axis->skip_torque_control) {
         /* Open-loop voltage mode: take the operator's u_d / u_q
          * straight through, no integration. */
