@@ -156,8 +156,18 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
     /* Both torque controllers (Q-axis and D-axis) share the same dt and
      * the same starting gains; the runtime tuner can rewrite either one
-     * later with esp_foc_axis_set_current_pi_gains_q16(). */
+     * later with esp_foc_axis_set_current_pi_gains_q16().
+     *
+     * Under ISR_HOT_PATH the PI fires every PWM period; otherwise the
+     * legacy task path runs at pwm_rate / downsampling. The PID dt
+     * (and the autotuner fs in CMake) must agree — Kconfig defaults
+     * AUTOGEN_DECIMATION to 1 when ISR_HOT_PATH is on so the
+     * generated Kp / Ki land at the same fs the loop will run at. */
+#if defined(CONFIG_ESP_FOC_ISR_HOT_PATH)
+    float loop_dt_s = dt_f;
+#else
     float loop_dt_s = dt_f * (float)ESP_FOC_LOW_SPEED_DOWNSAMPLING;
+#endif
     float loop_fs_hz = (loop_dt_s > 1e-9f) ? (1.0f / loop_dt_s) : 0.0f;
     q16_t loop_dt = q16_from_float(loop_dt_s);
     q16_t loop_inv_dt = q16_from_float(loop_fs_hz);
