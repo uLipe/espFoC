@@ -18,7 +18,6 @@ from ..protocol import TunerClient, TunerError
 from ..protocol.tuner import TUNER_FIRMWARE_TYPE_TSGX
 from .analysis_panel import AnalysisPanel
 from .generate_app_panel import GenerateAppPanel
-from .hardware_panel import HardwarePanel
 from .scope_panel import ScopePanel
 from .svm_panel import SvmPanel
 from .tuning_panel import TuningPanel
@@ -64,21 +63,19 @@ class MainWindow(QMainWindow):
         self._tuning = TuningPanel(client, on_params_changed=self._on_params)
         splitter.addWidget(self._tuning)
 
-        self._hardware = HardwarePanel()
-
         tabs = QTabWidget()
         tabs.addTab(self._analysis, "Analysis")
         tabs.addTab(self._scope, "Scope")
         tabs.addTab(self._svm, "SVM Hexagon")
-        tabs.addTab(self._hardware, "Hardware")
 
         # Generate App is shown only when the firmware identifies itself
         # as TunerStudio target (or in --demo mode where the demo also
-        # advertises TSGX). Anything else risks generating apps with the
-        # wrong calibration on a stranger firmware.
+        # advertises TSGX). Hardware configuration lives inside this
+        # panel now — it was a sibling tab before, but conceptually it
+        # is one step of the same code-generation workflow.
         if self._is_tuner_studio_target(client):
             self._generate = GenerateAppPanel(
-                client, self._hardware, self._current_motor_params)
+                client, self._current_motor_params)
             tabs.addTab(self._generate, "Generate App")
 
         splitter.addWidget(tabs)
