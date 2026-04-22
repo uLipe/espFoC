@@ -87,8 +87,16 @@ TEST_CASE("axis api: align and run happy path", "[espFoC][axis]")
     }
     vTaskDelay(pdMS_TO_TICKS(100));
     TEST_ASSERT_TRUE(mock_inv.set_voltages_count > 1);
+#if defined(CONFIG_ESP_FOC_ISR_HOT_PATH)
+    /* ISR hot path reads i_alpha / i_beta straight from the axis
+     * fields the ADC driver publishes; the loop does not call
+     * fetch_isensors() any more. The encoder still gets read in the
+     * outer task. */
+    TEST_ASSERT_TRUE(mock_rotor.read_counts_count > 0);
+#else
     TEST_ASSERT_TRUE(mock_isensor.fetch_count > 0);
     TEST_ASSERT_TRUE(mock_rotor.read_counts_count > 0);
+#endif
 }
 
 static int iq31_reg_cb_called;
