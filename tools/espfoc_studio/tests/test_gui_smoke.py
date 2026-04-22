@@ -83,8 +83,43 @@ def test_mainwindow_demo_boots_polls_and_streams_scope():
         reader.stop()
 
 
+def test_scope_panel_wallclock_and_autoset():
+    """Time axis tracks wall clock (not sample count) and Autoset
+    drops history + rebases the time origin."""
+    from espfoc_studio.gui.scope_panel import ScopePanel
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    panel = ScopePanel()
+    # Inject 200 frames at 1 ms wall-clock spacing.
+    base = time.monotonic()
+    for i in range(200):
+        # Patch the inbox directly so we control the timestamps.
+        with panel._inbox_lock:
+            panel._inbox.append((base + i * 1e-3, b"1.0,2.0,3.0\n"))
+    panel._render_tick()
+    assert panel._n_channels == 3
+    assert len(panel._time_buf) == 200
+    span = panel._time_buf[-1] - panel._time_buf[0]
+    # Span must be ~199 ms (199 deltas * 1 ms), regardless of any
+    # internal sample_dt assumption — that is the whole point.
+    assert 0.190 < span < 0.210, f"span={span!r} not wall-clock locked"
+
+    # Autoset clears state and rebases.
+    panel.autoset()
+    assert len(panel._time_buf) == 0
+    for buf in panel._channel_bufs:
+        assert len(buf) == 0
+    # Subsequent injection lands at near-zero relative time.
+    with panel._inbox_lock:
+        panel._inbox.append((time.monotonic(), b"4.0,5.0,6.0\n"))
+    panel._render_tick()
+    assert len(panel._time_buf) == 1
+    assert panel._time_buf[0] < 0.05  # fresh origin
+
+
 def main() -> int:
-    tests = [test_mainwindow_demo_boots_polls_and_streams_scope]
+    tests = [test_mainwindow_demo_boots_polls_and_streams_scope,
+             test_scope_panel_wallclock_and_autoset]
     failed = 0
     for t in tests:
         try:

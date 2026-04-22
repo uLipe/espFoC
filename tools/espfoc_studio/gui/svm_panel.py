@@ -19,8 +19,9 @@ scope bursts after a current step do not stall the Qt loop.
 from __future__ import annotations
 
 import threading
+import time
 from collections import deque
-from typing import Deque, Optional
+from typing import Deque, Optional, Tuple
 
 import numpy as np
 import pyqtgraph as pg
@@ -29,6 +30,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -72,11 +74,16 @@ class SvmPanel(QWidget):
 
     def __init__(self, reader: Optional[LinkReader] = None,
                  sample_period_s: float = 1e-3 * 4) -> None:
+        """sample_period_s is kept for backwards compatibility but no
+        longer drives the time axis — see ScopePanel for the same
+        wall-clock-locking rationale."""
         super().__init__()
         self._reader = reader
-        self._sample_dt = sample_period_s
+        self._sample_dt = sample_period_s  # backwards-compat only
         self._inbox_lock = threading.Lock()
-        self._inbox: Deque[bytes] = deque(maxlen=self.INBOX_CAP)
+        # Same (t_mono, payload) pattern as ScopePanel so the waveform
+        # frequency tracks real time even when frames arrive bursty.
+        self._inbox: Deque[Tuple[float, bytes]] = deque(maxlen=self.INBOX_CAP)
 
         self._alpha_buf: Deque[float] = deque(maxlen=self.TRAIL_CAP)
         self._beta_buf: Deque[float] = deque(maxlen=self.TRAIL_CAP)
@@ -84,7 +91,7 @@ class SvmPanel(QWidget):
         self._uu_buf: Deque[float] = deque(maxlen=self.WAVEFORM_CAP)
         self._uv_buf: Deque[float] = deque(maxlen=self.WAVEFORM_CAP)
         self._uw_buf: Deque[float] = deque(maxlen=self.WAVEFORM_CAP)
-        self._t = 0.0
+        self._t0 = time.monotonic()
 
         self._hex_radius = 1.0
         self._last_ab: tuple[float, float] = (0.0, 0.0)
@@ -164,6 +171,12 @@ class SvmPanel(QWidget):
             lbl.setStyleSheet("font-family: monospace; color: %s;"
                               % _LABEL_COLOR)
             side.addWidget(lbl)
+        autoset_btn = QPushButton("Autoset")
+        autoset_btn.setToolTip(
+            "Re-center the hexagon and the waveform: clear trail, "
+            "rebase time to now and re-enable axis autorange.")
+        autoset_btn.clicked.connect(self.autoset)
+        side.addWidget(autoset_btn)
         side.addStretch(1)
         top_row.addLayout(side, 0)
 
@@ -205,12 +218,35 @@ class SvmPanel(QWidget):
                 self._on_frame_reader_thread)
             self._reader = None
 
+    def autoset(self) -> None:
+        """Drop trail / waveform history, rebase time to 'now' and
+        re-enable autorange on both plots. Hex radius reverts to its
+        initial guess so the auto-scale EWMA can re-converge cleanly."""
+        with self._inbox_lock:
+            self._inbox.clear()
+        self._t0 = time.monotonic()
+        for buf in (self._alpha_buf, self._beta_buf,
+                    self._time_buf, self._uu_buf, self._uv_buf, self._uw_buf):
+            buf.clear()
+        self._hex_radius = 1.0
+        self._last_ab = (0.0, 0.0)
+        self._trail_curve.setData([], [])
+        self._arrow_curve.setData([0.0, 0.0], [0.0, 0.0])
+        self._head_scatter.setData(pos=np.array([[0.0, 0.0]]))
+        for curve in (self._uu_curve, self._uv_curve, self._uw_curve):
+            curve.setData([], [])
+        self._wave_plot.enableAutoRange(axis='x', enable=True)
+        self._wave_plot.enableAutoRange(axis='y', enable=True)
+        self._plot.enableAutoRange(axis='x', enable=True)
+        self._plot.enableAutoRange(axis='y', enable=True)
+
     # --- Frame path -------------------------------------------------------
 
     def _on_frame_reader_thread(self, channel: int, seq: int,
                                 payload: bytes) -> None:
+        t_mono = time.monotonic()
         with self._inbox_lock:
-            self._inbox.append(payload)
+            self._inbox.append((t_mono, payload))
 
     def _render_tick(self) -> None:
         with self._inbox_lock:
@@ -219,7 +255,7 @@ class SvmPanel(QWidget):
             pending = list(self._inbox)
             self._inbox.clear()
 
-        for payload in pending:
+        for t_mono, payload in pending:
             try:
                 tokens = payload.decode("ascii",
                                        errors="ignore").strip().split(",")
@@ -232,8 +268,7 @@ class SvmPanel(QWidget):
             a, b = _clarke(u_u, u_v, u_w)
             self._alpha_buf.append(a)
             self._beta_buf.append(b)
-            self._t += self._sample_dt
-            self._time_buf.append(self._t)
+            self._time_buf.append(t_mono - self._t0)
             self._uu_buf.append(u_u)
             self._uv_buf.append(u_v)
             self._uw_buf.append(u_w)

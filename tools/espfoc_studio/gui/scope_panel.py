@@ -14,8 +14,9 @@ link channel (``"%f,%f,...\\n"``). This panel:
 from __future__ import annotations
 
 import threading
+import time
 from collections import deque
-from typing import Deque, List, Optional
+from typing import Deque, List, Optional, Tuple
 
 import numpy as np
 import pyqtgraph as pg
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -64,15 +66,22 @@ class ScopePanel(QWidget):
 
     def __init__(self, reader: Optional[LinkReader] = None,
                  sample_period_s: float = 1e-3 * 4) -> None:
-        """sample_period_s defaults to the DemoFirmware decimation
-        (4 ms). Real firmware can override this by calling
-        set_sample_period() once its scope rate is known."""
+        """sample_period_s is kept for backwards compatibility but no
+        longer drives the time axis — the panel now timestamps each
+        frame on arrival with time.monotonic(), so the visible
+        frequency is immune to inbox drops, render-tick batching, or
+        the firmware shipping samples at a slightly different rate
+        than advertised."""
         super().__init__()
         self._reader = reader
-        self._sample_dt = sample_period_s
+        self._sample_dt = sample_period_s  # kept for backwards-compat only
         self._inbox_lock = threading.Lock()
-        self._inbox: Deque[bytes] = deque(maxlen=self.INBOX_CAP)
-        self._t = 0.0  # virtual clock (sample index * dt)
+        # Inbox holds (t_mono, payload) so the time axis is wall-clock
+        # locked from the moment the reader thread sees the frame, not
+        # an accumulating "samples seen so far" counter that lags or
+        # leads the actual data rate.
+        self._inbox: Deque[Tuple[float, bytes]] = deque(maxlen=self.INBOX_CAP)
+        self._t0 = time.monotonic()
         self._time_buf: Deque[float] = deque(maxlen=self.BUFFER_CAP)
         self._channel_bufs: List[Deque[float]] = []
         self._curves: List[pg.PlotDataItem] = []
@@ -81,12 +90,23 @@ class ScopePanel(QWidget):
 
         root = QHBoxLayout(self)
 
-        # Left gutter with the channel toggles.
+        # Left gutter with the channel toggles + Autoset button.
         gutter = QFrame()
         gutter.setFrameShape(QFrame.NoFrame)
         gutter.setFixedWidth(140)
         self._gutter_layout = QVBoxLayout(gutter)
         self._gutter_layout.setContentsMargins(4, 4, 4, 4)
+        # "Autoset" lives at the top so it is always reachable even
+        # when the channels list scrolls — clicking it re-enables
+        # autorange on both axes, drops the buffered history and
+        # rebases the time axis to "now". Use this whenever a manual
+        # zoom / pan parked the viewport away from the live cursor.
+        autoset_btn = QPushButton("Autoset")
+        autoset_btn.setToolTip(
+            "Re-center the scope: clear history, reset time origin "
+            "to now and re-enable axis autorange.")
+        autoset_btn.clicked.connect(self.autoset)
+        self._gutter_layout.addWidget(autoset_btn)
         self._gutter_layout.addWidget(QLabel("Channels"))
         self._gutter_layout.addStretch(1)
         scroll = QScrollArea()
@@ -118,7 +138,9 @@ class ScopePanel(QWidget):
     # --- Public helpers ---------------------------------------------------
 
     def set_sample_period(self, dt_s: float) -> None:
-        """Override the estimated scope Ts (used for the x axis only)."""
+        """No-op kept for backwards compatibility. The time axis is
+        wall-clock-locked now; the firmware's actual scope rate does
+        not need to be communicated to the panel any more."""
         if dt_s > 0:
             self._sample_dt = dt_s
 
@@ -126,13 +148,34 @@ class ScopePanel(QWidget):
         self._reader = reader
         reader.register_scope_callback(self._on_frame_reader_thread)
 
+    def autoset(self) -> None:
+        """Drop history, rebase time to 'now' and re-enable autorange.
+        Recovers from manual zoom / pan that parked the viewport off
+        the live cursor."""
+        with self._inbox_lock:
+            self._inbox.clear()
+        self._t0 = time.monotonic()
+        self._time_buf.clear()
+        for buf in self._channel_bufs:
+            buf.clear()
+        for curve in self._curves:
+            curve.setData([], [])
+        # Re-enable autorange on both axes; pyqtgraph turns it off
+        # silently the first time the user pans or zooms.
+        self._plot.enableAutoRange(axis='x', enable=True)
+        self._plot.enableAutoRange(axis='y', enable=True)
+
     # --- Frame path -------------------------------------------------------
 
     def _on_frame_reader_thread(self, channel: int, seq: int,
                                 payload: bytes) -> None:
-        # Cheap hand-off to the Qt thread; no Qt call here.
+        # Stamp the frame at arrival on the reader thread; no Qt call
+        # here. Whatever happens between here and the next render tick
+        # (batching, drop-oldest on the bounded inbox, render-tick
+        # spacing) does not show up on the time axis any more.
+        t_mono = time.monotonic()
         with self._inbox_lock:
-            self._inbox.append(payload)
+            self._inbox.append((t_mono, payload))
 
     def _render_tick(self) -> None:
         # Drain the inbox under the lock, then release so the reader
@@ -144,7 +187,7 @@ class ScopePanel(QWidget):
             self._inbox.clear()
 
         # Ingest every pending frame into the per-channel buffers.
-        for payload in pending:
+        for t_mono, payload in pending:
             try:
                 line = payload.decode("ascii", errors="ignore").strip()
                 values = [float(tok) for tok in line.split(",") if tok]
@@ -153,8 +196,7 @@ class ScopePanel(QWidget):
             if not values:
                 continue
             self._ensure_channels(len(values))
-            self._t += self._sample_dt
-            self._time_buf.append(self._t)
+            self._time_buf.append(t_mono - self._t0)
             for i, v in enumerate(values):
                 self._channel_bufs[i].append(v)
 
