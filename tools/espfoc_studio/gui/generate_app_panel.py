@@ -1,9 +1,9 @@
 """Generate App tab.
 
-Renders a ready-to-build IDF application from the live tuning state
-plus the values typed in on the Hardware tab. Visible only when the
-firmware identifies itself as TunerStudio target (or in --demo mode
-where the demo firmware reports the same magic).
+Single-stop workflow that turns a live tuning session into a
+ready-to-build IDF project. The Hardware section was a sibling tab
+before; living inside this panel makes the order of operations
+self-explanatory: configure the board, name the output, hit Generate.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from typing import Callable
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -35,31 +37,41 @@ _DEFAULT_BASE = os.path.expanduser("~/espfoc_apps")
 
 
 class GenerateAppPanel(QWidget):
-    """Form + log box that drives generate_sensored_app()."""
+    """Hardware + Output sections + log box. Drives generate_sensored_app()."""
 
     appGenerated = Signal(str)  # emits output dir on success
 
     def __init__(self, client: TunerClient,
-                 hardware: HardwarePanel,
                  get_motor_params: Callable[[], tuple[float, float, float]]
                  ) -> None:
         super().__init__()
         self._client = client
-        self._hw = hardware
         self._get_motor_params = get_motor_params
 
-        root = QVBoxLayout(self)
+        # Outer scroll so the panel never clips even when the window
+        # is short — the embedded Hardware section is form-heavy.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        outer.addWidget(scroll)
+        body = QWidget()
+        scroll.setWidget(body)
+        root = QVBoxLayout(body)
 
-        intro = QLabel(
-            "Captures the live Kp/Ki/integrator_limit, packages them with "
-            "the Hardware tab snapshot and writes a self-contained IDF "
-            "project that boots already tuned. The runtime tuner stays "
-            "wired in so you can re-tune later without rebuilding.")
-        intro.setWordWrap(True)
-        root.addWidget(intro)
+        # --- Hardware configuration (was a sibling tab before) ---
+        hw_box = QGroupBox("Hardware configuration")
+        hw_layout = QVBoxLayout(hw_box)
+        hw_layout.setContentsMargins(6, 12, 6, 6)
+        self._hw = HardwarePanel()
+        hw_layout.addWidget(self._hw)
+        root.addWidget(hw_box)
 
-        form_box = QGroupBox("Output")
-        form = QFormLayout(form_box)
+        # --- Output ---
+        out_box = QGroupBox("Output")
+        form = QFormLayout(out_box)
         self._app_name = QLineEdit("my_motor_app")
         form.addRow("App name", self._app_name)
 
@@ -76,15 +88,26 @@ class GenerateAppPanel(QWidget):
         path_row.addWidget(self._browse_btn)
         form.addRow("Output directory", path_row)
         self._override_box.toggled.connect(self._on_override_toggled)
-        root.addWidget(form_box)
+        root.addWidget(out_box)
 
-        gen_btn = QPushButton("Generate")
-        gen_btn.clicked.connect(self._on_generate)
-        root.addWidget(gen_btn)
+        # --- Action button ---
+        action_row = QHBoxLayout()
+        action_row.addStretch(1)
+        self._generate_btn = QPushButton("Generate")
+        self._generate_btn.setToolTip(
+            "Capture the live Kp / Ki / integrator_limit + current-filter "
+            "cutoff, package them with the Hardware section above and "
+            "write a self-contained IDF project that boots already tuned.")
+        self._generate_btn.clicked.connect(self._on_generate)
+        action_row.addWidget(self._generate_btn)
+        root.addLayout(action_row)
 
+        # --- Log ---
         self._log = QPlainTextEdit()
         self._log.setReadOnly(True)
         self._log.setMaximumBlockCount(200)
+        self._log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self._log.setMinimumHeight(140)
         root.addWidget(self._log)
         root.addStretch(0)
 

@@ -117,6 +117,37 @@ def test_scope_panel_wallclock_and_autoset():
     assert panel._time_buf[0] < 0.05  # fresh origin
 
 
+def test_generate_app_embeds_hardware_section():
+    """The standalone Hardware tab is gone in favour of an embedded
+    section inside GenerateAppPanel — guard against a regression that
+    re-introduces the orphaned tab or drops the embedded panel."""
+    from espfoc_studio.gui.generate_app_panel import GenerateAppPanel
+    from espfoc_studio.gui.hardware_panel import HardwarePanel
+
+    host_t, fw_t = LoopbackTransport.pair()
+    fw = DemoFirmware(fw_t)
+    fw.start()
+    reader = LinkReader(host_t)
+    reader.start()
+    try:
+        client = TunerClient(reader)
+        app = QApplication.instance() or QApplication(sys.argv)
+        panel = GenerateAppPanel(
+            client,
+            get_motor_params=lambda: (1.08, 0.0018, 150.0))
+        # The embedded HardwarePanel must be a child widget so the
+        # "Hardware tab moved into Generate App" semantics hold.
+        assert hasattr(panel, "_hw"), "GenerateAppPanel lost _hw attribute"
+        assert isinstance(panel._hw, HardwarePanel), (
+            f"_hw is {type(panel._hw).__name__}, not HardwarePanel")
+        cfg = panel._hw.get_config()
+        assert cfg.target in ("esp32", "esp32s3", "esp32p4"), (
+            f"unexpected default target {cfg.target!r}")
+    finally:
+        fw.stop()
+        reader.stop()
+
+
 def test_scope_panel_roll_mode_x_axis_stays_bounded():
     """Live cursor must always sit at x = 0 (right edge) even after
     a long run — the displayed X values are 'seconds before now',
@@ -148,7 +179,8 @@ def test_scope_panel_roll_mode_x_axis_stays_bounded():
 def main() -> int:
     tests = [test_mainwindow_demo_boots_polls_and_streams_scope,
              test_scope_panel_wallclock_and_autoset,
-             test_scope_panel_roll_mode_x_axis_stays_bounded]
+             test_scope_panel_roll_mode_x_axis_stays_bounded,
+             test_generate_app_embeds_hardware_section]
     failed = 0
     for t in tests:
         try:
