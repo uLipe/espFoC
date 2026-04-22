@@ -6,8 +6,21 @@ This file is used to generate GitHub releases. All versions from 2.0.0 onward ar
 
 ## Unreleased
 
+### Features
+
+- **FOC current loop runs inside the PWM ISR.** Park / current PI / inverse Park / SVPWM / `set_voltages` execute at the full PWM rate (40 kHz default) instead of the legacy `pwm_rate / decimation` (2 kHz). The user `regulation_callback` keeps running on its task at 2 kHz so user code rate is unchanged; the inner current loop bandwidth ceiling jumps roughly 20x. Gated by `CONFIG_ESP_FOC_ISR_HOT_PATH` (default y); legacy 2.x task path stays available when n.
+- **Alpha-beta angle tracker** (`include/espFoC/utils/angle_predictor_q16.h`) bridges the slow encoder (AS5600 over I2C, ~2 kHz hard cap) and the fast ISR. Outer task feeds `update()` with each fresh reading; ISR queries `predict()` to get a fresh extrapolated electrical angle every PWM cycle. Defaults `alpha = 0.30`, `beta = 0.05` (overridable via `CONFIG_ESP_FOC_PREDICTOR_ALPHA_X1000` / `_BETA_X1000`).
+- **Clarke-publish path inside ADC drivers.** Both continuous and one-shot ADC drivers now apply offset + gain + Clarke right after the per-channel biquad in the ADC ISR and atomic-write `i_alpha` / `i_beta` into operator-supplied Q16 sinks. The PWM ISR reads the published values directly — zero blocking, zero critical sections in the hot path. Wired through the new `set_publish_targets()` interface method.
+- **`esp_foc_scope_data_push_from_isr()`** — ISR-safe variant of the scope push that uses `xTaskNotifyGiveFromISR`. Scope buffer storage flips from `float` to `q16_t` so the float conversion happens in the daemon thread (Xtensa FPU context save in ISRs is non-trivial).
+- **Build-time autotuner alignment.** `CONFIG_ESP_FOC_AUTOGEN_DECIMATION` defaults to 1 when ISR_HOT_PATH is on (matches the new loop rate); the PID controllers in core init pick `loop_dt = pwm_period` to integrate at the rate they actually fire at. No manual retune needed when flipping the flag.
+
+### Considered, ruled out
+
+- **Plan #3 — IPC offload of sin/cos to the other core.** `esp_ipc_isr_call` callback must be assembly on Xtensa, no async completion notification (only busy-wait variants), and the LUT-based sin+cos already runs in the order of hundreds of cycles — IPI round-trip would dwarf the win.
+
 ### BREAKING CHANGES (major)
 
+- **`esp_foc_isensor_t` interface grew `set_publish_targets`.** Existing user-supplied isensor implementations need to add the method (a no-op stub is acceptable).
 - **EMA helper retired.** `include/espFoC/utils/ema_low_pass_filter.h` and `esp_foc_lp_filter_t` are gone. Every consumer (current filtering, velocity estimate, PLL observer, KF observer) migrated to the new 2nd-order Butterworth biquad in `include/espFoC/utils/biquad_q16.h`. Application code that called `esp_foc_low_pass_filter_*` directly must port to `esp_foc_biquad_q16_*` and `esp_foc_biquad_butterworth_lpf_design_q16()`.
 - **`esp_foc_axis_t` shrank.** The two `current_filters[2]` EMAs are gone — the per-phase Butterworth lives inside the isensor driver, applied to raw ADC counts before the gain conversion. `velocity_filter` keeps its slot but switches type from `esp_foc_lp_filter_t` to `esp_foc_biquad_q16_t`.
 - **Moving-average dropped from both ADC drivers.** `current_sensor_adc.c` and `current_sensor_adc_one_shot.c` no longer buffer `ESP_FOC_LOW_SPEED_DOWNSAMPLING` samples per channel and average them. Each fresh count goes through a per-channel biquad inside the ADC ISR. Consumers see the same `fetch_isensors()` interface.
