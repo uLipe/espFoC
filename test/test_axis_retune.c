@@ -76,9 +76,15 @@ TEST_CASE("axis_tuning: retune output matches direct MPZ design",
     TEST_ASSERT_EQUAL(ESP_FOC_OK,
         esp_foc_axis_retune_current_pi_q16(&s_axis, r, l, bw));
 
-    /* Recompute via the design helper using the same loop_ts_us derivation. */
-    uint32_t loop_ts_us = (uint32_t)((1000000ULL * (uint64_t)ESP_FOC_LOW_SPEED_DOWNSAMPLING)
-                                     / 20000ULL);
+    /* Recompute via the design helper. retune now reads the loop dt
+     * straight from the axis PID so the test mirrors that exact
+     * derivation — under ISR_HOT_PATH the effective decimation is 1
+     * so deriving it from the static DOWNSAMPLING constant would
+     * disagree with what the axis actually carries. */
+    q16_t loop_dt_q16 = s_axis.torque_controller[0].dt;
+    uint32_t loop_ts_us = (uint32_t)(((int64_t)loop_dt_q16 * 1000000LL
+                                      + (int64_t)Q16_ONE / 2)
+                                     / (int64_t)Q16_ONE);
     esp_foc_pi_design_input_t in = {
         .motor_r_ohm = r,
         .motor_l_h   = l,

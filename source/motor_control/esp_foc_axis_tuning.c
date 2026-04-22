@@ -37,14 +37,23 @@ esp_foc_err_t esp_foc_axis_retune_current_pi_q16(
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
-    int pwm_rate_hz = axis->inverter_driver->get_inverter_pwm_rate(axis->inverter_driver);
-    if (pwm_rate_hz <= 0) {
-        return ESP_FOC_ERR_INVALID_ARG;
+    /* Pull the loop period straight from the PID itself — that field
+     * is set in esp_foc_initialize_axis() to the actual rate the
+     * controller fires at (PWM period under ISR_HOT_PATH, or
+     * pwm_period * downsampling under the legacy task path). Using
+     * the PWM rate * a hardcoded DOWNSAMPLING constant here is wrong
+     * the moment those two stop matching — exactly what the ISR hot
+     * path did, leaving the MPZ designer convinced fs = 2 kHz and
+     * rejecting any bandwidth above 1 kHz with OUT_OF_RANGE. */
+    q16_t loop_dt_q16 = axis->torque_controller[0].dt;
+    if (loop_dt_q16 <= 0) {
+        return ESP_FOC_ERR_TIMESTEP_TOO_SMALL;
     }
-
-    /* loop_ts_us = 1e6 * DOWNSAMPLING / pwm_rate_hz */
-    uint32_t loop_ts_us = (uint32_t)((1000000ULL * (uint64_t)ESP_FOC_LOW_SPEED_DOWNSAMPLING)
-                                     / (uint64_t)pwm_rate_hz);
+    /* loop_ts_us = round(loop_dt_q16 * 1e6 / Q16_ONE), int64 to keep
+     * things honest at small dt values (25 us = 1638 in Q16). */
+    uint32_t loop_ts_us = (uint32_t)(((int64_t)loop_dt_q16 * 1000000LL
+                                      + (int64_t)Q16_ONE / 2)
+                                     / (int64_t)Q16_ONE);
     if (loop_ts_us == 0) {
         return ESP_FOC_ERR_TIMESTEP_TOO_SMALL;
     }
