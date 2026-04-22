@@ -83,11 +83,14 @@ class TuningPanel(QWidget):
             lbl.setStyleSheet("font-family: monospace;")
         self._fc_label = QLabel("-")
         self._fc_label.setStyleSheet("font-family: monospace;")
+        self._loop_fs_label = QLabel("-")
+        self._loop_fs_label.setStyleSheet("font-family: monospace;")
         live_form.addRow("Kp [V/A]", self._kp_label)
         live_form.addRow("Ki [V/(A·s)]", self._ki_label)
         live_form.addRow("ILim [V]", self._lim_label)
         live_form.addRow("Vmax [V]", self._vmax_label)
         live_form.addRow("I-LPF fc [Hz]", self._fc_label)
+        live_form.addRow("Loop fs [Hz]", self._loop_fs_label)
         root.addWidget(live_box)
 
         # --- Manual gain editor ---
@@ -203,6 +206,15 @@ class TuningPanel(QWidget):
         root.addStretch(1)
 
     # --- Public slots (driven by MainWindow's timer) -----------------------
+
+    def set_loop_rate_hz(self, fs_hz: float) -> None:
+        """Receive the firmware's current PI sample rate (read once
+        on connect by MainWindow). Cached so poll() can show it
+        without a round-trip per refresh — the value is fixed for
+        the duration of a session."""
+        if fs_hz > 1.0:
+            self._loop_fs_hz = fs_hz
+            self._loop_fs_label.setText(f"{fs_hz:9.1f}")
 
     def poll(self) -> None:
         """Refresh the live readout. Called periodically by MainWindow."""

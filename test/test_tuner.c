@@ -258,6 +258,24 @@ TEST_CASE("tuner: motion target writes refused while override is OFF",
             payload, sizeof(payload), NULL, &resp_len));
 }
 
+TEST_CASE("tuner: read LOOP_FS_HZ returns the value init programmed",
+          "[espFoC][tuner]")
+{
+    setup_attached_axis();
+    /* esp_foc_initialize_axis stores the loop sample rate (PWM rate
+     * under ISR_HOT_PATH or pwm_rate / decimation under the legacy
+     * task path) on the axis. Tuner just reads it back. */
+    uint8_t resp[4] = {0};
+    size_t rl = sizeof(resp);
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(
+        0, ESP_FOC_TUNER_OP_READ, ESP_FOC_TUNER_PARAM_LOOP_FS_HZ_Q16,
+        NULL, 0, resp, &rl));
+    TEST_ASSERT_EQUAL(4, rl);
+    q16_t fs = deserialize_q16_le(resp);
+    TEST_ASSERT_EQUAL_INT32(s_axis.current_filter_fs_hz_q16, fs);
+    TEST_ASSERT_TRUE(fs > 0);
+}
+
 TEST_CASE("tuner: read I_FILTER_FC returns the value init programmed",
           "[espFoC][tuner]")
 {

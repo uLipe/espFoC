@@ -257,6 +257,13 @@ class DemoFirmware(threading.Thread):
             self._send_response(seq, OK, struct.pack("<b", 0))
         elif pid == int(ParamId.I_FILTER_FC):
             self._send_response(seq, OK, _q16_to_bytes(self.current_filter_fc))
+        elif pid == int(ParamId.LOOP_FS_HZ):
+            # Demo firmware runs the synthetic plant + PID at ts_s, so
+            # the "loop rate" exposed to the host matches that. Real
+            # firmware reports either the PWM rate (ISR_HOT_PATH=y) or
+            # pwm_rate / decimation (legacy).
+            self._send_response(seq, OK,
+                                _q16_to_bytes(1.0 / max(self.motor.ts_s, 1e-9)))
         elif pid == int(ParamId.NVS_PRESENT):
             self._send_response(seq, OK,
                                 bytes([1 if self.nvs_overlay else 0]))

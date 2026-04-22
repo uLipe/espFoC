@@ -141,8 +141,20 @@ class AnalysisPanel(QWidget):
         except Exception:
             pass
 
+    def set_loop_rate_hz(self, fs_hz: float) -> None:
+        """Override the assumed loop sample rate. Called by the
+        MainWindow after reading PARAM_LOOP_FS_HZ from the firmware
+        on connect, so the discrete plant the analysis tab simulates
+        (step response, Bode, root locus) matches the rate the actual
+        current PI is firing at — Plan #2's ISR hot path runs at
+        40 kHz, the legacy task path runs at ~2 kHz, the predicted
+        response is wildly different between the two."""
+        if fs_hz > 1.0:
+            self._loop_fs_hz = fs_hz
+
     def _ts_s(self) -> float:
-        """The GUI assumes the default loop period (1 ms). Real-firmware
-        mode will override this once the axis state query grows a Ts
-        field; for now we use the same value the demo firmware uses."""
-        return 0.001
+        """Sample period the analysis math discretises against. Set
+        from the firmware via set_loop_rate_hz() at connect; falls
+        back to 1 ms if the firmware never reported one."""
+        fs = getattr(self, "_loop_fs_hz", None) or 1000.0
+        return 1.0 / fs
