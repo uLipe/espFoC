@@ -72,7 +72,7 @@ Inverter and rotor drivers are pluggable:
 
 ## Tuning
 
-![TunerStudio demo](doc/images/tuner_studio.png)
+![TunerStudio demo](doc/images/tuner_studio.gif)
 
 espFoC ships with **TunerStudio**, a PySide6 + pyqtgraph desktop app
 that speaks the runtime tuner protocol over UART or USB-CDC. In a
