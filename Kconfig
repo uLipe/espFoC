@@ -154,6 +154,46 @@ menu "espFoC Settings"
             Matches the 2.x EMA default to keep behaviour the same
             after the EMA -> biquad swap.
 
+    config ESP_FOC_ISR_HOT_PATH
+        bool "Run the FOC current loop inside the PWM ISR"
+        default y
+        help
+            When enabled, Park / current PI / inverse Park / SVPWM /
+            set_voltages execute inside the MCPWM timer ISR at the
+            full PWM rate (40 kHz default). The user regulation
+            callback keeps running at pwm_rate / DOWNSAMPLING (still
+            2 kHz default), so user code rate is unchanged but the
+            inner current loop bandwidth ceiling jumps roughly 20x.
+
+            The slow encoder (AS5600 over I2C, AS5048 over SPI) is
+            read from the outer task; an alpha-beta predictor extrapolates
+            the electrical angle for every PWM cycle.
+
+            Set to n to fall back to the 2.x task-based control loop
+            (e.g. while a sensorless observer config that has not
+            been ported to the ISR path yet is in use).
+
+    config ESP_FOC_PREDICTOR_ALPHA_X1000
+        int "Angle predictor alpha (x1000)"
+        depends on ESP_FOC_ISR_HOT_PATH
+        range 1 1000
+        default 300
+        help
+            Measurement gain of the alpha-beta angle tracker, stored
+            x1000 because Kconfig int does not accept floats. Default
+            300 -> alpha = 0.300. Higher values track measurements
+            faster but amplify encoder noise.
+
+    config ESP_FOC_PREDICTOR_BETA_X1000
+        int "Angle predictor beta (x1000)"
+        depends on ESP_FOC_ISR_HOT_PATH
+        range 1 1000
+        default 50
+        help
+            Velocity gain of the alpha-beta tracker. Critical-damping
+            rule of thumb: beta = alpha^2 / (2 - alpha). Default
+            50 -> beta = 0.050.
+
     config ESP_FOC_INJECTION_ENABLE
         bool "Enable signal injection on the q-axis current reference"
         default n

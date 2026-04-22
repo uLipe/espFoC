@@ -26,6 +26,9 @@
 #include "esp_log.h"
 #include "espFoC/esp_foc.h"
 #include "espFoC/esp_foc_calibration.h"
+#if defined(CONFIG_ESP_FOC_ISR_HOT_PATH)
+#include "espFoC/utils/angle_predictor_q16.h"
+#endif
 
 #if defined(ESP_FOC_AUTOGEN_GAINS_AVAILABLE)
 #include "esp_foc_autotuned_gains.h"
@@ -204,6 +207,28 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     }
     axis->current_filter_fc_hz_q16 = q16_from_float(current_filter_fc_hz);
     axis->current_filter_fs_hz_q16 = q16_from_float(loop_fs_hz);
+
+#if defined(CONFIG_ESP_FOC_ISR_HOT_PATH)
+    axis->latest_i_alpha = 0;
+    axis->latest_i_beta = 0;
+    /* Predictor starts uninitialised; the first outer-loop tick after
+     * alignment will seed it from the live encoder reading. Gains
+     * come from Kconfig (stored x1000 to dodge float). */
+    float pred_alpha = (float)CONFIG_ESP_FOC_PREDICTOR_ALPHA_X1000 / 1000.0f;
+    float pred_beta = (float)CONFIG_ESP_FOC_PREDICTOR_BETA_X1000 / 1000.0f;
+    esp_foc_angle_predictor_init_q16(&axis->angle_predictor,
+                                     pred_alpha, pred_beta,
+                                     esp_foc_now_useconds());
+    /* Wire the ADC ISR's Clarke-publish path straight into the axis
+     * fields the PWM ISR will read. NULL targets disable publishing,
+     * so this is also the opt-in point for the new pipeline. */
+    if (isensor != NULL && axis->isensor_driver->set_publish_targets != NULL) {
+        axis->isensor_driver->set_publish_targets(
+            axis->isensor_driver,
+            (q16_t *)&axis->latest_i_alpha,
+            (q16_t *)&axis->latest_i_beta);
+    }
+#endif
 
     axis->motor_pole_pairs = settings.motor_pole_pairs;
 

@@ -8,6 +8,7 @@
 #include "espFoC/esp_foc_units_q16.h"
 #include "espFoC/utils/pid_controller.h"
 #include "espFoC/utils/biquad_q16.h"
+#include "espFoC/utils/angle_predictor_q16.h"
 #include "espFoC/esp_foc_injection.h"
 #include "espFoC/drivers/inverter_interface.h"
 #include "espFoC/drivers/current_sensor_interface.h"
@@ -112,6 +113,20 @@ struct esp_foc_axis_s {
      * is current_filter_fs_hz_q16, captured at init. */
     q16_t current_filter_fc_hz_q16;
     q16_t current_filter_fs_hz_q16;
+
+#if defined(CONFIG_ESP_FOC_ISR_HOT_PATH)
+    /* Plan #2: full FOC pipeline runs inside the PWM ISR. The slow
+     * encoder is read from the outer task, fed into the alpha-beta
+     * predictor; the ISR queries predict() to get a fresh extrapolated
+     * electrical angle every PWM cycle. */
+    esp_foc_angle_predictor_q16_t angle_predictor;
+    /* ADC ISR atomic-writes Clarke output here; PWM ISR reads. Both
+     * are 32-bit aligned q16, single-instruction stores on Xtensa /
+     * RISC-V — no torn-read concern. The volatile keeps the compiler
+     * from caching the read across loop iterations. */
+    volatile q16_t latest_i_alpha;
+    volatile q16_t latest_i_beta;
+#endif
 
     esp_foc_injection_t injection;
 
