@@ -28,6 +28,7 @@
 #include <sdkconfig.h>
 #include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/utils/biquad_q16.h"
+#include "espFoC/utils/foc_math_q16.h"
 #include "espFoC/driver_iq31_local.h"
 #include "espFoC/current_sensor_adc_one_shot.h"
 #include "hal/adc_hal.h"
@@ -57,6 +58,10 @@ typedef struct {
     int32_t filtered_count[4];
     esp_foc_biquad_q16_t bq[4];
     float offsets[4];
+    /* Optional Clarke publish targets — see current_sensor_adc.c for
+     * the same plumbing on the continuous driver. */
+    volatile q16_t *publish_alpha;
+    volatile q16_t *publish_beta;
     esp_foc_isensor_t interface;
 
     int number_of_channels;
@@ -96,6 +101,24 @@ static adc_oneshot_hal_cfg_t hal_cfg = {
 
 static void oneshot_adc_start_sample(isensor_adc_t *isensor, adc_channel_t channel, adc_unit_t unit);
 
+static inline void adc_publish_alpha_beta(isensor_adc_t *obj)
+{
+    const int32_t adc_rng = 2048;
+    int32_t d0 = obj->filtered_count[0] - (int32_t)lroundf(obj->offsets[0]);
+    int32_t d1 = obj->filtered_count[1] - (int32_t)lroundf(obj->offsets[1]);
+    d0 = esp_foc_clamp_int32(d0, -adc_rng, adc_rng);
+    d1 = esp_foc_clamp_int32(d1, -adc_rng, adc_rng);
+    q16_t iu = q16_mul(esp_foc_q16_from_adc_diff_clamped(d0, adc_rng),
+                       obj->adc_to_current_scale_q16);
+    q16_t iv = q16_mul(esp_foc_q16_from_adc_diff_clamped(d1, adc_rng),
+                       obj->adc_to_current_scale_q16);
+    q16_t iw = q16_sub(0, q16_add(iu, iv));
+    q16_t alpha, beta;
+    q16_clarke(iu, iv, iw, &alpha, &beta);
+    *obj->publish_alpha = alpha;
+    *obj->publish_beta  = beta;
+}
+
 static void isensor_adc_isr(void *arg)
 {
     isensor_adc_t * isensor = (isensor_adc_t *)arg;
@@ -128,6 +151,9 @@ static void isensor_adc_isr(void *arg)
             isensor->number_of_conversions = 0;
             adc_oneshot_ll_clear_event(event);
             adc_oneshot_ll_disable_all_unit();
+            if(isensor->publish_alpha != NULL && isensor->publish_beta != NULL) {
+                adc_publish_alpha_beta(isensor);
+            }
             if(isensor->callback) {
                 isensor->callback(isensor->user_data);
             }
@@ -336,6 +362,19 @@ static void set_filter_cutoff(esp_foc_isensor_t *self, float fc_hz, float fs_hz)
     esp_foc_critical_leave();
 }
 
+static void set_publish_targets(esp_foc_isensor_t *self,
+                                q16_t *i_alpha_target,
+                                q16_t *i_beta_target)
+{
+    isensor_adc_t *obj =
+        __containerof(self, isensor_adc_t, interface);
+
+    esp_foc_critical_enter();
+    obj->publish_alpha = (volatile q16_t *)i_alpha_target;
+    obj->publish_beta  = (volatile q16_t *)i_beta_target;
+    esp_foc_critical_leave();
+}
+
 static void set_to_zero(esp_foc_rotor_sensor_t *self)
 {
     isensor_adc_t *obj = __containerof(self, isensor_adc_t, encoder_interface);
@@ -421,6 +460,9 @@ esp_foc_isensor_t *isensor_adc_oneshot_new(esp_foc_isensor_adc_oneshot_config_t 
     isensor_adc.interface.calibrate_isensors = calibrate_isensors;
     isensor_adc.interface.set_isensor_callback = set_callback;
     isensor_adc.interface.set_filter_cutoff = set_filter_cutoff;
+    isensor_adc.interface.set_publish_targets = set_publish_targets;
+    isensor_adc.publish_alpha = NULL;
+    isensor_adc.publish_beta  = NULL;
     isensor_adc.number_of_channels = config->number_of_channels;
     /* Default to bypass on every channel; axis init dials a real
      * cutoff in via set_filter_cutoff. */

@@ -28,6 +28,7 @@
 #include <math.h>
 #include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/utils/biquad_q16.h"
+#include "espFoC/utils/foc_math_q16.h"
 #include "espFoC/driver_iq31_local.h"
 #include "espFoC/current_sensor_adc.h"
 #include "hal/adc_hal.h"
@@ -58,6 +59,12 @@ typedef struct {
     int32_t filtered_count[4];
     esp_foc_biquad_q16_t bq[4];
     float offsets[4];
+    /* Optional Clarke publish targets. When both are non-NULL the ADC
+     * ISR computes (offset, gain, Clarke) on channels 0/1 right after
+     * the biquad and atomic-writes the result. The PWM ISR can then
+     * read i_alpha / i_beta directly without a fetch_isensors() call. */
+    volatile q16_t *publish_alpha;
+    volatile q16_t *publish_beta;
     esp_foc_isensor_t interface;
     int number_of_channels;
     isensor_callback_t callback;
@@ -93,6 +100,34 @@ DRAM_ATTR static isensor_adc_t isensor_adc;
 static bool adc_initialized = false;
 static const float adc_to_volts = ((3.1f)/ 4096.0f);
 
+/* Apply offset + gain + Clarke on channels 0/1 and atomic-write
+ * (i_alpha, i_beta) into the publish targets. Inlined into the ISR
+ * for the new ISR-driven hot path to skip; called only when both
+ * targets are wired. Channels 2/3 (axis 1) are not handled here —
+ * Plan #2 is single-axis for now. */
+static inline void adc_publish_alpha_beta(isensor_adc_t *obj)
+{
+    const int32_t adc_rng = 2048;
+    int32_t d0 = obj->filtered_count[0] - (int32_t)lroundf(obj->offsets[0]);
+    int32_t d1 = obj->filtered_count[1] - (int32_t)lroundf(obj->offsets[1]);
+    d0 = esp_foc_clamp_int32(d0, -adc_rng, adc_rng);
+    d1 = esp_foc_clamp_int32(d1, -adc_rng, adc_rng);
+    q16_t iu = q16_mul(esp_foc_q16_from_adc_diff_clamped(d0, adc_rng),
+                       obj->adc_to_current_scale_q16);
+    q16_t iv = q16_mul(esp_foc_q16_from_adc_diff_clamped(d1, adc_rng),
+                       obj->adc_to_current_scale_q16);
+    /* Three-phase KCL gives iw, then the standard Clarke (with the
+     * codebase's q16_clarke helper which expects u/v/w). */
+    q16_t iw = q16_sub(0, q16_add(iu, iv));
+    q16_t alpha, beta;
+    q16_clarke(iu, iv, iw, &alpha, &beta);
+    /* Single 32-bit aligned writes; both Xtensa and RISC-V deliver
+     * these as one store, so the PWM ISR can read either field
+     * without a torn-read concern. */
+    *obj->publish_alpha = alpha;
+    *obj->publish_beta  = beta;
+}
+
 static bool isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
 {
     adc_hal_digi_enable(false);
@@ -113,6 +148,10 @@ static bool isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_
                                             (q16_t)(raw << 16));
         isensor->filtered_count[i] = y >> 16;
         p++;
+    }
+
+    if(isensor->publish_alpha != NULL && isensor->publish_beta != NULL) {
+        adc_publish_alpha_beta(isensor);
     }
 
     if(isensor->callback != NULL) {
@@ -274,6 +313,19 @@ static void set_filter_cutoff(esp_foc_isensor_t *self, float fc_hz, float fs_hz)
     esp_foc_critical_leave();
 }
 
+static void set_publish_targets(esp_foc_isensor_t *self,
+                                q16_t *i_alpha_target,
+                                q16_t *i_beta_target)
+{
+    isensor_adc_t *obj =
+        __containerof(self, isensor_adc_t, interface);
+
+    esp_foc_critical_enter();
+    obj->publish_alpha = (volatile q16_t *)i_alpha_target;
+    obj->publish_beta  = (volatile q16_t *)i_beta_target;
+    esp_foc_critical_leave();
+}
+
 
 esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
 {
@@ -290,6 +342,9 @@ esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
     isensor_adc.interface.calibrate_isensors = calibrate_isensors;
     isensor_adc.interface.set_isensor_callback = set_callback;
     isensor_adc.interface.set_filter_cutoff = set_filter_cutoff;
+    isensor_adc.interface.set_publish_targets = set_publish_targets;
+    isensor_adc.publish_alpha = NULL;
+    isensor_adc.publish_beta  = NULL;
     /* Default to bypass so the driver works correctly even if the
      * caller (axis init / tuner) never invokes set_filter_cutoff. */
     for (int i = 0; i < 4; ++i) {
