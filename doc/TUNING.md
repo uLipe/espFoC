@@ -196,6 +196,97 @@ Operators with hand-tuned observer cutoffs may want to revisit:
 the new filter has the same -3 dB position but a sharper roll-off
 (40 dB/decade vs 20 dB/decade) and slightly different phase.
 
+## ISR hot path (Plan #2)
+
+Set `CONFIG_ESP_FOC_ISR_HOT_PATH=y` (default) and the entire FOC
+inner loop — Park, current PI, inverse Park, SVPWM, `set_voltages`
+— runs inside the MCPWM timer ISR at the full PWM rate (40 kHz
+default). The user `regulation_callback` keeps running on its
+FreeRTOS task at `pwm_rate / ESP_FOC_LOW_SPEED_DOWNSAMPLING`
+(2 kHz default), so user code rate is unchanged. The current PI's
+sample rate climbs from 2 kHz to 40 kHz: a ~20x bandwidth headroom
+for free, no faster ADC needed.
+
+Three pieces work together:
+
+* **ADC ISR** (`source/drivers/current_sensor_adc.c` and the P4
+  one-shot variant): every fresh sample goes through the per-phase
+  Butterworth biquad, then the driver applies offset + gain +
+  Clarke and atomic-writes `i_alpha` / `i_beta` into the
+  axis-supplied sinks via the new `set_publish_targets()` interface
+  method. The PWM ISR can then read both currents with a single
+  load each — no critical section, no fetch_isensors call.
+
+* **PWM ISR** (`foc_hot_isr` in
+  `source/motor_control/control_strategy/esp_foc_control_current_mode_sensored.c`):
+  reads the published currents, asks the angle predictor for a fresh
+  electrical angle, runs Park + PI + inverse Park + SVPWM, calls
+  `set_voltages`, optionally pushes a scope frame via
+  `esp_foc_scope_data_push_from_isr()`, then decrements the
+  downsample counter and notifies the outer task on rollover.
+
+* **Outer task** (renamed in spirit, same symbol
+  `do_current_mode_sensored_low_speed_loop`): waits on the ISR's
+  notification, reads the slow encoder (AS5600 over I2C, AS5048
+  over SPI, or PCNT-direct), folds the new electrical angle into
+  the predictor under critical section, runs the velocity smoothing
+  biquad, then notifies the regulator task so the user
+  `regulation_callback` can refresh the targets.
+
+The slow encoder problem is solved with an **alpha-beta angle
+tracker** (`include/espFoC/utils/angle_predictor_q16.h`):
+
+```
+predict(t_now):
+    dt = t_now - t_last
+    return wrap_2pi(theta_est + omega_est * dt)
+
+update(theta_meas, t_meas):
+    dt = t_meas - t_last
+    theta_pred = wrap_2pi(theta_est + omega_est * dt)
+    err = wrap_pi(theta_meas - theta_pred)            in (-pi, +pi]
+    theta_est = wrap_2pi(theta_pred + alpha * err)
+    omega_est += (beta / dt) * err
+```
+
+Default gains `alpha = 0.30`, `beta = 0.05` (close to critically
+damped at 2 kHz update rate; rule of thumb is
+`beta = alpha^2 / (2 - alpha)`). Override via
+`CONFIG_ESP_FOC_PREDICTOR_ALPHA_X1000` /
+`CONFIG_ESP_FOC_PREDICTOR_BETA_X1000` (stored x1000 because Kconfig
+int does not take floats). The tracker degrades gracefully when the
+encoder hangs — the unit tests assert the predicted angle drift
+stays under 0.5 rad after 50 ms with no updates at 60 Hz electrical.
+
+When the ADC sample is older than one PWM period (drop / 50 kHz cap
+on plain ESP32 with PWM > 25 kHz), the ISR reuses the latest
+published value. The PI integrates one cycle of slightly stale
+current — way milder degradation than the legacy 2 kHz loop already
+lives with.
+
+Set `CONFIG_ESP_FOC_ISR_HOT_PATH=n` to fall back to the legacy 2.x
+task-based path. Useful while a sensorless observer config that has
+not been ported to the ISR path yet is in use.
+
+### Why not Plan #3 (offload sin/cos to the other core)?
+
+Investigated and dropped:
+
+* `esp_ipc_isr_call` exists in IDF v5.5 but on Xtensa (ESP32 /
+  ESP32-S3) the callback must be **assembly** with no C calls
+  allowed — the LUT-based `q16_sin/cos` in `iq31_sin/cos` cannot
+  run there.
+* The API offers only `_call` (busy-wait until the other core
+  starts) and `_call_blocking` (busy-wait until it finishes); no
+  asynchronous "done" callback back to the originating core, so
+  the desired `PWM ISR -> dispatch -> sincos done IRQ -> hot path`
+  pipeline cannot be assembled from the public IDF surface.
+* `q16_sin + q16_cos` together are a few hundred cycles (LUT 8192
+  + IQ31 conversions). The IPI round-trip would dwarf that.
+
+Documented for the record so we do not revisit it without new
+information.
+
 ## Alignment with natural-direction probe
 
 `esp_foc_align_axis()` parks the rotor at electrical 0, zeroes the
