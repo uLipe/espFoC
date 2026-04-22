@@ -117,9 +117,38 @@ def test_scope_panel_wallclock_and_autoset():
     assert panel._time_buf[0] < 0.05  # fresh origin
 
 
+def test_scope_panel_roll_mode_x_axis_stays_bounded():
+    """Live cursor must always sit at x = 0 (right edge) even after
+    a long run — the displayed X values are 'seconds before now',
+    not absolute monotonic time, so they can never run off-screen."""
+    from espfoc_studio.gui.scope_panel import ScopePanel
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    panel = ScopePanel()
+    # Pretend the panel has been running for an hour and a frame
+    # arrives one tick before "now".
+    panel._t0 = time.monotonic() - 3600.0
+    with panel._inbox_lock:
+        panel._inbox.append((time.monotonic() - 0.010, b"1.0,2.0\n"))
+        panel._inbox.append((time.monotonic() - 0.005, b"1.5,2.5\n"))
+        panel._inbox.append((time.monotonic(),         b"2.0,3.0\n"))
+    panel._render_tick()
+    assert panel._n_channels == 2
+    # Pull the rendered X data from the first curve and check that
+    # the latest sample sits at ~0 and nothing is at +3600 seconds.
+    x_data, _ = panel._curves[0].getData()
+    assert x_data is not None and len(x_data) == 3
+    assert x_data[-1] > -0.05, f"latest sample at x={x_data[-1]!r}, expected ~0"
+    assert x_data[0] >= -panel.WINDOW_S, (
+        f"oldest sample at x={x_data[0]!r}, outside the window")
+    assert max(abs(v) for v in x_data) < panel.WINDOW_S + 0.1, (
+        "X values escaped the rolling window")
+
+
 def main() -> int:
     tests = [test_mainwindow_demo_boots_polls_and_streams_scope,
-             test_scope_panel_wallclock_and_autoset]
+             test_scope_panel_wallclock_and_autoset,
+             test_scope_panel_roll_mode_x_axis_stays_bounded]
     failed = 0
     for t in tests:
         try:

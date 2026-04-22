@@ -29,7 +29,12 @@ class MainWindow(QMainWindow):
                  title: str = "espFoC TunerStudio") -> None:
         super().__init__()
         self.setWindowTitle(title)
-        self.resize(1280, 800)
+        # 900 px of vertical room is what fits the SVM hexagon (380)
+        # plus its three-phase waveform (220) plus axis labels and tab
+        # chrome without clipping. The Scope tab is more forgiving but
+        # benefits from the same headroom.
+        self.resize(1280, 900)
+        self.setMinimumSize(1024, 720)
 
         central = QWidget()
         self.setCentralWidget(central)
