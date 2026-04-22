@@ -57,8 +57,15 @@ class DemoFirmware(threading.Thread):
         self._dec = Decoder()
         self._state_lock = threading.Lock()
 
+        # ts_s mirrors the ISR_HOT_PATH default loop period (40 kHz
+         # PWM = 25 us). The demo runs SUB_STEPS=40 sub-iterations of
+         # the synthetic plant per wall-clock millisecond so the scope
+         # frame rate stays where the GUI expects it (~250 Hz, one
+         # frame per 4 ms wallclock = SUB_STEPS * SCOPE_DECIMATION).
+         # This keeps mpz_design(BW=4 kHz, fs=40 kHz) inside Nyquist
+         # and matches what the host's analysis tab discretises against.
         self.motor = motor or MotorParams(r_ohm=1.08, l_h=0.0018,
-                                          ts_s=0.001, v_max=12.0)
+                                          ts_s=25e-6, v_max=12.0)
         initial_gains = mpz_design(self.motor, bandwidth_hz=150.0)
         self.kp = initial_gains.kp
         self.ki = initial_gains.ki
@@ -99,7 +106,13 @@ class DemoFirmware(threading.Thread):
     # Configurable set of channels the demo streams on the SCOPE channel.
     # The firmware's esp_foc_scope.c emits CSV text as the payload; we do
     # the same here so the host-side ScopePanel can share the parser.
-    SCOPE_DECIMATION = 4  # one scope frame every N control steps (Ts = 1 ms)
+    # Sub-iterations of the synthetic plant per wall-clock tick. With
+    # ts_s = 25 us this gives a wall-clock budget of 1 ms per outer
+    # loop iteration, matching the previous demo cadence so the scope
+    # frame rate (one frame every SCOPE_DECIMATION outer iterations =
+    # 4 ms = 250 Hz) stays where the rest of the GUI expects it.
+    SUB_STEPS = 40
+    SCOPE_DECIMATION = 4
 
     def _scope_frame_csv(self) -> bytes:
         """Reproduce the firmware's esp_foc_scope.c payload format:
@@ -166,29 +179,39 @@ class DemoFirmware(threading.Thread):
     # --- Simulation loop ---------------------------------------------------
 
     def _simulate(self) -> None:
-        """Run the plant + PID at Ts. Matches the firmware closed-loop
-        enough for the scope to show sensible waveforms, and pushes a
-        SCOPE-channel frame every SCOPE_DECIMATION steps so the host
-        gets a live stream just like it would from a real bridge."""
+        """Run the plant + PID at Ts (matches the firmware ISR_HOT_PATH
+        loop rate of 40 kHz). Each wall-clock tick advances SUB_STEPS
+        sub-iterations of the closed loop in tight Python so a host
+        request like mpz_design(BW=4 kHz) lands on a plant that was
+        actually discretised at the same rate the design was computed
+        for. Scope frames are emitted every SUB_STEPS * SCOPE_DECIMATION
+        sub-steps (= one frame per 4 ms wallclock) so the GUI's frame
+        rate stays where it has been since the SVM panel was wired."""
         import math
         alpha = math.exp(-self.motor.r_ohm * self.motor.ts_s / self.motor.l_h)
-        counter = 0
+        sub_counter = 0
         seq = 0
+        # Wall-clock budget per outer iteration = SUB_STEPS * ts_s, e.g.
+        # 40 * 25 us = 1 ms — same cadence the demo had before the
+        # ts_s rebase to 40 kHz.
+        wall_dt = self.SUB_STEPS * self.motor.ts_s
         while not self._stop.is_set():
             with self._state_lock:
-                ref = self.target_iq if self.override else 0.0
-                err = ref - self._i_actual
-                u = self.kp * err + self._integ_prev
-                u = max(-self.motor.v_max, min(self.motor.v_max, u))
-                self._integ_prev = self._integ
-                self._integ += self.ki * err * self.motor.ts_s
-                if self.lim > 0:
-                    self._integ = max(-self.lim, min(self.lim, self._integ))
-                self._i_actual = (alpha * self._i_actual
-                                  + (1.0 - alpha) / self.motor.r_ohm * u)
-            counter += 1
-            if counter >= self.SCOPE_DECIMATION:
-                counter = 0
+                for _ in range(self.SUB_STEPS):
+                    ref = self.target_iq if self.override else 0.0
+                    err = ref - self._i_actual
+                    u = self.kp * err + self._integ_prev
+                    u = max(-self.motor.v_max, min(self.motor.v_max, u))
+                    self._integ_prev = self._integ
+                    self._integ += self.ki * err * self.motor.ts_s
+                    if self.lim > 0:
+                        self._integ = max(-self.lim,
+                                          min(self.lim, self._integ))
+                    self._i_actual = (alpha * self._i_actual
+                                      + (1.0 - alpha) / self.motor.r_ohm * u)
+            sub_counter += 1
+            if sub_counter >= self.SCOPE_DECIMATION:
+                sub_counter = 0
                 payload = self._scope_frame_csv()
                 if len(payload) <= MAX_PAYLOAD:
                     try:
@@ -197,7 +220,7 @@ class DemoFirmware(threading.Thread):
                     except Exception:
                         pass
                     seq = (seq + 1) & 0xFF
-            time.sleep(self.motor.ts_s)
+            time.sleep(wall_dt)
 
     # --- Dispatcher --------------------------------------------------------
 
