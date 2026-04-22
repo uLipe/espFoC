@@ -232,10 +232,16 @@ menu "espFoC Settings"
         config ESP_FOC_AUTOGEN_DECIMATION
             int "Current loop decimation factor the autotuner assumes"
             depends on ESP_FOC_USE_AUTOGEN_GAINS
+            default 1 if ESP_FOC_ISR_HOT_PATH
             default 20
             help
-                Should match ESP_FOC_LOW_SPEED_DOWNSAMPLING in
-                esp_foc_controls.h. Use 1 for ISR-mode control loops.
+                Tells the build-time autotuner what fs the runtime
+                current PI is going to see, expressed as
+                ESP_FOC_PWM_RATE_HZ / decimation. ISR_HOT_PATH=y
+                runs the loop straight off the PWM ISR, so the
+                effective decimation is 1; legacy task-mode loops
+                use ESP_FOC_LOW_SPEED_DOWNSAMPLING (20) which is the
+                default when the ISR path is disabled.
 
     endmenu
 
