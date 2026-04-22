@@ -32,7 +32,10 @@
 const char *TAG = "ESP_FOC_SCOPE";
 
 struct scope_frame {
-    float data[CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS];
+    /* Buffered as raw Q16 so the data_push path stays float-free —
+     * Xtensa FPU context save in an ISR is non-trivial and the
+     * conversion is cheap to defer to the daemon thread anyway. */
+    q16_t data[CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS];
 };
 
 static uint32_t used_channels = 0;
@@ -80,14 +83,16 @@ static void esp_foc_scope_daemon_thread(void *arg)
         if(used_channels != 0) {
             for(int i = 0; i < CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS; i++) {
                 if(used_channels & (1 << i)) {
-                    idx += sprintf(&out_buf[idx],"%f,",next_sample->data[i]);
+                    idx += sprintf(&out_buf[idx],"%f,",
+                                   q16_to_float(next_sample->data[i]));
                 }
             }
             out_buf[idx-1] = '\n';
             out_buf[idx] = 0;
         } else {
             /* send at least one channel */
-            idx += sprintf(&out_buf[idx],"%f,",next_sample->data[0]);
+            idx += sprintf(&out_buf[idx],"%f,",
+                           q16_to_float(next_sample->data[0]));
             out_buf[idx-1] = '\n';
             out_buf[idx] = 0;
         }
@@ -107,28 +112,57 @@ void esp_foc_scope_initalize(void)
     }
 }
 
+/* Snapshot every wired channel into the active write buffer. Returns
+ * true when the buffer just rolled over (caller is responsible for
+ * waking the daemon — the two public push variants below handle the
+ * wake with the appropriate FreeRTOS API for their context). */
+static inline bool scope_capture_frame(void)
+{
+    struct scope_frame *next_sample =
+        &scope_buffer[!ping_pong_switch][wr_buff_index];
+    for(int i = 0; i < CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS; i++) {
+        if(used_channels & (1 << i)) {
+            next_sample->data[i] = *scope_channels[i];
+        } else {
+            next_sample->data[i] = 0;
+        }
+    }
+    wr_buff_index++;
+    if(wr_buff_index >= CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE) {
+        rd_buff_index = 0;
+        wr_buff_index = 0;
+        ping_pong_switch ^= 1;
+        return true;
+    }
+    return false;
+}
+
 void esp_foc_scope_data_push(void)
 {
     if(!scope_enable) {
         ESP_LOGW(TAG, "ESP FOC scope is not ready yet, skipping...");
         return;
     }
-
-    struct scope_frame *next_sample = &scope_buffer[!ping_pong_switch][wr_buff_index];
-    for(int i = 0; i < CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS; i++) {
-        if(used_channels & (1 << i)) {
-            next_sample->data[i] = q16_to_float(*scope_channels[i]);
-        } else {
-            next_sample->data[i] = 0.0f;
-        }
-    }
-
-    wr_buff_index++;
-    if(wr_buff_index >= CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE) {
-        rd_buff_index = 0;
-        wr_buff_index = 0;
-        ping_pong_switch ^= 1;
+    if(scope_capture_frame()) {
         esp_foc_send_notification(scope_ev);
+    }
+}
+
+void esp_foc_scope_data_push_from_isr(void)
+{
+    /* ISR-context push for callers that live in IRAM (e.g. the FOC
+     * hot path inside the PWM ISR). Same buffer protocol as the
+     * task-context push, but the wake uses the FromISR notification
+     * variant so we never call xTaskNotifyGive from interrupt land.
+     *
+     * No ESP_LOGW guard here on purpose — printing inside an ISR
+     * would be way worse than silently dropping the rare case where
+     * push fires before scope_initalize(). */
+    if(!scope_enable) {
+        return;
+    }
+    if(scope_capture_frame()) {
+        esp_foc_send_notification_from_isr(scope_ev);
     }
 }
 
