@@ -95,6 +95,19 @@ class MainWindow(QMainWindow):
         self._timer.timeout.connect(self._poll)
         self._timer.start()
 
+        # Pull the actual loop sample rate from the firmware so the
+        # Analysis tab discretises against the right Ts. Plan #2 (FOC
+        # in PWM ISR) bumps this from ~2 kHz to 40 kHz; without it
+        # the predicted step response on the Analysis tab would be
+        # off by the same 20x factor.
+        try:
+            fs_hz = client.read_loop_fs_hz()
+            if fs_hz > 1.0:
+                self._analysis.set_loop_rate_hz(fs_hz)
+                self._tuning.set_loop_rate_hz(fs_hz)
+        except TunerError:
+            pass
+
         # Prime the analysis view with the initial spinbox values.
         self._tuning._notify_params_changed()
 

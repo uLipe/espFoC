@@ -150,6 +150,7 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
     case ESP_FOC_TUNER_PARAM_INT_LIM_Q16:     value = lim; break;
     case ESP_FOC_TUNER_PARAM_V_MAX_Q16:       value = axis->max_voltage; break;
     case ESP_FOC_TUNER_PARAM_I_FILTER_FC_Q16: value = axis->current_filter_fc_hz_q16; break;
+    case ESP_FOC_TUNER_PARAM_LOOP_FS_HZ_Q16:  value = axis->current_filter_fs_hz_q16; break;
     default:
         return ESP_FOC_ERR_INVALID_ARG;
     }

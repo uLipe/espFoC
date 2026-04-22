@@ -39,6 +39,7 @@ class ParamId(IntEnum):
     INT_LIM_Q16     = 0x0012
     V_MAX_Q16       = 0x0013
     I_FILTER_FC     = 0x0014
+    LOOP_FS_HZ      = 0x0015
     AXIS_STATE      = 0x0040
     AXIS_LAST_ERR   = 0x0041
     NVS_PRESENT     = 0x0042
@@ -248,6 +249,13 @@ class TunerClient:
     def read_current_filter_fc(self) -> float:
         """Cutoff (Hz) of the per-phase Butterworth in the isensor driver."""
         return self._read_q16(ParamId.I_FILTER_FC)
+
+    def read_loop_fs_hz(self) -> float:
+        """Sample rate (Hz) at which the current PI fires on the
+        firmware. Equals the PWM rate under ISR_HOT_PATH and
+        pwm_rate / decimation under the legacy task path. The host
+        uses this to discretise the analysis-tab plant correctly."""
+        return self._read_q16(ParamId.LOOP_FS_HZ)
 
     def write_current_filter_fc(self, fc_hz: float) -> None:
         """Re-design the per-phase biquad with the supplied cutoff (Hz).
