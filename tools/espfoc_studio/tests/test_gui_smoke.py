@@ -148,6 +148,58 @@ def test_generate_app_embeds_hardware_section():
         reader.stop()
 
 
+def test_build_worker_idf_path_helper(tmp_dir=None):
+    """is_valid_idf_path is a pure helper; verify it accepts a fake
+    minimal layout and rejects an empty / partial one."""
+    import tempfile
+    from espfoc_studio.gui.build_worker import is_valid_idf_path
+
+    assert not is_valid_idf_path("")
+    assert not is_valid_idf_path("/no/such/path/at/all")
+    with tempfile.TemporaryDirectory() as td:
+        # Empty directory: missing tools/idf.py + components/.
+        assert not is_valid_idf_path(td)
+        os.makedirs(os.path.join(td, "tools"))
+        os.makedirs(os.path.join(td, "components"))
+        # Components dir present but tools/idf.py still missing.
+        assert not is_valid_idf_path(td)
+        with open(os.path.join(td, "tools", "idf.py"), "w") as f:
+            f.write("# pretend\n")
+        assert is_valid_idf_path(td), "minimal IDF layout should pass"
+
+
+def test_generate_app_build_mode_toggle():
+    """Flipping the firmware-only toggle relabels the action button
+    and disables Output. Locks down the dispatch behaviour without
+    actually invoking idf.py (subprocess test would be flaky in CI)."""
+    from espfoc_studio.gui.generate_app_panel import GenerateAppPanel
+
+    host_t, fw_t = LoopbackTransport.pair()
+    fw = DemoFirmware(fw_t)
+    fw.start()
+    reader = LinkReader(host_t)
+    reader.start()
+    try:
+        client = TunerClient(reader)
+        app = QApplication.instance() or QApplication(sys.argv)
+        panel = GenerateAppPanel(client,
+                                 get_motor_params=lambda: (1.08, 0.0018, 150.0))
+        # Default mode = generate; button labelled accordingly.
+        assert panel._generate_btn.text() == "Generate"
+        assert panel._app_name.isEnabled()
+        # Flip to firmware-only.
+        panel._build_fw_box.setChecked(True)
+        assert panel._generate_btn.text() == "Build firmware"
+        assert not panel._app_name.isEnabled()
+        # Flip back.
+        panel._build_fw_box.setChecked(False)
+        assert panel._generate_btn.text() == "Generate"
+        assert panel._app_name.isEnabled()
+    finally:
+        fw.stop()
+        reader.stop()
+
+
 def test_scope_panel_roll_mode_x_axis_stays_bounded():
     """Live cursor must always sit at x = 0 (right edge) even after
     a long run — the displayed X values are 'seconds before now',
@@ -180,7 +232,9 @@ def main() -> int:
     tests = [test_mainwindow_demo_boots_polls_and_streams_scope,
              test_scope_panel_wallclock_and_autoset,
              test_scope_panel_roll_mode_x_axis_stays_bounded,
-             test_generate_app_embeds_hardware_section]
+             test_generate_app_embeds_hardware_section,
+             test_build_worker_idf_path_helper,
+             test_generate_app_build_mode_toggle]
     failed = 0
     for t in tests:
         try:
