@@ -91,9 +91,12 @@ class ScopePanel(QWidget):
         root = QHBoxLayout(self)
 
         # Left gutter with the channel toggles + Autoset button.
+        # Sized as min/max instead of fixed so the plot grabs all the
+        # horizontal slack first when the window grows, but the gutter
+        # never collapses below something readable.
         gutter = QFrame()
         gutter.setFrameShape(QFrame.NoFrame)
-        gutter.setFixedWidth(140)
+        gutter.setMinimumWidth(140)
         self._gutter_layout = QVBoxLayout(gutter)
         self._gutter_layout.setContentsMargins(4, 4, 4, 4)
         # "Autoset" lives at the top so it is always reachable even
@@ -111,7 +114,8 @@ class ScopePanel(QWidget):
         self._gutter_layout.addStretch(1)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFixedWidth(150)
+        scroll.setMinimumWidth(160)
+        scroll.setMaximumWidth(220)
         scroll.setWidget(gutter)
         root.addWidget(scroll)
 

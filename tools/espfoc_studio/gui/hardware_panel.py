@@ -140,7 +140,21 @@ class HardwarePanel(QWidget):
         super().__init__()
         self._cfg = initial or HardwareConfig()
 
-        root = QVBoxLayout(self)
+        # Scroll area wrapper so the form does not clip when embedded
+        # inside another panel (the new Generate App tab) or when the
+        # window is short — the form has a lot of rows.
+        from PySide6.QtWidgets import QScrollArea
+        from PySide6.QtCore import Qt as _Qt
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(_Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        outer.addWidget(scroll)
+        body = QWidget()
+        scroll.setWidget(body)
+        root = QVBoxLayout(body)
 
         # --- Target chip ---
         self._target_combo = QComboBox()

@@ -23,6 +23,40 @@ _BORDER = "#3a3b3f"
 _ERROR = "#ef5350"
 
 
+# Axis-state badge palette. Picked the dominant flag (override > running >
+# aligned > init > none) and rendered it as a single colored pill instead
+# of the old "+INITIALIZED -ALIGNED -RUNNING -TUNER_OVERRIDE" text. Keep
+# the foreground / background pair high-contrast on the dark theme.
+BADGE_STYLES = {
+    "OFFLINE":  ("OFFLINE",  "#0b0c0d", "#6c757d"),
+    "INIT":     ("INIT",     "#0b0c0d", "#ffb300"),
+    "ALIGNED":  ("ALIGNED",  "#0b0c0d", _ACCENT),
+    "RUNNING":  ("RUNNING",  "#0b0c0d", "#66bb6a"),
+    "OVERRIDE": ("OVERRIDE", "#ffffff", "#ab47bc"),
+}
+
+
+def make_badge_qss(state_key: str) -> tuple[str, str]:
+    """Returns (label, qss) for the axis state badge. Unknown keys
+    fall back to the OFFLINE style. Caller applies the qss to a
+    plain QLabel via setStyleSheet()."""
+    label, fg, bg = BADGE_STYLES.get(state_key, BADGE_STYLES["OFFLINE"])
+    qss = (
+        f"QLabel {{"
+        f" background-color: {bg};"
+        f" color: {fg};"
+        f" border-radius: 6px;"
+        f" padding: 4px 12px;"
+        f" font-weight: 600;"
+        f" font-size: 11px;"
+        f" letter-spacing: 1px;"
+        f" min-width: 78px;"
+        f" qproperty-alignment: 'AlignCenter';"
+        f"}}"
+    )
+    return label, qss
+
+
 def apply_dark_theme(app: QApplication) -> None:
     app.setStyle("Fusion")
 
@@ -72,6 +106,27 @@ def apply_dark_theme(app: QApplication) -> None:
         }}
         QLabel, QCheckBox, QRadioButton {{
             color: {_FG};
+        }}
+        /* Fusion's default indicator melts into the dark background.
+         * Force a visible square with a clear checked state. */
+        QCheckBox::indicator {{
+            width: 16px;
+            height: 16px;
+            border: 1px solid {_BORDER};
+            border-radius: 3px;
+            background-color: #2b2c30;
+        }}
+        QCheckBox::indicator:hover {{
+            border: 1px solid {_ACCENT};
+        }}
+        QCheckBox::indicator:checked {{
+            background-color: {_ACCENT};
+            border: 1px solid {_ACCENT};
+            image: none;
+        }}
+        QCheckBox::indicator:disabled {{
+            background-color: #1a1b1d;
+            border: 1px solid {_BORDER};
         }}
         QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox {{
             background-color: #2b2c30;

@@ -15,11 +15,14 @@ from PySide6.QtWidgets import (
     QLabel,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from ..protocol import AxisStateFlag, TunerClient, TunerError
+from .theme import make_badge_qss
 
 
 def _spin(minimum: float, maximum: float,
@@ -63,13 +66,32 @@ class TuningPanel(QWidget):
         self._last_bw = 150.0
         self._cal_present = False
 
-        root = QVBoxLayout(self)
+        # The whole panel sits inside a QScrollArea so a small window
+        # gets a vertical scroll bar instead of clipping content. Keeps
+        # every existing widget the operator already knows.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        outer.addWidget(scroll)
 
-        # --- Axis state badge ---
-        self._state_label = QLabel("axis: disconnected")
-        self._state_label.setAlignment(Qt.AlignLeft)
-        self._state_label.setStyleSheet("font-family: monospace;")
-        root.addWidget(self._state_label)
+        body = QWidget()
+        scroll.setWidget(body)
+        root = QVBoxLayout(body)
+
+        # --- Axis state badge (single colored pill, dominant flag) ---
+        state_row = QHBoxLayout()
+        state_row.addWidget(QLabel("Axis status:"))
+        self._state_label = QLabel("OFFLINE")
+        label, qss = make_badge_qss("OFFLINE")
+        self._state_label.setText(label)
+        self._state_label.setStyleSheet(qss)
+        self._state_label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        state_row.addWidget(self._state_label)
+        state_row.addStretch(1)
+        root.addLayout(state_row)
 
         # --- Live gains readout ---
         live_box = QGroupBox("Live gains")
@@ -235,7 +257,11 @@ class TuningPanel(QWidget):
         self._lim_label.setText(f"{lim:9.3f}")
         self._vmax_label.setText(f"{vmax:9.3f}")
         self._fc_label.setText(f"{fc:9.1f}")
-        self._state_label.setText(f"axis: {self._format_state(state)}")
+        # Single colored badge driven by the dominant flag.
+        badge_key = self._badge_key_for_state(state)
+        label, qss = make_badge_qss(badge_key)
+        self._state_label.setText(label)
+        self._state_label.setStyleSheet(qss)
         self._cal_present = present
         self._cal_label.setText("calibration: " +
                                 ("\u2713 present in NVS" if present
@@ -384,9 +410,17 @@ class TuningPanel(QWidget):
                                 self._kp_spin.value(), self._ki_spin.value())
 
     @staticmethod
-    def _format_state(s: AxisStateFlag) -> str:
-        pretty = []
-        for flag in (AxisStateFlag.INITIALIZED, AxisStateFlag.ALIGNED,
-                     AxisStateFlag.RUNNING, AxisStateFlag.TUNER_OVERRIDE):
-            pretty.append(f"{'+' if s & flag else '-'}{flag.name}")
-        return " ".join(pretty)
+    def _badge_key_for_state(s: AxisStateFlag) -> str:
+        """Pick the dominant flag and map it to a badge palette key.
+        Order matters: an aligned axis with override active is shown
+        as OVERRIDE, not RUNNING — that is the most actionable state
+        for the operator. Bits checked top-down."""
+        if s & AxisStateFlag.TUNER_OVERRIDE:
+            return "OVERRIDE"
+        if s & AxisStateFlag.RUNNING:
+            return "RUNNING"
+        if s & AxisStateFlag.ALIGNED:
+            return "ALIGNED"
+        if s & AxisStateFlag.INITIALIZED:
+            return "INIT"
+        return "OFFLINE"
