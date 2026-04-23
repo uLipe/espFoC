@@ -127,11 +127,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     vbus_pu = q16_to_float(axis->dc_link_voltage);
     axis->dc_link_to_normalized = q16_from_float((vbus_pu > 1e-9f) ? (1.0f / vbus_pu) : 0.0f);
 
-#ifdef CONFIG_ESP_FOC_USE_SINE_PWM
-    axis->max_voltage = q16_from_float(vbus_pu / 2.0f);
-#else
     axis->max_voltage = q16_from_float(vbus_pu / 1.7320508075688772f);
-#endif
 
     axis->inverter_driver->set_voltages(axis->inverter_driver, 0, 0, 0);
 

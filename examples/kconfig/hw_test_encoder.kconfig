@@ -1,0 +1,33 @@
+menu "test_encoder — hardware (SPI AS5048)"
+
+    config FOC_ENCODER_SDA_PIN
+        int "I2C SDA (if used; often unused in SPI test)"
+        range 0 54
+        default 8
+
+    config FOC_ENCODER_SCL_PIN
+        int "I2C SCL (if used)"
+        range 0 54
+        default 9
+
+    config FOC_ENCODER_MISO_PIN
+        int "SPI MISO"
+        range 0 54
+        default 4
+
+    config FOC_ENCODER_MOSI_PIN
+        int "SPI MOSI"
+        range 0 54
+        default 5
+
+    config FOC_ENCODER_SCK_PIN
+        int "SPI SCK"
+        range 0 54
+        default 6
+
+    config FOC_ENCODER_CS_PIN
+        int "SPI CS"
+        range 0 54
+        default 7
+
+endmenu

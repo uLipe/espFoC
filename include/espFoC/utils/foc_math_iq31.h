@@ -26,7 +26,7 @@
  * @file foc_math_iq31.h
  * @brief FOC math in fixed-point Q1.31 (IQ31): Clarke/Park transforms,
  *        normalize angle, limit voltage, apply bias, third harmonic.
- *        Mirrors the scope of foc_math.h. Depends on esp_foc_iq31.h.
+ *        Clarke/Park, normalize, limit_voltage in IQ1.31. Depends on esp_foc_iq31.h.
  */
 
 #pragma once

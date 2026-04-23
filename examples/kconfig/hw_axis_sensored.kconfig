@@ -1,0 +1,57 @@
+menu "Free-running FoC (axis_sensored) — hardware"
+
+    config FOC_PWM_U_PIN
+        int "GPIO: phase U (high side)"
+        range 0 54
+        default 5
+
+    config FOC_PWM_V_PIN
+        int "GPIO: phase V (high side)"
+        range 0 54
+        default 20
+
+    config FOC_PWM_W_PIN
+        int "GPIO: phase W (high side)"
+        range 0 54
+        default 7
+
+    config FOC_PWM_EN_PIN
+        int "Gate driver enable GPIO (set to -1 if not connected)"
+        range -1 54
+        default -1
+        help
+            Passed to the MCPWM inverter: -1 skips the enable output; 0+ uses that GPIO
+            (see FOC_PWM_EN_ACT_LOW for polarity). A negative return value in the
+            C API encodes active-low (see axis_sensored.c).
+
+    config FOC_PWM_EN_ACT_LOW
+        bool "Active-low enable (inverted)"
+        default n
+        depends on FOC_PWM_EN_PIN >= 0
+
+    config FOC_PWM_UL_PIN
+        int "GPIO: phase U (low side)"
+        range 0 54
+        default 6
+
+    config FOC_PWM_VL_PIN
+        int "GPIO: phase V (low side)"
+        range 0 54
+        default 21
+
+    config FOC_PWM_WL_PIN
+        int "GPIO: phase W (low side)"
+        range 0 54
+        default 8
+
+    config FOC_ENCODER_SDA_PIN
+        int "AS5600 I2C SDA"
+        range 0 54
+        default 17
+
+    config FOC_ENCODER_SCL_PIN
+        int "AS5600 I2C SCL"
+        range 0 54
+        default 18
+
+endmenu
