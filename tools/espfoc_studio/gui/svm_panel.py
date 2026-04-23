@@ -5,12 +5,14 @@ and shows:
 
 * three fixed phase axes (A/B/C at 0°/120°/240°) with a colored
   "phase projection" vector each — their length is the instantaneous
-  u_u / u_v / u_w, so you see the three components animate along
-  their axes as the electrical angle sweeps;
+  u_u / u_v / u_w (normalized for display), so you see the three
+  components along their axes as the electrical angle sweeps;
 * the resultant V_αβ vector (Clarke sum of the three phases) with a
-  fading trail so the rotation on the hexagon is visible at a glance;
-* the three-phase time-series underneath, colored identically to the
-  scope tab's channels 0/1/2.
+  fading trail; α and β are in **per-unit** relative to a running
+  scale so the view stays in [-1, 1] and phase rails stay inside the
+  unit hex;
+* the three-phase time-series underneath, physical units (V), matching
+  the scope tab's channels 0/1/2.
 
 Rendering is buffered on the reader side and flushed at 20 FPS so
 scope bursts after a current step do not stall the Qt loop.
@@ -18,6 +20,7 @@ scope bursts after a current step do not stall the Qt loop.
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from collections import deque
@@ -71,6 +74,7 @@ class SvmPanel(QWidget):
     AUTOSCALE_ALPHA = 0.04    # EWMA weight for hexagon radius
     RENDER_INTERVAL_MS = 50   # 20 FPS — smooth but lighter than the scope
     INBOX_CAP = 512           # bound the producer/consumer queue
+    PU_FLOOR = 1e-4          # min divisor for per-unit; keeps [-1,1] stable
 
     def __init__(self, reader: Optional[LinkReader] = None,
                  sample_period_s: float = 1e-3 * 4) -> None:
@@ -93,8 +97,9 @@ class SvmPanel(QWidget):
         self._uw_buf: Deque[float] = deque(maxlen=self.WAVEFORM_CAP)
         self._t0 = time.monotonic()
 
-        self._hex_radius = 1.0
+        self._pu_ref = 1.0
         self._last_ab: tuple[float, float] = (0.0, 0.0)
+        self._last_abc: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
         root = QVBoxLayout(self)
 
@@ -102,15 +107,15 @@ class SvmPanel(QWidget):
         top_row = QHBoxLayout()
         root.addLayout(top_row, 2)
 
-        self._plot = pg.PlotWidget(title="SVPWM voltage vector")
+        self._plot = pg.PlotWidget(title="SVPWM voltage vector (per unit)")
         self._plot.setAspectLocked(True)
-        self._plot.setLabel('left', "β", units='V')
-        self._plot.setLabel('bottom', "α", units='V')
+        self._plot.setLabel('left', "β (pu)", units="")
+        self._plot.setLabel('bottom', "α (pu)", units="")
         self._plot.showGrid(x=True, y=True, alpha=0.15)
         self._plot.setMinimumHeight(380)
         self._hex_crosshair = attach_crosshair(
             self._plot,
-            fmt=lambda x, y: f"α = {x:+.3f}\nβ = {y:+.3f}")
+            fmt=lambda x, y: f"α = {x:+.3f} pu\nβ = {y:+.3f} pu")
 
         self._hex_curve = self._plot.plot(
             pen=pg.mkPen(QColor(_HEX_COLOR), width=2))
@@ -158,24 +163,26 @@ class SvmPanel(QWidget):
             brush=pg.mkBrush(QColor(_ARROW_COLOR)))
         self._plot.addItem(self._head_scatter)
         self._redraw_hexagon()
+        self._apply_hex_viewport()
         top_row.addWidget(self._plot, 1)
 
         side = QVBoxLayout()
         side.setContentsMargins(6, 6, 6, 6)
         side.setSpacing(4)
-        self._alpha_label = QLabel("α = 0.000 V")
-        self._beta_label = QLabel("β = 0.000 V")
-        self._mag_label = QLabel("|V| = 0.000 V")
+        self._alpha_label = QLabel("α = 0.000 pu")
+        self._beta_label = QLabel("β = 0.000 pu")
+        self._mag_label = QLabel("|V| = 0.000 pu")
         self._sector_label = QLabel("sector: -")
+        self._scale_label = QLabel("1 pu = 1.00 (arb.)")
         for lbl in (self._alpha_label, self._beta_label,
-                    self._mag_label, self._sector_label):
+                    self._mag_label, self._sector_label, self._scale_label):
             lbl.setStyleSheet("font-family: monospace; color: %s;"
                               % _LABEL_COLOR)
             side.addWidget(lbl)
         autoset_btn = QPushButton("Autoset")
         autoset_btn.setToolTip(
-            "Re-center the hexagon and the waveform: clear trail, "
-            "rebase time to now and re-enable axis autorange.")
+            "Clear the trail, reset the per-unit scale, lock the SVM view "
+            "to [-1,1], rebase the waveform, and re-enable voltage autorange.")
         autoset_btn.clicked.connect(self.autoset)
         side.addWidget(autoset_btn)
         side.addStretch(1)
@@ -228,31 +235,25 @@ class SvmPanel(QWidget):
             self._reader = None
 
     def autoset(self) -> None:
-        """Drop trail / waveform history, rebase time to 'now' and
-        snap both plots back to their canonical viewports. Hex radius
-        reverts to its initial guess so the auto-scale EWMA can
-        re-converge cleanly."""
+        """Drop trail / waveform history, rebase time to 'now',
+        reset the per-unit scale, and re-lock the hex to [-1,1]."""
         with self._inbox_lock:
             self._inbox.clear()
         self._t0 = time.monotonic()
         for buf in (self._alpha_buf, self._beta_buf,
                     self._time_buf, self._uu_buf, self._uv_buf, self._uw_buf):
             buf.clear()
-        self._hex_radius = 1.0
+        self._pu_ref = 1.0
         self._last_ab = (0.0, 0.0)
+        self._last_abc = (0.0, 0.0, 0.0)
         self._trail_curve.setData([], [])
         self._arrow_curve.setData([0.0, 0.0], [0.0, 0.0])
         self._head_scatter.setData(pos=np.array([[0.0, 0.0]]))
         for curve in (self._uu_curve, self._uv_curve, self._uw_curve):
             curve.setData([], [])
-        # Waveform plot returns to the rolling [-WINDOW, 0] window;
-        # hexagon plot returns to autorange (the EWMA radius drives
-        # the layer below, but pyqtgraph's view also autoranges off
-        # the live data).
         self._wave_plot.setXRange(-self.WAVEFORM_WINDOW_S, 0.0, padding=0)
         self._wave_plot.enableAutoRange(axis='y', enable=True)
-        self._plot.enableAutoRange(axis='x', enable=True)
-        self._plot.enableAutoRange(axis='y', enable=True)
+        self._apply_hex_viewport()
 
     # --- Frame path -------------------------------------------------------
 
@@ -280,6 +281,7 @@ class SvmPanel(QWidget):
                 continue
             u_u, u_v, u_w = vals[0], vals[1], vals[2]
             a, b = _clarke(u_u, u_v, u_w)
+            self._last_abc = (u_u, u_v, u_w)
             self._alpha_buf.append(a)
             self._beta_buf.append(b)
             self._time_buf.append(t_mono - self._t0)
@@ -296,39 +298,35 @@ class SvmPanel(QWidget):
             self._uv_buf.popleft()
             self._uw_buf.popleft()
 
-        # Auto-scale the hexagon against the most recent magnitude.
         a, b = self._last_ab
-        mag = (a * a + b * b) ** 0.5
-        target = max(mag * 1.2, 1e-6)
-        self._hex_radius = ((1.0 - self.AUTOSCALE_ALPHA) * self._hex_radius
-                            + self.AUTOSCALE_ALPHA * target)
-        if target > self._hex_radius:
-            self._hex_radius = target
-        self._redraw_hexagon()
+        uu, uv, uw = self._last_abc
+        mag = math.hypot(a, b)
+        frame_peak = max(abs(uu), abs(uv), abs(uw), mag, self.PU_FLOOR)
+        self._pu_ref = ((1.0 - self.AUTOSCALE_ALPHA) * self._pu_ref
+                        + self.AUTOSCALE_ALPHA * frame_peak)
+        if frame_peak > self._pu_ref:
+            self._pu_ref = max(frame_peak, self.PU_FLOOR)
+        inv = 1.0 / self._pu_ref
+        a_n, b_n = a * inv, b * inv
+        uu_n, uv_n, uw_n = uu * inv, uv * inv, uw * inv
 
-        # Phase projection arrows (u_u along A axis, u_v along B, u_w
-        # along C). The three arrow tips sum (scaled by 2/3) to the
-        # resultant V — a live Clarke transform in picture form.
-        if self._uu_buf and self._uv_buf and self._uw_buf:
-            phases = (self._uu_buf[-1],
-                      self._uv_buf[-1],
-                      self._uw_buf[-1])
-            tip_positions = []
-            for curve, (dx, dy), mag in zip(self._phase_vec_curves,
-                                            self._PHASE_DIRS, phases):
-                tip = (mag * dx, mag * dy)
-                curve.setData([0.0, tip[0]], [0.0, tip[1]])
-                tip_positions.append(tip)
-            self._phase_vec_tips.setData(pos=np.array(tip_positions))
+        for curve, (dx, dy), p in zip(self._phase_vec_curves,
+                                        self._PHASE_DIRS, (uu_n, uv_n, uw_n)):
+            tip = (p * dx, p * dy)
+            curve.setData([0.0, tip[0]], [0.0, tip[1]])
+        self._phase_vec_tips.setData(
+            pos=np.array([
+                (pn * d[0], pn * d[1])
+                for d, pn in zip(self._PHASE_DIRS, (uu_n, uv_n, uw_n))
+            ]))
 
-        # Trail + resultant arrow (drawn on top).
         t_a = np.fromiter(self._alpha_buf, dtype=float,
                           count=len(self._alpha_buf))
         t_b = np.fromiter(self._beta_buf, dtype=float,
                           count=len(self._beta_buf))
-        self._trail_curve.setData(t_a, t_b)
-        self._arrow_curve.setData([0.0, a], [0.0, b])
-        self._head_scatter.setData(pos=np.array([[a, b]]))
+        self._trail_curve.setData(t_a * inv, t_b * inv)
+        self._arrow_curve.setData([0.0, a_n], [0.0, b_n])
+        self._head_scatter.setData(pos=np.array([[a_n, b_n]]))
 
         # Three-phase waveform: roll-mode display, same recipe as
         # ScopePanel — sample times become "seconds before now" so the
@@ -346,15 +344,15 @@ class SvmPanel(QWidget):
                                np.fromiter(self._uw_buf, dtype=float,
                                            count=len(self._uw_buf)))
 
-        # Readout labels.
-        self._alpha_label.setText(f"α = {a:+8.3f} V")
-        self._beta_label.setText(f"β = {b:+8.3f} V")
-        self._mag_label.setText(f"|V| = {mag:8.3f} V")
-        if mag < 1e-6:
+        mag_pu = mag * inv
+        self._alpha_label.setText(f"α = {a_n:+8.3f} pu")
+        self._beta_label.setText(f"β = {b_n:+8.3f} pu")
+        self._mag_label.setText(f"|V| = {mag_pu:8.3f} pu")
+        self._scale_label.setText(f"1 pu = {self._pu_ref:8.4f}  (ch0–2 units)")
+        if mag < 1e-20:
             self._sector_label.setText("sector: -")
         else:
-            import math
-            ang = math.atan2(b, a)
+            ang = math.atan2(b_n, a_n)
             if ang < 0:
                 ang += 2.0 * math.pi
             sec = int(ang // (math.pi / 3.0)) + 1
@@ -373,8 +371,15 @@ class SvmPanel(QWidget):
         (-0.5, -0.86602540378),      # cos(240°), sin(240°)
     )
 
+    def _apply_hex_viewport(self) -> None:
+        pad = 0.02
+        self._plot.setXRange(-1, 1, padding=pad)
+        self._plot.setYRange(-1, 1, padding=pad)
+        self._plot.enableAutoRange(axis="x", enable=False)
+        self._plot.enableAutoRange(axis="y", enable=False)
+
     def _redraw_hexagon(self) -> None:
-        R = self._hex_radius
+        R = 1.0
         angles = np.arange(7) * (np.pi / 3.0)  # close the polygon
         hx = R * np.cos(angles)
         hy = R * np.sin(angles)
