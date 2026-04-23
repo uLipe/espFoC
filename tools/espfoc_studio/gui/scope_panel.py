@@ -158,6 +158,12 @@ class ScopePanel(QWidget):
             self._sample_dt = dt_s
 
     def attach_reader(self, reader: LinkReader) -> None:
+        if self._reader is not None and self._reader is not reader:
+            try:
+                self._reader.unregister_scope_callback(
+                    self._on_frame_reader_thread)
+            except ValueError:
+                pass
         self._reader = reader
         reader.register_scope_callback(self._on_frame_reader_thread)
 

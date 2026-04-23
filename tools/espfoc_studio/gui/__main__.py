@@ -81,13 +81,21 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.demo:
         client, shutdown = _setup_demo()
         title = "espFoC TunerStudio — DEMO (simulated firmware)"
+        link_mode = "demo"
+        link_descr = "in-process loopback (DemoFirmware)"
+        serial_config = None
     else:
         client, shutdown = _setup_serial(args.port, args.baud, args.axis)
         title = f"espFoC TunerStudio — {args.port} @ {args.baud}"
+        link_mode = "hw"
+        link_descr = f"{args.port} @ {args.baud}"
+        serial_config = (args.port, args.baud, args.axis)
 
     app = QApplication.instance() or QApplication(sys.argv)
     apply_dark_theme(app)
-    window = MainWindow(client, title=title)
+    window = MainWindow(
+        client, title=title, link_mode=link_mode, link_descr=link_descr,
+        serial_config=serial_config)
     window.show()
 
     # Allow Ctrl-C in the terminal to close the window.

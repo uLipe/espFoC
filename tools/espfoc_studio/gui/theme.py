@@ -33,6 +33,10 @@ BADGE_STYLES = {
     "ALIGNED":  ("ALIGNED",  "#0b0c0d", _ACCENT),
     "RUNNING":  ("RUNNING",  "#0b0c0d", "#66bb6a"),
     "OVERRIDE": ("OVERRIDE", "#ffffff", "#ab47bc"),
+    "LINK_DEMO":   ("DEMO",      "#0b0c0d", "#ab47bc"),
+    "LINK_OK":     ("CONNECTED", "#0b0c0d", "#66bb6a"),
+    "LINK_WAIT":   ("CONNECTING", "#0b0c0d", "#ffb300"),
+    "LINK_DOWN":   ("NO LINK",  "#ffffff", _ERROR),
 }
 
 

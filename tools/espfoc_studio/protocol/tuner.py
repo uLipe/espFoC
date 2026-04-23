@@ -152,6 +152,13 @@ class TunerClient:
     def reader(self) -> LinkReader:
         return self._reader
 
+    def replace_reader(self, new_reader: LinkReader) -> None:
+        """Swap the active LinkReader after a transport failure / reconnect
+        (same TunerClient instance; axis and sequence counter stay put)."""
+        if new_reader is None:  # pragma: no cover - guard for callers
+            raise ValueError("replace_reader: reader is None")
+        self._reader = new_reader
+
     def close(self) -> None:
         if self._owns_reader:
             self._reader.stop()

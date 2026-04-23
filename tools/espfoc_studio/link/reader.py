@@ -45,6 +45,12 @@ class LinkReader:
 
     # --- Lifecycle -------------------------------------------------------
 
+    @property
+    def is_running(self) -> bool:
+        """True while the background reader thread is active."""
+        t = self._thread
+        return t is not None and t.is_alive()
+
     def start(self) -> None:
         if self._thread is not None:
             return

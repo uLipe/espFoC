@@ -42,7 +42,9 @@ def test_mainwindow_demo_boots_polls_and_streams_scope():
         client = TunerClient(reader)
         app = QApplication.instance() or QApplication(sys.argv)
         apply_dark_theme(app)
-        w = MainWindow(client, title="espFoC smoke")
+        w = MainWindow(
+            client, title="espFoC smoke", link_mode="demo",
+            link_descr="test loopback", serial_config=None)
         w.show()
         # Engage the override and push a non-zero iq so the demo plant
         # actually modulates — otherwise the SVM hexagon just sees zero

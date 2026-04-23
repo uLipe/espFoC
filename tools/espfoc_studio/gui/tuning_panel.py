@@ -60,6 +60,7 @@ class TuningPanel(QWidget):
                                                        float, float], None]] = None) -> None:
         super().__init__()
         self._client = client
+        self.last_poll_ok: bool = True
         self._on_params_changed = on_params_changed
         self._last_motor_r = 1.08
         self._last_motor_l = 0.0018
@@ -216,10 +217,7 @@ class TuningPanel(QWidget):
         self._log_view.setFont(f)
         root.addWidget(self._log_view)
         self._logFromReader.connect(self._append_log)
-        try:
-            self._client.reader.register_log_callback(self._on_log_reader)
-        except Exception:
-            pass
+        self.rebind_log_reader()
 
         # --- Status / errors bar ---
         self._status = QLabel("")
@@ -238,6 +236,18 @@ class TuningPanel(QWidget):
             self._loop_fs_hz = fs_hz
             self._loop_fs_label.setText(f"{fs_hz:9.1f}")
 
+    def rebind_log_reader(self) -> None:
+        try:
+            self._client.reader.register_log_callback(self._on_log_reader)
+        except Exception:
+            pass
+
+    def detach_log_reader(self) -> None:
+        try:
+            self._client.reader.register_log_callback(None)
+        except Exception:
+            pass
+
     def poll(self) -> None:
         """Refresh the live readout. Called periodically by MainWindow."""
         try:
@@ -250,7 +260,9 @@ class TuningPanel(QWidget):
             present = self._client.is_calibration_present()
         except TunerError as e:
             self._status.setText(str(e))
+            self.last_poll_ok = False
             return
+        self.last_poll_ok = True
         self._status.setText("")
         self._kp_label.setText(f"{kp:9.4f}")
         self._ki_label.setText(f"{ki:9.2f}")

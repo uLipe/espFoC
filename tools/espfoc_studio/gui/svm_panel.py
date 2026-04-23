@@ -216,6 +216,8 @@ class SvmPanel(QWidget):
     # --- Subscription helpers --------------------------------------------
 
     def attach_reader(self, reader: LinkReader) -> None:
+        if self._reader is not None and self._reader is not reader:
+            self.detach()
         self._reader = reader
         reader.register_scope_callback(self._on_frame_reader_thread)
 
