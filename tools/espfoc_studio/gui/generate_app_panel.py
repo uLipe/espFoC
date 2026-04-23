@@ -114,9 +114,12 @@ class GenerateAppPanel(QWidget):
         self._build_fw_box = QCheckBox(
             "Skip code generation, build tuner_studio_target firmware")
         self._build_fw_box.setToolTip(
-            "When checked, ignores App name / Output and runs `idf.py "
-            "build` on examples/tuner_studio_target with the chip "
-            "selected in Hardware. The action button below relabels.")
+            "When checked, runs `idf.py set-target` and `idf.py build` on "
+            "examples/tuner_studio_target.  Removes prior sdkconfig/build, "
+            "re-materializes from sdkconfig.defaults* for the chip, then "
+            "merges the Hardware form (pin map, motor profile, shunt) into "
+            "the project sdkconfig before compiling. App name / Output are "
+            "ignored. The action button relabels.")
         self._build_fw_box.toggled.connect(self._on_build_mode_toggled)
         bform.addRow(self._build_fw_box)
 
@@ -244,6 +247,8 @@ class GenerateAppPanel(QWidget):
             return
         chip = self._hw.get_config().target
         self._append(f">>> building tuner_studio_target for {chip}")
+        self._append("    (clean sdkconfig+build, set-target, merge Hardware "
+                      "-> sdkconfig, then build)")
         self._append(f"    IDF_PATH = {idf_path}")
         self._append(f"    target dir = {_TUNER_TARGET_DIR}")
         self._start_build_worker(idf_path, _TUNER_TARGET_DIR, chip)
@@ -255,8 +260,9 @@ class GenerateAppPanel(QWidget):
         self._generate_btn.setEnabled(False)
 
         self._build_thread = QThread(self)
-        self._build_worker = BuildWorker(idf_path, target_dir, chip,
-                                         _TUNER_TARGET_BIN)
+        self._build_worker = BuildWorker(
+            idf_path, target_dir, chip, _TUNER_TARGET_BIN,
+            hardware=self._hw.get_config())
         self._build_worker.moveToThread(self._build_thread)
         self._build_worker.line.connect(self._append)
         self._build_worker.finished.connect(self._on_build_finished)
