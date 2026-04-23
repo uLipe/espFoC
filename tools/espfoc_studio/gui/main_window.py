@@ -119,7 +119,8 @@ class MainWindow(QMainWindow):
         self._reset_btn = QPushButton("RESET BOARD")
         self._reset_btn.setCursor(Qt.PointingHandCursor)
         self._reset_btn.setStyleSheet(make_reset_board_button_qss())
-        self._reset_btn.setToolTip("Reinicia a placa (esp_restart). Emergência.")
+        self._reset_btn.setToolTip(
+            "Restart the target (esp_restart). Emergency use only.")
         self._reset_btn.clicked.connect(self._on_reset_board_clicked)
         if link_mode == "demo":
             self._reset_btn.setEnabled(False)
@@ -165,8 +166,8 @@ class MainWindow(QMainWindow):
 
     def _on_reset_board_clicked(self) -> None:
         r = QMessageBox.question(
-            self, "Reiniciar a placa",
-            "Reiniciar a placa agora? A ligação USB pode cair momentaneamente.",
+            self, "Reset board",
+            "Restart the board now? The USB link may drop briefly.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if r != QMessageBox.Yes:
@@ -174,7 +175,7 @@ class MainWindow(QMainWindow):
         try:
             self._client.reset_board()
         except TunerError as e:
-            QMessageBox.warning(self, "Reinício", str(e))
+            QMessageBox.warning(self, "Reset failed", str(e))
 
     def _set_link_badge(self, key: str) -> None:
         text, qss = make_badge_qss(key)
