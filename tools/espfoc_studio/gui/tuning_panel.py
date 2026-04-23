@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..protocol import AxisStateFlag, TunerClient, TunerError
+from .alignment_progress import AlignmentProgressDialog
 from .theme import make_badge_qss
 
 
@@ -89,6 +90,7 @@ class TuningPanel(QWidget):
         self._last_bw = 150.0
         self._cal_present = False
         self._align_thread: Optional[_AlignAxisThread] = None
+        self._align_progress: Optional[AlignmentProgressDialog] = None
 
         # The whole panel sits inside a QScrollArea so a small window
         # gets a vertical scroll bar instead of clipping content. Keeps
@@ -392,7 +394,12 @@ class TuningPanel(QWidget):
             return
         self._append_log("> alignment requested")
         self._align_btn.setEnabled(False)
+        self._set_axis_badge_key("ALIGNING")
         self.long_operation.emit(True)
+        par = self.window()
+        parent_widget = par if isinstance(par, QWidget) else self
+        self._align_progress = AlignmentProgressDialog(parent_widget)
+        self._align_progress.show()
         self._align_thread = _AlignAxisThread(self._client, self)
         self._align_thread.success.connect(
             self._on_align_succeeded, Qt.QueuedConnection)
@@ -409,6 +416,9 @@ class TuningPanel(QWidget):
         self._status.setText(err)
 
     def _on_align_thread_finished(self) -> None:
+        if self._align_progress is not None:
+            self._align_progress.close()
+            self._align_progress = None
         self._align_btn.setEnabled(True)
         self.long_operation.emit(False)
         self._align_thread = None
@@ -416,6 +426,11 @@ class TuningPanel(QWidget):
             self.poll()
         except Exception:
             pass
+
+    def _set_axis_badge_key(self, key: str) -> None:
+        label, qss = make_badge_qss(key)
+        self._state_label.setText(label)
+        self._state_label.setStyleSheet(qss)
 
     def _on_persist(self) -> None:
         try:
@@ -470,7 +485,9 @@ class TuningPanel(QWidget):
         """Pick the dominant flag and map it to a badge palette key.
         Order matters: an aligned axis with override active is shown
         as OVERRIDE, not RUNNING — that is the most actionable state
-        for the operator. Bits checked top-down."""
+        for the operator. Bits checked top-down.
+        (ALIGNING is a GUI-only key set only during a host-triggered
+        align; it is not in this bitmask.)"""
         if s & AxisStateFlag.TUNER_OVERRIDE:
             return "OVERRIDE"
         if s & AxisStateFlag.RUNNING:

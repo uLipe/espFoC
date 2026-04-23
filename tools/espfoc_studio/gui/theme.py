@@ -30,6 +30,7 @@ _ERROR = "#ef5350"
 BADGE_STYLES = {
     "OFFLINE":  ("OFFLINE",  "#0b0c0d", "#6c757d"),
     "INIT":     ("INIT",     "#0b0c0d", "#ffb300"),
+    "ALIGNING": ("ALIGNING", "#0b0c0d", "#ff9800"),
     "ALIGNED":  ("ALIGNED",  "#0b0c0d", _ACCENT),
     "RUNNING":  ("RUNNING",  "#0b0c0d", "#66bb6a"),
     "OVERRIDE": ("OVERRIDE", "#ffffff", "#ab47bc"),
