@@ -93,9 +93,10 @@ void esp_foc_tuner_send_callback(const uint8_t *buf, size_t len)
         return;
     }
     tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, buf, len);
-    /* Short timeout: we never block the reactor for long; if the host is
-     * slow to drain its endpoint we drop newer bytes rather than stall. */
-    (void)tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(20));
+    /* Non-blocking flush: schedules TX without waiting for the host. A
+     * short blocking timeout caused esp_tinyusb to log "Flush failed" when
+     * the IN pipe could not empty within 20ms under bursty load. */
+    (void)tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, 0);
 }
 
 #if defined(CONFIG_ESP_FOC_SCOPE)
@@ -127,7 +128,7 @@ void esp_foc_send_buffer_callback(const uint8_t *buffer, int size)
         return;
     }
     tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, frame, frame_len);
-    (void)tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(20));
+    (void)tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, 0);
 }
 #endif
 
