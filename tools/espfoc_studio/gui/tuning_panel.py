@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -47,13 +47,35 @@ def _spin(minimum: float, maximum: float,
     return box
 
 
+class _AlignAxisThread(QThread):
+    """Runs firmware align off the Qt GUI thread; align can block for
+    many seconds and must not stall repaints, timers, or the scope view."""
+
+    success = Signal()
+    failed = Signal(str)
+
+    def __init__(self, client: TunerClient, parent=None) -> None:
+        super().__init__(parent)
+        self._client = client
+
+    def run(self) -> None:  # noqa: N802
+        try:
+            self._client.align_axis()
+        except TunerError as e:
+            self.failed.emit(str(e))
+        else:
+            self.success.emit()
+
+
 class TuningPanel(QWidget):
     """Left-hand side of the main window: controls + live readout.
 
-    All slots reach out to a TunerClient directly. We keep every
-    round-trip short so the UI does not feel janky even on real serial."""
+    Most slots use short TunerClient round-trips. Long executables
+    (align) run in a QThread; MainWindow pauses the poll timer to keep
+    the bus usage serialized."""
 
     _logFromReader = Signal(str)
+    long_operation = Signal(bool)
 
     def __init__(self, client: TunerClient,
                  on_params_changed: Optional[Callable[[float, float, float,
@@ -66,6 +88,7 @@ class TuningPanel(QWidget):
         self._last_motor_l = 0.0018
         self._last_bw = 150.0
         self._cal_present = False
+        self._align_thread: Optional[_AlignAxisThread] = None
 
         # The whole panel sits inside a QScrollArea so a small window
         # gets a vertical scroll bar instead of clipping content. Keeps
@@ -191,9 +214,9 @@ class TuningPanel(QWidget):
         # --- Alignment + calibration ---
         align = QGroupBox("Alignment & calibration")
         align_layout = QVBoxLayout(align)
-        btn_align = QPushButton("Align axis")
-        btn_align.clicked.connect(self._on_align)
-        align_layout.addWidget(btn_align)
+        self._align_btn = QPushButton("Align axis")
+        self._align_btn.clicked.connect(self._on_align)
+        align_layout.addWidget(self._align_btn)
         self._cal_label = QLabel("calibration: -")
         self._cal_label.setStyleSheet("font-family: monospace; color: #9aa0a6;")
         align_layout.addWidget(self._cal_label)
@@ -365,13 +388,34 @@ class TuningPanel(QWidget):
             self._status.setText(str(e))
 
     def _on_align(self) -> None:
-        self._append_log("> alignment requested")
-        try:
-            self._client.align_axis()
-        except TunerError as e:
-            self._status.setText(str(e))
+        if self._align_thread is not None and self._align_thread.isRunning():
             return
+        self._append_log("> alignment requested")
+        self._align_btn.setEnabled(False)
+        self.long_operation.emit(True)
+        self._align_thread = _AlignAxisThread(self._client, self)
+        self._align_thread.success.connect(
+            self._on_align_succeeded, Qt.QueuedConnection)
+        self._align_thread.failed.connect(
+            self._on_align_failed, Qt.QueuedConnection)
+        self._align_thread.finished.connect(
+            self._on_align_thread_finished, Qt.QueuedConnection)
+        self._align_thread.start()
+
+    def _on_align_succeeded(self) -> None:
         self._status.setText("")
+
+    def _on_align_failed(self, err: str) -> None:
+        self._status.setText(err)
+
+    def _on_align_thread_finished(self) -> None:
+        self._align_btn.setEnabled(True)
+        self.long_operation.emit(False)
+        self._align_thread = None
+        try:
+            self.poll()
+        except Exception:
+            pass
 
     def _on_persist(self) -> None:
         try:

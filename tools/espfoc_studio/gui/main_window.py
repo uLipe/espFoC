@@ -75,6 +75,8 @@ class MainWindow(QMainWindow):
 
         self._tuning = TuningPanel(
             self._client, on_params_changed=self._on_params)
+        self._tuning.long_operation.connect(
+            self._on_tuning_long_operation)
         splitter.addWidget(self._tuning)
 
         tabs = QTabWidget()
@@ -213,6 +215,14 @@ class MainWindow(QMainWindow):
         if self._reconnect_serial():
             return True
         return False
+
+    def _on_tuning_long_operation(self, busy: bool) -> None:
+        """Stop live tuner polls while a worker thread uses TunerClient;
+        the GUI event loop and scope timer keep running."""
+        if busy:
+            self._timer.stop()
+        else:
+            self._timer.start()
 
     def _poll(self) -> None:
         if (self._serial_config is not None
