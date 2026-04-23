@@ -51,6 +51,9 @@ class ParamId(IntEnum):
     V_MAX_Q16       = 0x0013
     I_FILTER_FC     = 0x0014
     LOOP_FS_HZ      = 0x0015
+    MOTOR_R_OHM     = 0x0016
+    MOTOR_L_H       = 0x0017
+    MOTOR_BW_HZ     = 0x0018
     AXIS_STATE      = 0x0040
     AXIS_LAST_ERR   = 0x0041
     NVS_PRESENT     = 0x0042
@@ -279,6 +282,18 @@ class TunerClient:
         pwm_rate / decimation under the legacy task path. The host
         uses this to discretise the analysis-tab plant correctly."""
         return self._read_q16(ParamId.LOOP_FS_HZ)
+
+    def read_motor_r_ohm(self) -> float:
+        """Last R [Ω] from NVS shadow; 0 if not stored on device."""
+        return self._read_q16(ParamId.MOTOR_R_OHM)
+
+    def read_motor_l_h(self) -> float:
+        """Last L [H] from NVS shadow; 0 if not stored."""
+        return self._read_q16(ParamId.MOTOR_L_H)
+
+    def read_motor_bw_hz(self) -> float:
+        """Last current-loop bandwidth [Hz] from NVS; 0 if not stored."""
+        return self._read_q16(ParamId.MOTOR_BW_HZ)
 
     def write_current_filter_fc(self, fc_hz: float) -> None:
         """Re-design the per-phase biquad with the supplied cutoff (Hz).

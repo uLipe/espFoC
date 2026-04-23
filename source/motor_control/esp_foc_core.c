@@ -23,6 +23,8 @@
  */
 
 #include <math.h>
+#include <string.h>
+#include <stdbool.h>
 #include "esp_log.h"
 #include "espFoC/esp_foc.h"
 #include "espFoC/esp_foc_calibration.h"
@@ -122,6 +124,13 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->inverter_driver = inverter;
     axis->rotor_sensor_driver = rotor;
     axis->isensor_driver = isensor;
+    axis->nvs_axis_id = (uint8_t)settings.motor_unit;
+    if (axis->nvs_axis_id >= ESP_FOC_CALIBRATION_MAX_AXES) {
+        axis->nvs_axis_id = 0;
+    }
+    axis->nvs_motor_r_ohm = 0;
+    axis->nvs_motor_l_h = 0;
+    axis->nvs_bandwidth_hz = 0;
 
     axis->dc_link_voltage = axis->inverter_driver->get_dc_link_voltage(axis->inverter_driver);
     vbus_pu = q16_to_float(axis->dc_link_voltage);
@@ -183,6 +192,9 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
      * the same motor profile, override the autogen seed gains. NVS
      * load is a cold path; failure (no entry, profile mismatch, NVS
      * empty) just skips the overlay silently. */
+    axis->natural_direction =
+        (settings.natural_direction == ESP_FOC_MOTOR_NATURAL_DIRECTION_CW) ? Q16_ONE
+                                                                         : Q16_MINUS_ONE;
     {
         esp_foc_calibration_data_t cal;
         if (esp_foc_calibration_load((uint8_t)settings.motor_unit, &cal)
@@ -195,6 +207,25 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
             }
             if (cal.current_filter_fc_hz > 0) {
                 current_filter_fc_hz = q16_to_float(cal.current_filter_fc_hz);
+            }
+            axis->nvs_motor_r_ohm = cal.motor_r_ohm;
+            axis->nvs_motor_l_h = cal.motor_l_h;
+            axis->nvs_bandwidth_hz = cal.bandwidth_hz;
+            {
+                uint8_t aflags;
+                uint16_t enc0;
+                q16_t nat_d;
+                esp_foc_calibration_get_align(&cal, &aflags, &enc0, &nat_d);
+                if ((aflags & ESP_FOC_CAL_ALIGN_FLAG_DIR) != 0 &&
+                    (nat_d == Q16_ONE || nat_d == Q16_MINUS_ONE)) {
+                    axis->natural_direction = nat_d;
+                }
+                if ((aflags & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) != 0 &&
+                    axis->rotor_sensor_driver->set_zero_offset_raw_12b
+                        != NULL) {
+                    axis->rotor_sensor_driver->set_zero_offset_raw_12b(
+                        axis->rotor_sensor_driver, enc0);
+                }
             }
             ESP_LOGI(tag,
                      "axis %d: NVS calibration overlay applied "
@@ -243,10 +274,9 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         (float)CONFIG_ESP_FOC_VELOCITY_FILTER_CUTOFF_HZ,
         loop_fs_hz);
 
-    /* settings.natural_direction is a hint; esp_foc_align_axis() probes
-     * the rotor and overrides this once the motor is energised. */
-    axis->natural_direction = (settings.natural_direction == ESP_FOC_MOTOR_NATURAL_DIRECTION_CW)
-                              ? Q16_ONE : Q16_MINUS_ONE;
+    /* natural_direction: defaults above; NVS may have overridden;
+     * esp_foc_align_axis() probes and overrides unless NVS has a
+     * stored direction bit. */
 
     axis->high_speed_loop_cb = do_current_mode_sensored_high_speed_loop;
     axis->low_speed_loop_cb = do_current_mode_sensored_low_speed_loop;
@@ -263,10 +293,72 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
  * enough that a stuck rotor will obviously fail to clear the bar. */
 #define ESP_FOC_DIR_PROBE_MIN_COUNTS 50
 
+#if defined(CONFIG_ESP_FOC_CALIBRATION_NVS)
+static void apply_stored_align_hints(esp_foc_axis_t *axis, bool *skip_dir_probe)
+{
+    esp_foc_calibration_data_t cal;
+
+    *skip_dir_probe = false;
+    if (esp_foc_calibration_load(axis->nvs_axis_id, &cal) != ESP_FOC_OK) {
+        return;
+    }
+    uint8_t aflags;
+    uint16_t enc0;
+    q16_t nat_d;
+    esp_foc_calibration_get_align(&cal, &aflags, &enc0, &nat_d);
+    if ((aflags & ESP_FOC_CAL_ALIGN_FLAG_DIR) != 0u &&
+        (nat_d == Q16_ONE || nat_d == Q16_MINUS_ONE)) {
+        axis->natural_direction = nat_d;
+        *skip_dir_probe = true;
+    }
+    if ((aflags & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) != 0u &&
+        axis->rotor_sensor_driver->set_zero_offset_raw_12b != NULL) {
+        axis->rotor_sensor_driver->set_zero_offset_raw_12b(
+            axis->rotor_sensor_driver, enc0);
+    }
+}
+
+static void persist_alignment_fields(esp_foc_axis_t *axis)
+{
+    uint8_t aflags = 0;
+    uint16_t z = 0;
+
+    if (axis->rotor_sensor_driver->get_zero_offset_12b != NULL) {
+        aflags |= ESP_FOC_CAL_ALIGN_FLAG_OFFSET;
+        z = axis->rotor_sensor_driver->get_zero_offset_12b(
+            axis->rotor_sensor_driver);
+    }
+    if (axis->natural_direction == Q16_ONE ||
+        axis->natural_direction == Q16_MINUS_ONE) {
+        aflags |= ESP_FOC_CAL_ALIGN_FLAG_DIR;
+    }
+
+    {
+        esp_foc_calibration_data_t data;
+        if (esp_foc_calibration_load(axis->nvs_axis_id, &data) != ESP_FOC_OK) {
+            memset(&data, 0, sizeof(data));
+            for (int i = 0; i < 2; ++i) {
+                data.kp = axis->torque_controller[i].kp;
+                data.ki = axis->torque_controller[i].ki;
+                data.integrator_limit = axis->torque_controller[i].integrator_limit;
+            }
+            data.current_filter_fc_hz = axis->current_filter_fc_hz_q16;
+        }
+        esp_foc_calibration_pack_align(&data, aflags, z, axis->natural_direction);
+        if (esp_foc_calibration_save(axis->nvs_axis_id, &data) == ESP_FOC_OK) {
+            axis->nvs_motor_r_ohm = data.motor_r_ohm;
+            axis->nvs_motor_l_h = data.motor_l_h;
+            axis->nvs_bandwidth_hz = data.bandwidth_hz;
+        }
+    }
+}
+#endif
+
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 {
     q16_t e_sin, e_cos;
     q16_t a, b, u, v, w;
+    bool skip_dir_probe = false;
 
     if (axis == NULL) {
         return ESP_FOC_ERR_INVALID_ARG;
@@ -276,6 +368,12 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     }
 
     axis->rotor_aligned = ESP_FOC_ERR_ALIGNMENT_IN_PROGRESS;
+#if defined(CONFIG_ESP_FOC_CALIBRATION_NVS)
+    apply_stored_align_hints(axis, &skip_dir_probe);
+    if (skip_dir_probe) {
+        ESP_LOGI(tag, "alignment: natural direction from NVS (skipping Vq probe)");
+    }
+#endif
     axis->inverter_driver->set_voltages(axis->inverter_driver, 0, 0, 0);
 
     e_sin = q16_sin(0);
@@ -296,41 +394,47 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     /* Step 2 — zero the encoder. The current physical position is now
      * the firmware's electrical zero. */
     axis->rotor_sensor_driver->set_to_zero(axis->rotor_sensor_driver);
-    int64_t ticks_zero = axis->rotor_sensor_driver->read_accumulated_counts_i64(
-                            axis->rotor_sensor_driver);
 
-    /* Step 3 — probe natural direction by applying a positive Vq pulse.
-     * In a properly aligned PMSM, +Vq produces forward torque. We watch
-     * raw encoder counts to decide whether the encoder counts up or
-     * down on physical forward motion, and set natural_direction so
-     * the computed axis->rotor_position increases in the forward
-     * direction. The settings hint is kept only when the rotor refuses
-     * to move enough to be conclusive (load-stuck or open phase). */
-    q16_t probe_vq = q16_from_float(q16_to_float(axis->max_voltage) * 0.30f);
-    esp_foc_modulate_dq_voltage(e_sin, e_cos,
-                                0, probe_vq,
-                                &a, &b, &u, &v, &w,
-                                axis->max_voltage,
-                                axis->dc_link_to_normalized);
-    axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);
-    esp_foc_sleep_ms(300);
+    if (!skip_dir_probe) {
+        int64_t ticks_zero =
+            axis->rotor_sensor_driver->read_accumulated_counts_i64(
+                axis->rotor_sensor_driver);
+        /* Step 3 — probe natural direction by applying a positive Vq pulse.
+         * In a properly aligned PMSM, +Vq produces forward torque. We watch
+         * raw encoder counts to decide whether the encoder counts up or
+         * down on physical forward motion, and set natural_direction so
+         * the computed axis->rotor_position increases in the forward
+         * direction. The settings hint is kept only when the rotor refuses
+         * to move enough to be conclusive (load-stuck or open phase). */
+        q16_t probe_vq = q16_from_float(
+            q16_to_float(axis->max_voltage) * 0.30f);
+        esp_foc_modulate_dq_voltage(e_sin, e_cos,
+                                    0, probe_vq,
+                                    &a, &b, &u, &v, &w,
+                                    axis->max_voltage,
+                                    axis->dc_link_to_normalized);
+        axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);
+        esp_foc_sleep_ms(300);
 
-    int64_t ticks_after = axis->rotor_sensor_driver->read_accumulated_counts_i64(
-                             axis->rotor_sensor_driver);
-    int64_t delta = ticks_after - ticks_zero;
+        int64_t ticks_after = axis->rotor_sensor_driver
+                                  ->read_accumulated_counts_i64(
+                                      axis->rotor_sensor_driver);
+        int64_t delta = ticks_after - ticks_zero;
 
-    if (delta >= ESP_FOC_DIR_PROBE_MIN_COUNTS) {
-        axis->natural_direction = Q16_ONE;        /* CW */
-        ESP_LOGI(tag, "alignment: natural direction = CW (delta=%lld)",
-                 (long long)delta);
-    } else if (delta <= -ESP_FOC_DIR_PROBE_MIN_COUNTS) {
-        axis->natural_direction = Q16_MINUS_ONE;  /* CCW */
-        ESP_LOGI(tag, "alignment: natural direction = CCW (delta=%lld)",
-                 (long long)delta);
-    } else {
-        ESP_LOGW(tag, "alignment: rotor moved only %lld counts (need >= %d) — "
-                      "keeping the natural_direction hint from settings",
-                 (long long)delta, ESP_FOC_DIR_PROBE_MIN_COUNTS);
+        if (delta >= ESP_FOC_DIR_PROBE_MIN_COUNTS) {
+            axis->natural_direction = Q16_ONE;        /* CW */
+            ESP_LOGI(tag, "alignment: natural direction = CW (delta=%lld)",
+                     (long long)delta);
+        } else if (delta <= -ESP_FOC_DIR_PROBE_MIN_COUNTS) {
+            axis->natural_direction = Q16_MINUS_ONE;  /* CCW */
+            ESP_LOGI(tag, "alignment: natural direction = CCW (delta=%lld)",
+                     (long long)delta);
+        } else {
+            ESP_LOGW(tag,
+                     "alignment: rotor moved only %lld counts (need >= %d) — "
+                     "keeping the natural_direction hint from settings",
+                     (long long)delta, ESP_FOC_DIR_PROBE_MIN_COUNTS);
+        }
     }
 
     /* Step 4 — re-park the rotor at electrical 0 and re-zero the
@@ -345,6 +449,9 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     axis->rotor_sensor_driver->set_to_zero(axis->rotor_sensor_driver);
 
     axis->rotor_aligned = ESP_FOC_OK;
+#if defined(CONFIG_ESP_FOC_CALIBRATION_NVS)
+    persist_alignment_fields(axis);
+#endif
     axis->inverter_driver->set_voltages(axis->inverter_driver, 0, 0, 0);
     esp_foc_sleep_ms(500);
     return ESP_FOC_OK;

@@ -153,6 +153,8 @@ void mock_rotor_sensor_init(mock_rotor_sensor_t *m, float counts_per_rev)
     m->interface.read_counts = mock_rotor_read_counts;
     m->interface.read_accumulated_counts_i64 = mock_rotor_read_accumulated_i64;
     m->interface.set_simulation_count = mock_rotor_set_simulation_count;
+    m->interface.set_zero_offset_raw_12b = NULL;
+    m->interface.get_zero_offset_12b = NULL;
 }
 
 esp_foc_rotor_sensor_t *mock_rotor_sensor_interface(mock_rotor_sensor_t *m)

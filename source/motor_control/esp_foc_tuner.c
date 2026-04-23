@@ -111,11 +111,7 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
             b[0] = (uint8_t)(int8_t)axis->rotor_aligned;
             break;
         case ESP_FOC_TUNER_PARAM_NVS_PRESENT:
-            /* axis->settings is not stored; use 0 as the axis_id slot
-             * the host most likely cares about (single-axis is the
-             * common case). Multi-axis hosts can still read the gains
-             * back to verify the overlay landed. */
-            b[0] = esp_foc_calibration_present(0) ? 1 : 0;
+            b[0] = esp_foc_calibration_present(axis->nvs_axis_id) ? 1 : 0;
             break;
         default: break;
         }
@@ -151,6 +147,9 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
     case ESP_FOC_TUNER_PARAM_V_MAX_Q16:       value = axis->max_voltage; break;
     case ESP_FOC_TUNER_PARAM_I_FILTER_FC_Q16: value = axis->current_filter_fc_hz_q16; break;
     case ESP_FOC_TUNER_PARAM_LOOP_FS_HZ_Q16:  value = axis->current_filter_fs_hz_q16; break;
+    case ESP_FOC_TUNER_PARAM_MOTOR_R_OHM_Q16: value = axis->nvs_motor_r_ohm; break;
+    case ESP_FOC_TUNER_PARAM_MOTOR_L_H_Q16:   value = axis->nvs_motor_l_h; break;
+    case ESP_FOC_TUNER_PARAM_MOTOR_BW_HZ_Q16: value = axis->nvs_bandwidth_hz; break;
     default:
         return ESP_FOC_ERR_INVALID_ARG;
     }
@@ -313,7 +312,10 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
          * the user just typed in; firmware combines them with its own
          * current Kp/Ki/integrator_limit + the live current-filter
          * cutoff before persisting. */
-        esp_foc_calibration_data_t data = {0};
+        esp_foc_calibration_data_t data;
+        if (esp_foc_calibration_load(axis->nvs_axis_id, &data) != ESP_FOC_OK) {
+            memset(&data, 0, sizeof(data));
+        }
         esp_foc_axis_get_current_pi_gains_q16(axis, &data.kp, &data.ki,
                                               &data.integrator_limit);
         data.current_filter_fc_hz = axis->current_filter_fc_hz_q16;
@@ -323,7 +325,12 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
             data.motor_l_h = read_q16(p + 4);
             data.bandwidth_hz = read_q16(p + 8);
         }
-        esp_foc_err_t err = esp_foc_calibration_save(0, &data);
+        esp_foc_err_t err = esp_foc_calibration_save(axis->nvs_axis_id, &data);
+        if (err == ESP_FOC_OK) {
+            axis->nvs_motor_r_ohm = data.motor_r_ohm;
+            axis->nvs_motor_l_h = data.motor_l_h;
+            axis->nvs_bandwidth_hz = data.bandwidth_hz;
+        }
         tuner_log(err == ESP_FOC_OK
                   ? "calibration: saved to NVS"
                   : "calibration: save failed");
@@ -332,7 +339,7 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
 
     if (id == ESP_FOC_TUNER_CMD_LOAD_NVS) {
         esp_foc_calibration_data_t data;
-        esp_foc_err_t err = esp_foc_calibration_load(0, &data);
+        esp_foc_err_t err = esp_foc_calibration_load(axis->nvs_axis_id, &data);
         if (err != ESP_FOC_OK) {
             tuner_log("calibration: nothing to load");
             return err;
@@ -348,6 +355,11 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
                                                     fc, fs);
             axis->current_filter_fc_hz_q16 = data.current_filter_fc_hz;
         }
+        if (err == ESP_FOC_OK) {
+            axis->nvs_motor_r_ohm = data.motor_r_ohm;
+            axis->nvs_motor_l_h = data.motor_l_h;
+            axis->nvs_bandwidth_hz = data.bandwidth_hz;
+        }
         tuner_log(err == ESP_FOC_OK
                   ? "calibration: NVS overlay applied"
                   : "calibration: apply failed");
@@ -356,6 +368,11 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
 
     if (id == ESP_FOC_TUNER_CMD_ERASE_NVS) {
         esp_foc_err_t err = esp_foc_calibration_erase();
+        if (err == ESP_FOC_OK) {
+            axis->nvs_motor_r_ohm = 0;
+            axis->nvs_motor_l_h = 0;
+            axis->nvs_bandwidth_hz = 0;
+        }
         tuner_log(err == ESP_FOC_OK
                   ? "calibration: NVS namespace erased"
                   : "calibration: erase failed");

@@ -51,6 +51,9 @@ typedef enum {
     ESP_FOC_TUNER_PARAM_V_MAX_Q16       = 0x0013, /* read q16 */
     ESP_FOC_TUNER_PARAM_I_FILTER_FC_Q16 = 0x0014, /* read q16 (Hz, current LPF) */
     ESP_FOC_TUNER_PARAM_LOOP_FS_HZ_Q16  = 0x0015, /* read q16 (Hz, current PI sample rate) */
+    ESP_FOC_TUNER_PARAM_MOTOR_R_OHM_Q16  = 0x0016, /* read q16, last NVS R [Ohm] or 0 */
+    ESP_FOC_TUNER_PARAM_MOTOR_L_H_Q16    = 0x0017, /* read q16, last NVS L [H] or 0 */
+    ESP_FOC_TUNER_PARAM_MOTOR_BW_HZ_Q16  = 0x0018, /* read q16, last NVS bandwidth [Hz] or 0 */
     ESP_FOC_TUNER_PARAM_AXIS_STATE      = 0x0040, /* read u8 bitmap */
     ESP_FOC_TUNER_PARAM_AXIS_LAST_ERR   = 0x0041, /* read i8 (esp_foc_err_t) */
     ESP_FOC_TUNER_PARAM_NVS_PRESENT     = 0x0042, /* read u8 (0/1) */

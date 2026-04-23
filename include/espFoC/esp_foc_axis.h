@@ -96,6 +96,12 @@ struct esp_foc_axis_s {
     q16_t dc_link_to_normalized;
     q16_t max_voltage;
     int motor_pole_pairs;
+    /* NVS key; copied from settings.motor_unit in esp_foc_initialize_axis. */
+    uint8_t nvs_axis_id;
+    /* Last known motor params from NVS (tuner readback; q16, Ohm / H / Hz). */
+    q16_t nvs_motor_r_ohm;
+    q16_t nvs_motor_l_h;
+    q16_t nvs_bandwidth_hz;
     q16_t natural_direction;
 
     esp_foc_err_t rotor_aligned;

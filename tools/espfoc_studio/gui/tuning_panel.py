@@ -480,6 +480,37 @@ class TuningPanel(QWidget):
                                 self._bw_spin.value(),
                                 self._kp_spin.value(), self._ki_spin.value())
 
+    def sync_motor_from_nvs_shadows(self) -> None:
+        """After connect with NVS calibration, pull R/L/BW and live controls
+        from the target so MPZ/Analysis are not left at local defaults."""
+        r = self._client.read_motor_r_ohm()
+        l_h = self._client.read_motor_l_h()
+        bw = self._client.read_motor_bw_hz()
+        kp = self._client.read_kp()
+        ki = self._client.read_ki()
+        fc = self._client.read_current_filter_fc()
+        for sp in (self._r_spin, self._l_mh_spin, self._bw_spin,
+                   self._kp_spin, self._ki_spin, self._fc_spin):
+            sp.blockSignals(True)
+        try:
+            if r > 1e-10:
+                self._r_spin.setValue(r)
+            if l_h > 1e-12:
+                self._l_mh_spin.setValue(l_h * 1e3)
+            if bw > 0.5:
+                self._bw_spin.setValue(bw)
+            self._kp_spin.setValue(kp)
+            self._ki_spin.setValue(ki)
+            if fc > 0.0:
+                self._fc_spin.setValue(fc)
+        finally:
+            for sp in (self._r_spin, self._l_mh_spin, self._bw_spin,
+                       self._kp_spin, self._ki_spin, self._fc_spin):
+                sp.blockSignals(False)
+        self._last_motor_r = self._r_spin.value()
+        self._last_motor_l = self._l_mh_spin.value() * 1e-3
+        self._last_bw = self._bw_spin.value()
+
     @staticmethod
     def _badge_key_for_state(s: AxisStateFlag) -> str:
         """Pick the dominant flag and map it to a badge palette key.

@@ -5,6 +5,50 @@
  */
 
 #include <sdkconfig.h>
+#include "espFoC/esp_foc_calibration.h"
+
+void esp_foc_calibration_pack_align(esp_foc_calibration_data_t *d,
+                                   uint8_t flags,
+                                   uint16_t enc_zero_12b,
+                                   q16_t natural_direction)
+{
+    if (d == NULL) {
+        return;
+    }
+    d->reserved[0] = flags;
+    d->reserved[1] = 0;
+    d->reserved[2] = (uint8_t)(enc_zero_12b & 0xFFu);
+    d->reserved[3] = (uint8_t)((enc_zero_12b >> 8) & 0xFFu);
+    uint32_t nd = (uint32_t)(int32_t)natural_direction;
+    d->reserved[4] = (uint8_t)(nd & 0xFFu);
+    d->reserved[5] = (uint8_t)((nd >> 8) & 0xFFu);
+    d->reserved[6] = (uint8_t)((nd >> 16) & 0xFFu);
+    d->reserved[7] = (uint8_t)((nd >> 24) & 0xFFu);
+}
+
+void esp_foc_calibration_get_align(const esp_foc_calibration_data_t *d,
+                                  uint8_t *flags,
+                                  uint16_t *enc_zero_12b,
+                                  q16_t *natural_direction)
+{
+    if (d == NULL) {
+        return;
+    }
+    if (flags != NULL) {
+        *flags = d->reserved[0];
+    }
+    if (enc_zero_12b != NULL) {
+        *enc_zero_12b = (uint16_t)d->reserved[2] |
+            ((uint16_t)d->reserved[3] << 8);
+    }
+    if (natural_direction != NULL) {
+        uint32_t u = (uint32_t)d->reserved[4] |
+            ((uint32_t)d->reserved[5] << 8) |
+            ((uint32_t)d->reserved[6] << 16) |
+            ((uint32_t)d->reserved[7] << 24);
+        *natural_direction = (q16_t)u;
+    }
+}
 
 #if defined(CONFIG_ESP_FOC_CALIBRATION_NVS)
 
@@ -13,7 +57,6 @@
 #include "esp_log.h"
 #include "nvs.h"
 #include "nvs_flash.h"
-#include "espFoC/esp_foc_calibration.h"
 
 static const char *TAG = "ESP_FOC_CALIB";
 
@@ -219,8 +262,6 @@ bool esp_foc_calibration_present(uint8_t axis_id)
 }
 
 #else /* CONFIG_ESP_FOC_CALIBRATION_NVS not set — stub everything. */
-
-#include "espFoC/esp_foc_calibration.h"
 
 uint32_t esp_foc_calibration_profile_hash(void) { return 0u; }
 

@@ -54,11 +54,30 @@ typedef struct {
      * 16-byte reserved block so the on-flash schema stays at version
      * 1 and old blobs (which read zero here) gracefully fall back. */
     q16_t current_filter_fc_hz;
-    /* Remaining 12 bytes for future expansion (speed loop, observer
-     * gains, etc.). Old blobs zero-fill these so additions can keep
-     * extending the payload without bumping the schema version. */
+    /* Alignment snapshot (12 bytes, little-endian in NVS). Old blobs
+     * are zero: both flags off — behaviour unchanged.
+     *   [0]  flags: bit0 = encoder_zero valid, bit1 = natural_direction valid
+     *   [1]  0
+     *   [2,3] uint16_t le encoder zero raw (AS5600: 0..4095, masked by driver)
+     *   [4,7] q16_t natural_direction (+1 / -1)
+     *   [8,11] reserved
+     */
     uint8_t reserved[12];
 } esp_foc_calibration_data_t;
+
+#define ESP_FOC_CALIBRATION_MAX_AXES 4u
+
+#define ESP_FOC_CAL_ALIGN_FLAG_OFFSET 0x01u
+#define ESP_FOC_CAL_ALIGN_FLAG_DIR    0x02u
+
+void esp_foc_calibration_pack_align(esp_foc_calibration_data_t *d,
+                                     uint8_t flags,
+                                     uint16_t enc_zero_12b,
+                                     q16_t natural_direction);
+void esp_foc_calibration_get_align(const esp_foc_calibration_data_t *d,
+                                  uint8_t *flags,
+                                  uint16_t *enc_zero_12b,
+                                  q16_t *natural_direction);
 
 /**
  * @brief Hash of the current build's motor profile + schema version.

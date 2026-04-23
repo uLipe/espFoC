@@ -255,6 +255,8 @@ esp_foc_rotor_sensor_t *rotor_sensor_as5048_new(int pin_mosi,
     rotor_sensors[port].interface.set_to_zero = set_to_zero;
     rotor_sensors[port].interface.read_accumulated_counts_i64 = read_accumulated_counts_i64;
     rotor_sensors[port].interface.set_simulation_count = set_simulation_count;
+    rotor_sensors[port].interface.set_zero_offset_raw_12b = NULL;
+    rotor_sensors[port].interface.get_zero_offset_12b = NULL;
 
     rotor_sensors[port].zero_offset = 0;
     rotor_sensors[port].prev_raw_iq = 0;

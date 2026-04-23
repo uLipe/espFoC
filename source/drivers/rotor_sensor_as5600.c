@@ -4,6 +4,7 @@
  * Copyright (c) 2021 Felipe Neves
  */
 
+#include <string.h>
 #include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/driver_iq31_local.h"
 #include "espFoC/rotor_sensor_as5600.h"
@@ -68,6 +69,20 @@ static void set_to_zero(esp_foc_rotor_sensor_t *self)
     ESP_LOGI(tag, "Setting %d [ticks] as offset.", obj->zero_offset);
 }
 
+static void set_zero_offset_raw_12b(esp_foc_rotor_sensor_t *self,
+                                    uint16_t raw_angle)
+{
+    esp_foc_as5600_t *obj = __containerof(self, esp_foc_as5600_t, interface);
+    obj->zero_offset = (uint16_t)(raw_angle & (uint16_t)AS5600_READING_MASK);
+    ESP_LOGI(tag, "Restored %u [ticks] as zero offset (NVS).", obj->zero_offset);
+}
+
+static uint16_t get_zero_offset_12b(esp_foc_rotor_sensor_t *self)
+{
+    esp_foc_as5600_t *obj = __containerof(self, esp_foc_as5600_t, interface);
+    return (uint16_t)(obj->zero_offset & (uint16_t)AS5600_READING_MASK);
+}
+
 static uint32_t get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
 {
     (void)self;
@@ -120,11 +135,14 @@ esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
         return NULL;
     }
 
+    memset(&rotor_sensors[port].interface, 0, sizeof(rotor_sensors[port].interface));
     rotor_sensors[port].interface.get_counts_per_revolution = get_counts_per_revolution;
     rotor_sensors[port].interface.read_counts = read_counts;
     rotor_sensors[port].interface.set_to_zero = set_to_zero;
     rotor_sensors[port].interface.read_accumulated_counts_i64 = read_accumulated_counts_i64;
     rotor_sensors[port].interface.set_simulation_count = set_simulation_count;
+    rotor_sensors[port].interface.set_zero_offset_raw_12b = set_zero_offset_raw_12b;
+    rotor_sensors[port].interface.get_zero_offset_12b = get_zero_offset_12b;
     rotor_sensors[port].i2c_port = I2C_NUM_0;
     rotor_sensors[port].zero_offset = 0;
     rotor_sensors[port].prev_raw_iq = 0;

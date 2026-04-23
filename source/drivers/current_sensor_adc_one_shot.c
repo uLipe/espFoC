@@ -475,6 +475,8 @@ esp_foc_isensor_t *isensor_adc_oneshot_new(esp_foc_isensor_adc_oneshot_config_t 
     isensor_adc.encoder_interface.set_to_zero = set_to_zero;
     isensor_adc.encoder_interface.read_accumulated_counts_i64 = read_accumulated_counts_i64_enc;
     isensor_adc.encoder_interface.set_simulation_count = encoder_set_simulation_count;
+    isensor_adc.encoder_interface.set_zero_offset_raw_12b = NULL;
+    isensor_adc.encoder_interface.get_zero_offset_12b = NULL;
     isensor_adc.encoder_accumulated = 0.0f;
     isensor_adc.encoder_previous = 0.0f;
     isensor_adc.encoder_zero_offset = 0;

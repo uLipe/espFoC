@@ -14,4 +14,8 @@ struct esp_foc_rotor_sensor_s {
     q16_t (*read_counts)(esp_foc_rotor_sensor_t *self);
     int64_t (*read_accumulated_counts_i64)(esp_foc_rotor_sensor_t *self);
     void (*set_simulation_count)(esp_foc_rotor_sensor_t *self, q16_t increment);
+    /* Restores the absolute zero (raw counts); optional (NULL) if unknown. */
+    void (*set_zero_offset_raw_12b)(esp_foc_rotor_sensor_t *self,
+                                    uint16_t raw_angle);
+    uint16_t (*get_zero_offset_12b)(esp_foc_rotor_sensor_t *self);
 };

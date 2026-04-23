@@ -143,7 +143,12 @@ class MainWindow(QMainWindow):
         except TunerError:
             pass
 
-        # Prime the analysis view with the initial spinbox values.
+        try:
+            if link_mode != "demo" and self._client.is_calibration_present():
+                self._tuning.sync_motor_from_nvs_shadows()
+        except TunerError:
+            pass
+        # Prime the analysis view (including after optional NVS sync).
         self._tuning._notify_params_changed()
 
         if link_mode == "hw":
@@ -203,6 +208,12 @@ class MainWindow(QMainWindow):
                 self._tuning.set_loop_rate_hz(fs_hz)
         except TunerError:
             pass
+        try:
+            if self._client.is_calibration_present():
+                self._tuning.sync_motor_from_nvs_shadows()
+        except TunerError:
+            pass
+        self._tuning._notify_params_changed()
         return True
 
     def _maybe_reconnect(self) -> bool:
