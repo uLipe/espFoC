@@ -26,6 +26,17 @@ from ..link import (
 )
 
 
+def _tuner_error_from_link_io(err: BaseException) -> TunerError:
+    return TunerError(f"link I/O: {err}")
+
+
+def _is_transport_io_failure(err: BaseException) -> bool:
+    if isinstance(err, (OSError, ConnectionError, BrokenPipeError)):
+        return True
+    ex_mod = getattr(type(err), "__module__", "") or ""
+    return ex_mod.startswith("serial")
+
+
 class Op(IntEnum):
     READ = 0x01
     WRITE = 0x02
@@ -179,7 +190,12 @@ class TunerClient:
         q = self._reader.register_tuner_waiter(seq)
         try:
             frame = encode(Channel.TUNER, seq, app)
-            self._reader.transport.send_bytes(frame)
+            try:
+                self._reader.transport.send_bytes(frame)
+            except Exception as e:
+                if _is_transport_io_failure(e):
+                    raise _tuner_error_from_link_io(e) from e
+                raise
             try:
                 body = q.get(timeout=timeout if timeout is not None
                              else self.DEFAULT_TIMEOUT)
