@@ -21,8 +21,24 @@ static const char *TAG = "esp-foc-example";
 
 static esp_foc_inverter_t *inverter;
 
+/* Same wire encoding as inverter_*_mcpwm_new: -1 = unused; else negative
+ * GPIO index means active low on that pin. */
+static int mcpwm_enable_gpio_from_kconfig(void)
+{
+    if (CONFIG_FOC_PWM_EN_PIN < 0) {
+        return -1;
+    }
+#ifdef CONFIG_FOC_PWM_EN_ACT_LOW
+    if (CONFIG_FOC_PWM_EN_ACT_LOW) {
+        return -CONFIG_FOC_PWM_EN_PIN;
+    }
+#endif
+    return CONFIG_FOC_PWM_EN_PIN;
+}
+
 static void initialize_foc_drivers(void)
 {
+    const int en = mcpwm_enable_gpio_from_kconfig();
 #ifdef CONFIG_FOC_TEST_6_PWM
     inverter = inverter_6pwm_mpcwm_new(
         CONFIG_FOC_PWM_U_PIN,
@@ -31,7 +47,7 @@ static void initialize_foc_drivers(void)
         CONFIG_FOC_PWM_VL_PIN,
         CONFIG_FOC_PWM_W_PIN,
         CONFIG_FOC_PWM_WL_PIN,
-        CONFIG_FOC_PWM_EN_PIN,
+        en,
         24.0f,
         0
     );
@@ -40,7 +56,7 @@ static void initialize_foc_drivers(void)
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_V_PIN,
         CONFIG_FOC_PWM_W_PIN,
-        CONFIG_FOC_PWM_EN_PIN,
+        en,
         24.0f,
         0
     );

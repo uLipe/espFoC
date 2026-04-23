@@ -122,6 +122,19 @@ static void regulation_callback(esp_foc_axis_t *axis_cb,
     id_ref->raw = id_base;
 }
 
+static int mcpwm_enable_gpio_from_kconfig(void)
+{
+    if (CONFIG_FOC_PWM_EN_PIN < 0) {
+        return -1;
+    }
+#ifdef CONFIG_FOC_PWM_EN_ACT_LOW
+    if (CONFIG_FOC_PWM_EN_ACT_LOW) {
+        return -CONFIG_FOC_PWM_EN_PIN;
+    }
+#endif
+    return CONFIG_FOC_PWM_EN_PIN;
+}
+
 static void initialize_foc_drivers(void)
 {
     inverter = inverter_6pwm_mpcwm_new(
@@ -131,7 +144,7 @@ static void initialize_foc_drivers(void)
         CONFIG_FOC_PWM_VL_PIN,
         CONFIG_FOC_PWM_W_PIN,
         CONFIG_FOC_PWM_WL_PIN,
-        -47,
+        mcpwm_enable_gpio_from_kconfig(),
         12.0f,
         0
     );

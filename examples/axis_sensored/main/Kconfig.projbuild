@@ -16,9 +16,18 @@ menu "Frerunning FoC example menu"
         default 7
 
     config FOC_PWM_EN_PIN
-        int "Gpio number for PWM of phase W"
-        range 0 34
-        default 19
+        int "Gate driver enable GPIO (set to -1 if not connected)"
+        range -1 54
+        default -1
+        help
+            Passed to the MCPWM inverter: -1 skips the enable output; 0+ uses that GPIO
+            (see FOC_PWM_EN_ACT_LOW for polarity). Same convention as
+            TUNER_TARGET_PWM_EN_PIN / a negative value in the C API encodes active low.
+
+    config FOC_PWM_EN_ACT_LOW
+        bool "Active-low enable (inverted)"
+        default n
+        depends on FOC_PWM_EN_PIN >= 0
 
     config FOC_TEST_6_PWM
         bool "Enable test for the 6-MCPWM"
