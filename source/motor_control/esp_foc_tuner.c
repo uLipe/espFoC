@@ -6,11 +6,15 @@
 
 #include <string.h>
 #include <stdio.h>
+#include "esp_log.h"
 #include "espFoC/esp_foc_tuner.h"
 #include "espFoC/esp_foc_axis_tuning.h"
 #include "espFoC/esp_foc_axis.h"
 #include "espFoC/esp_foc_link.h"
 #include "espFoC/esp_foc_calibration.h"
+#include "espFoC/utils/esp_foc_q16.h"
+
+static const char *tun_tag = "esp_foc_tuner";
 
 /* Per-axis registry. Pointers are only mutated from esp_foc_tuner_attach_axis,
  * which is expected to be called from a non-time-critical context. */
@@ -359,6 +363,26 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
             axis->nvs_motor_r_ohm = data.motor_r_ohm;
             axis->nvs_motor_l_h = data.motor_l_h;
             axis->nvs_bandwidth_hz = data.bandwidth_hz;
+            {
+                uint8_t af;
+                uint16_t eraw;
+                q16_t nstore;
+                esp_foc_calibration_get_align(&data, &af, &eraw, &nstore);
+                const char *cw = (nstore == Q16_ONE)   ? "CW" :
+                    (nstore == Q16_MINUS_ONE)         ? "CCW" : "?";
+                ESP_LOGI(
+                    tun_tag,
+                    "LOAD_NVS axis %u: PI+audit R=%.4f ohm L=%.4e H bw=%.1f  "
+                    "align: off=%d enc=%u dir=%d %s",
+                    (unsigned)axis->nvs_axis_id,
+                    (double)q16_to_float(data.motor_r_ohm),
+                    (double)q16_to_float(data.motor_l_h),
+                    (double)q16_to_float(data.bandwidth_hz),
+                    (int)((af & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) ? 1 : 0),
+                    (unsigned)eraw,
+                    (int)((af & ESP_FOC_CAL_ALIGN_FLAG_DIR) ? 1 : 0),
+                    (af & ESP_FOC_CAL_ALIGN_FLAG_DIR) ? cw : "—");
+            }
         }
         tuner_log(err == ESP_FOC_OK
                   ? "calibration: NVS overlay applied"

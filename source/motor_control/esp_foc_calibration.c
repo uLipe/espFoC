@@ -55,6 +55,7 @@ void esp_foc_calibration_get_align(const esp_foc_calibration_data_t *d,
 #include <stdio.h>
 #include <string.h>
 #include "esp_log.h"
+#include "espFoC/utils/esp_foc_q16.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -182,8 +183,43 @@ esp_foc_err_t esp_foc_calibration_save(uint8_t axis_id,
         ESP_LOGE(TAG, "nvs save axis %u failed: %d", axis_id, (int)err);
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
-    ESP_LOGI(TAG, "axis %u calibration saved (Kp=%.4f Ki=%.2f)",
-             axis_id, q16_to_float(data->kp), q16_to_float(data->ki));
+    {
+        uint8_t af;
+        uint16_t enc0;
+        q16_t nat_d;
+        const float fcli = (data->current_filter_fc_hz != 0)
+                            ? q16_to_float(data->current_filter_fc_hz) : 0.0f;
+        esp_foc_calibration_get_align(data, &af, &enc0, &nat_d);
+        ESP_LOGI(
+            TAG,
+            "axis %u: save OK  profile_hash=0x%08x  Kp=%.4f Ki=%.2f ILim=%.3f  I-lpf=%.1fHz",
+            axis_id, (unsigned)blob.profile_hash,
+            (double)q16_to_float(data->kp), (double)q16_to_float(data->ki),
+            (double)q16_to_float(data->integrator_limit), (double)fcli);
+        ESP_LOGI(
+            TAG,
+            "axis %u: save  motor: R=%.4f Ohm  L=%.4e H  bandwidth=%.1f Hz (audit / MPZ input)",
+            axis_id, (double)q16_to_float(data->motor_r_ohm),
+            (double)q16_to_float(data->motor_l_h),
+            (double)q16_to_float(data->bandwidth_hz));
+        {
+            const char *nlab = "?";
+            if (nat_d == Q16_ONE) {
+                nlab = "CW";
+            } else if (nat_d == Q16_MINUS_ONE) {
+                nlab = "CCW";
+            }
+            const int offv = (af & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) ? 1 : 0;
+            const int dirv = (af & ESP_FOC_CAL_ALIGN_FLAG_DIR) ? 1 : 0;
+            ESP_LOGI(
+                TAG,
+                "axis %u: save  align: off_flag=%d enc_raw=%u  dir_flag=%d nat_stored=%s",
+                axis_id, offv,
+                (unsigned)((af & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) != 0u ? enc0 : 0u),
+                dirv,
+                (af & ESP_FOC_CAL_ALIGN_FLAG_DIR) != 0u ? nlab : "—");
+        }
+    }
     return ESP_FOC_OK;
 }
 
