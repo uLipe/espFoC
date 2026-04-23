@@ -65,6 +65,9 @@ typedef struct {
      * read i_alpha / i_beta directly without a fetch_isensors() call. */
     volatile q16_t *publish_alpha;
     volatile q16_t *publish_beta;
+    /* Same-tick Iu, Iv (axis amperes, q16) for scope — optional. */
+    volatile q16_t *publish_iu;
+    volatile q16_t *publish_iv;
     esp_foc_isensor_t interface;
     int number_of_channels;
     isensor_callback_t callback;
@@ -126,6 +129,12 @@ static inline void adc_publish_alpha_beta(isensor_adc_t *obj)
      * without a torn-read concern. */
     *obj->publish_alpha = alpha;
     *obj->publish_beta  = beta;
+    if (obj->publish_iu != NULL) {
+        *obj->publish_iu = iu;
+    }
+    if (obj->publish_iv != NULL) {
+        *obj->publish_iv = iv;
+    }
 }
 
 static bool isensor_adc_done_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
@@ -315,7 +324,9 @@ static void set_filter_cutoff(esp_foc_isensor_t *self, float fc_hz, float fs_hz)
 
 static void set_publish_targets(esp_foc_isensor_t *self,
                                 q16_t *i_alpha_target,
-                                q16_t *i_beta_target)
+                                q16_t *i_beta_target,
+                                q16_t *i_u_target,
+                                q16_t *i_v_target)
 {
     isensor_adc_t *obj =
         __containerof(self, isensor_adc_t, interface);
@@ -323,6 +334,8 @@ static void set_publish_targets(esp_foc_isensor_t *self,
     esp_foc_critical_enter();
     obj->publish_alpha = (volatile q16_t *)i_alpha_target;
     obj->publish_beta  = (volatile q16_t *)i_beta_target;
+    obj->publish_iu = (volatile q16_t *)i_u_target;
+    obj->publish_iv = (volatile q16_t *)i_v_target;
     esp_foc_critical_leave();
 }
 
@@ -345,6 +358,8 @@ esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
     isensor_adc.interface.set_publish_targets = set_publish_targets;
     isensor_adc.publish_alpha = NULL;
     isensor_adc.publish_beta  = NULL;
+    isensor_adc.publish_iu = NULL;
+    isensor_adc.publish_iv = NULL;
     /* Default to bypass so the driver works correctly even if the
      * caller (axis init / tuner) never invokes set_filter_cutoff. */
     for (int i = 0; i < 4; ++i) {

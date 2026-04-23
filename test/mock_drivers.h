@@ -68,6 +68,8 @@ typedef struct {
     int set_publish_targets_count;
     q16_t *publish_alpha_target;
     q16_t *publish_beta_target;
+    q16_t *publish_iu_target;
+    q16_t *publish_iv_target;
     isensor_callback_t saved_callback;
     void *saved_callback_param;
 } mock_isensor_t;

@@ -192,12 +192,16 @@ static void mock_isensor_set_filter_cutoff(esp_foc_isensor_t *self, float fc, fl
 
 static void mock_isensor_set_publish_targets(esp_foc_isensor_t *self,
                                              q16_t *i_alpha_target,
-                                             q16_t *i_beta_target)
+                                             q16_t *i_beta_target,
+                                             q16_t *i_u_target,
+                                             q16_t *i_v_target)
 {
     mock_isensor_t *m = MOCK_ISENSOR_FROM_SELF(self);
     m->set_publish_targets_count++;
     m->publish_alpha_target = i_alpha_target;
     m->publish_beta_target  = i_beta_target;
+    m->publish_iu_target = i_u_target;
+    m->publish_iv_target = i_v_target;
 }
 
 static void mock_isensor_set_callback(esp_foc_isensor_t *self, isensor_callback_t cb, void *param)

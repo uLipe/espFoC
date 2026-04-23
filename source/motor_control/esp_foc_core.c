@@ -335,7 +335,9 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         axis->isensor_driver->set_publish_targets(
             axis->isensor_driver,
             (q16_t *)&axis->latest_i_alpha,
-            (q16_t *)&axis->latest_i_beta);
+            (q16_t *)&axis->latest_i_beta,
+            &axis->i_u,
+            &axis->i_v);
     }
 #endif
 

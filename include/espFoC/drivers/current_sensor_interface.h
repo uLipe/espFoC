@@ -34,18 +34,19 @@ struct esp_foc_isensor_s {
     void (*set_filter_cutoff)(esp_foc_isensor_t *self, float fc_hz, float fs_hz);
 
     /**
-     * @brief Wire i_alpha / i_beta sinks. After every full conversion
-     *        the driver applies offset + gain + Clarke to channels 0 / 1
-     *        (axis 0 U / V) and atomic-writes the result to the supplied
-     *        Q16 targets. The PWM ISR can then read i_alpha / i_beta
-     *        without going through fetch_isensors() (and without ever
-     *        blocking on critical sections).
+     * @brief After each conversion the driver applies offset, gain, and
+     *        (optionally) Clarke to axis-0 shunt channels U / V, then
+     *        writes i_alpha / i_beta, and (if the last two args are
+     *        non-NULL) the same-tick U / V phase currents for scope/debug.
+     *        The PWM ISR can read the published values without
+     *        fetch_isensors().
      *
-     * Pass NULL pointers to disable publishing. Drivers that do not run
-     * an ISR-side conversion (mocks, future hall-only) provide a no-op
-     * stub.
+     * Pass NULL for any target to skip that sink. Drivers that do not run
+     * an ISR-side conversion provide a no-op stub.
      */
     void (*set_publish_targets)(esp_foc_isensor_t *self,
                                 q16_t *i_alpha_target,
-                                q16_t *i_beta_target);
+                                q16_t *i_beta_target,
+                                q16_t *i_u_target,
+                                q16_t *i_v_target);
 };

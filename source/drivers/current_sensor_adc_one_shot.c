@@ -62,6 +62,8 @@ typedef struct {
      * the same plumbing on the continuous driver. */
     volatile q16_t *publish_alpha;
     volatile q16_t *publish_beta;
+    volatile q16_t *publish_iu;
+    volatile q16_t *publish_iv;
     esp_foc_isensor_t interface;
 
     int number_of_channels;
@@ -117,6 +119,12 @@ static inline void adc_publish_alpha_beta(isensor_adc_t *obj)
     q16_clarke(iu, iv, iw, &alpha, &beta);
     *obj->publish_alpha = alpha;
     *obj->publish_beta  = beta;
+    if (obj->publish_iu != NULL) {
+        *obj->publish_iu = iu;
+    }
+    if (obj->publish_iv != NULL) {
+        *obj->publish_iv = iv;
+    }
 }
 
 static void isensor_adc_isr(void *arg)
@@ -364,7 +372,9 @@ static void set_filter_cutoff(esp_foc_isensor_t *self, float fc_hz, float fs_hz)
 
 static void set_publish_targets(esp_foc_isensor_t *self,
                                 q16_t *i_alpha_target,
-                                q16_t *i_beta_target)
+                                q16_t *i_beta_target,
+                                q16_t *i_u_target,
+                                q16_t *i_v_target)
 {
     isensor_adc_t *obj =
         __containerof(self, isensor_adc_t, interface);
@@ -372,6 +382,8 @@ static void set_publish_targets(esp_foc_isensor_t *self,
     esp_foc_critical_enter();
     obj->publish_alpha = (volatile q16_t *)i_alpha_target;
     obj->publish_beta  = (volatile q16_t *)i_beta_target;
+    obj->publish_iu = (volatile q16_t *)i_u_target;
+    obj->publish_iv = (volatile q16_t *)i_v_target;
     esp_foc_critical_leave();
 }
 
@@ -463,6 +475,8 @@ esp_foc_isensor_t *isensor_adc_oneshot_new(esp_foc_isensor_adc_oneshot_config_t 
     isensor_adc.interface.set_publish_targets = set_publish_targets;
     isensor_adc.publish_alpha = NULL;
     isensor_adc.publish_beta  = NULL;
+    isensor_adc.publish_iu = NULL;
+    isensor_adc.publish_iv = NULL;
     isensor_adc.number_of_channels = config->number_of_channels;
     /* Default to bypass on every channel; axis init dials a real
      * cutoff in via set_filter_cutoff. */
