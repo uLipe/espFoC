@@ -18,9 +18,10 @@ form, the next launch starts fresh on the default target.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -88,22 +89,44 @@ class HardwareConfig:
     motor_profile: str = "default"
 
 
-def _list_motor_profiles() -> List[str]:
-    """Find scripts/motors/*.json relative to the package root."""
+def _motor_dir() -> str:
     here = os.path.dirname(os.path.abspath(__file__))
     root = os.path.normpath(os.path.join(here, "..", "..", ".."))
-    motors_dir = os.path.join(root, "scripts", "motors")
-    profiles: List[str] = []
+    return os.path.join(root, "scripts", "motors")
+
+
+def _motor_profile_combo_rows() -> List[Tuple[str, str]]:
+    """(profile_id, list_label) for each ``scripts/motors/*.json``.
+
+    ``profile_id`` is the filename without ``.json`` and matches
+    :kconfig:option:`CONFIG_ESP_FOC_MOTOR_PROFILE`.  ``list_label`` prefers
+    the profile's ``"name"`` field when present, e.g.
+    ``KTECH MF4005v2-25T (mf400525t)``.
+    """
+    motors_dir = _motor_dir()
+    rows: List[Tuple[str, str]] = []
     try:
-        for name in os.listdir(motors_dir):
-            if name.endswith(".json"):
-                profiles.append(name[:-5])
+        for fname in os.listdir(motors_dir):
+            if not fname.endswith(".json"):
+                continue
+            stem = fname[:-5]
+            path = os.path.join(motors_dir, fname)
+            label = stem
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    doc = json.load(f)
+                disp = (doc.get("name") or "").strip()
+                if disp:
+                    label = f"{disp} ({stem})"
+            except (OSError, TypeError, json.JSONDecodeError):
+                pass
+            rows.append((stem, label))
     except OSError:
         pass
-    profiles.sort()
-    if not profiles:
-        profiles = ["default"]
-    return profiles
+    rows.sort(key=lambda r: (r[1].lower(), r[0]))
+    if not rows:
+        rows = [("default", "default")]
+    return rows
 
 
 def _populate_pin_combo(combo: QComboBox, target: str,
@@ -320,13 +343,15 @@ class HardwarePanel(QWidget):
         mf.addRow("Pole pairs", self._pole_pairs)
 
         self._profile = QComboBox()
-        for p in _list_motor_profiles():
-            self._profile.addItem(p, p)
+        for profile_id, label in _motor_profile_combo_rows():
+            self._profile.addItem(label, profile_id)
         idx = self._profile.findData(self._cfg.motor_profile)
         if idx >= 0:
             self._profile.setCurrentIndex(idx)
-        self._profile.currentTextChanged.connect(
+        self._profile.currentIndexChanged.connect(
             lambda *_: self.configChanged.emit())
+        self._profile.setToolTip(
+            "Build-time autotune profile: files under scripts/motors/*.json")
         mf.addRow("Profile", self._profile)
         root.addWidget(m_box)
 

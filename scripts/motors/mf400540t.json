@@ -1,0 +1,16 @@
+{
+  "name": "KTECH MF4005v2-40T",
+  "comment": "KTech motor servos, without the control board, this is the 40 Turns version",
+  "motor": {
+    "resistance_ohm": 4.3,
+    "inductance_h":   0.0012,
+    "pole_pairs":     13
+  },
+  "control": {
+    "current_bw_hz":  4000.0,
+    "v_max_volts":    12.0
+  },
+  "safety": {
+    "min_phase_margin_deg": 30.0
+  }
+}
