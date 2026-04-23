@@ -10,7 +10,9 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QMainWindow,
+    QPushButton,
     QSplitter,
     QTabWidget,
     QSizePolicy,
@@ -20,7 +22,7 @@ from PySide6.QtWidgets import (
 from ..link import LinkReader
 from ..protocol import AxisStateFlag, TunerClient, TunerError
 from ..protocol.tuner import TUNER_FIRMWARE_TYPE_TSGX
-from .theme import make_badge_qss
+from .theme import make_badge_qss, make_reset_board_button_qss
 from .analysis_panel import AnalysisPanel
 from .generate_app_panel import GenerateAppPanel
 from .scope_panel import ScopePanel
@@ -114,7 +116,15 @@ class MainWindow(QMainWindow):
         self._link_descr.setStyleSheet("color: #9aa0a6; font-size: 12px;")
         self._link_descr.setText(dtext)
         self._link_descr.setMinimumWidth(100)
+        self._reset_btn = QPushButton("RESET BOARD")
+        self._reset_btn.setCursor(Qt.PointingHandCursor)
+        self._reset_btn.setStyleSheet(make_reset_board_button_qss())
+        self._reset_btn.setToolTip("Reinicia a placa (esp_restart). Emergência.")
+        self._reset_btn.clicked.connect(self._on_reset_board_clicked)
+        if link_mode == "demo":
+            self._reset_btn.setEnabled(False)
         sb.addPermanentWidget(self._link_badge, 0)
+        sb.addPermanentWidget(self._reset_btn, 0)
         sb.addPermanentWidget(self._link_descr, 0)
         if link_mode == "demo":
             self._set_link_badge("LINK_DEMO")
@@ -152,6 +162,19 @@ class MainWindow(QMainWindow):
 
         if link_mode == "hw":
             self._update_link_badge()
+
+    def _on_reset_board_clicked(self) -> None:
+        r = QMessageBox.question(
+            self, "Reiniciar a placa",
+            "Reiniciar a placa agora? A ligação USB pode cair momentaneamente.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if r != QMessageBox.Yes:
+            return
+        try:
+            self._client.reset_board()
+        except TunerError as e:
+            QMessageBox.warning(self, "Reinício", str(e))
 
     def _set_link_badge(self, key: str) -> None:
         text, qss = make_badge_qss(key)

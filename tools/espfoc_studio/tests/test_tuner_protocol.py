@@ -137,6 +137,8 @@ class FakeFirmware(threading.Thread):
                 self.kp = self._from_q16(cmd[0:4]) * 5.0
                 self.ki = self._from_q16(cmd[4:8]) * 1000.0
                 self._send_response(seq, 0)
+            elif pid == int(ParamId.CMD_RESET_BOARD):
+                self._send_response(seq, 0)
             else:
                 self._send_response(seq, -2)
         else:
@@ -231,6 +233,14 @@ def test_recompute_gains():
         fw.stop()
 
 
+def test_reset_board():
+    cli, fw = _setup()
+    try:
+        cli.reset_board()
+    finally:
+        fw.stop()
+
+
 def main() -> int:
     tests = [
         test_read_pi_gains,
@@ -239,6 +249,7 @@ def main() -> int:
         test_override_flow_then_motion,
         test_motion_rejected_when_override_off,
         test_recompute_gains,
+        test_reset_board,
     ]
     failed = 0
     for t in tests:

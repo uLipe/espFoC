@@ -86,6 +86,8 @@ typedef enum {
     ESP_FOC_TUNER_CMD_PERSIST_NVS       = 0x00B0, /* save current gains */
     ESP_FOC_TUNER_CMD_LOAD_NVS          = 0x00B1, /* apply NVS overlay */
     ESP_FOC_TUNER_CMD_ERASE_NVS         = 0x00B2, /* nuke calibration ns */
+    ESP_FOC_TUNER_CMD_RESET_BOARD      = 0x00B3, /* host emergency: esp_restart
+                                                   * after response; no payload */
 } esp_foc_tuner_id_t;
 
 /* Bitmap returned by ESP_FOC_TUNER_PARAM_AXIS_STATE. */

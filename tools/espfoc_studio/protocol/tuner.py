@@ -76,6 +76,7 @@ class ParamId(IntEnum):
     CMD_PERSIST_NVS     = 0x00B0
     CMD_LOAD_NVS        = 0x00B1
     CMD_ERASE_NVS       = 0x00B2
+    CMD_RESET_BOARD     = 0x00B3
 
 # 'TSGX' little-endian as a sentinel returned by tuner_studio_target.
 TUNER_FIRMWARE_TYPE_TSGX = 0x58475354
@@ -365,3 +366,15 @@ class TunerClient:
 
     def erase_calibration(self) -> None:
         self._exec(ParamId.CMD_ERASE_NVS)
+
+    def reset_board(self, timeout: float = 1.2) -> None:
+        """Ask firmware to `esp_restart()`. The link usually drops before
+        the response returns; a timeout is normal and is treated as success.
+        """
+        try:
+            self._exec(ParamId.CMD_RESET_BOARD, timeout=timeout)
+        except TunerError as e:
+            err = str(e).lower()
+            if "timeout" in err or "link" in err or "response" in err:
+                return
+            raise

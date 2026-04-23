@@ -62,6 +62,33 @@ def make_badge_qss(state_key: str) -> tuple[str, str]:
     return label, qss
 
 
+def make_reset_board_button_qss() -> str:
+    """Pill matching link badges, with a clear border and hover for a
+    pushbutton (emergency board reset)."""
+    fg, bg = "#ffffff", _ERROR
+    return (
+        f"QPushButton {{"
+        f" background-color: {bg};"
+        f" color: {fg};"
+        f" border: 1px solid #ffcdd2;"
+        f" border-radius: 6px;"
+        f" padding: 4px 12px;"
+        f" font-weight: 600;"
+        f" font-size: 11px;"
+        f" letter-spacing: 0.5px;"
+        f" min-width: 96px;"
+        f"}}"
+        f"QPushButton:hover {{"
+        f" background-color: #e53935;"
+        f" border: 1px solid #ffebee;"
+        f" color: #fff;"
+        f"}}"
+        f"QPushButton:pressed {{ background-color: #c62828; }}"
+        f"QPushButton:disabled {{ background-color: #4e342e; color: #bcaaa4;"
+        f" border-color: #5d4037; }}"
+    )
+
+
 def apply_dark_theme(app: QApplication) -> None:
     app.setStyle("Fusion")
 

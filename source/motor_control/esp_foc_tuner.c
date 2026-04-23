@@ -7,6 +7,9 @@
 #include <string.h>
 #include <stdio.h>
 #include "esp_log.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "espFoC/esp_foc_tuner.h"
 #include "espFoC/esp_foc_axis_tuning.h"
 #include "espFoC/esp_foc_axis.h"
@@ -90,6 +93,13 @@ static q16_t read_q16(const void *src)
  * handle_write needs it for the LOG-channel breadcrumb on the
  * current-filter cutoff write. */
 static void tuner_log(const char *msg);
+
+static void board_reset_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(150));
+    esp_restart();
+}
 
 static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
                                  esp_foc_tuner_id_t id,
@@ -401,6 +411,18 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
                   ? "calibration: NVS namespace erased"
                   : "calibration: erase failed");
         return err;
+    }
+
+    if (id == ESP_FOC_TUNER_CMD_RESET_BOARD) {
+        (void)axis;
+        (void)payload;
+        (void)payload_len;
+        tuner_log("board: host requested reset (rebooting)");
+        if (xTaskCreate(board_reset_task, "foc_host_rst", 3072, NULL,
+                        tskIDLE_PRIORITY + 1, NULL) != pdPASS) {
+            esp_restart();
+        }
+        return ESP_FOC_OK;
     }
 
     return ESP_FOC_ERR_INVALID_ARG;
