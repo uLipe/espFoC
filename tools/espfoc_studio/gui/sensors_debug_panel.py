@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..link import LinkReader
+from ..link.scope_sample import decode_scope_payload_to_floats_csv_first
 from .crosshair import attach_crosshair
 from .scope_panel import ScopePanel
 
@@ -200,8 +201,7 @@ class SensorsDebugPanel(QWidget):
         last_vals: Optional[List[float]] = None
         for t_mono, payload in batch:
             try:
-                line = payload.decode("ascii", errors="ignore").strip()
-                vals = [float(x) for x in line.split(",") if x]
+                vals = decode_scope_payload_to_floats_csv_first(payload)
             except ValueError:
                 continue
             if len(vals) < need or not self._active:

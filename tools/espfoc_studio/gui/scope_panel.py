@@ -1,8 +1,8 @@
 """Scope panel: rolling time-series of every channel emitted by the
 firmware's esp_foc_scope.
 
-The firmware encodes each sample as a single CSV line on the SCOPE
-link channel (``"%f,%f,...\\n"``). This panel:
+The firmware sends SCOPE v1 binary (Q16.16 as int32 LE) or, for older
+builds, CSV floats on the SCOPE link channel. This panel:
 
 * discovers the channel count from the first line (so any number of
   scope_add_channel() calls work without UI changes);
@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..link import LinkReader
+from ..link.scope_sample import decode_scope_payload_to_floats_csv_first
 from .crosshair import attach_crosshair
 
 
@@ -210,8 +211,7 @@ class ScopePanel(QWidget):
         # Ingest every pending frame into the per-channel buffers.
         for t_mono, payload in pending:
             try:
-                line = payload.decode("ascii", errors="ignore").strip()
-                values = [float(tok) for tok in line.split(",") if tok]
+                values = decode_scope_payload_to_floats_csv_first(payload)
             except ValueError:
                 continue
             if not values:

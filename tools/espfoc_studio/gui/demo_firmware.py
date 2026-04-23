@@ -22,6 +22,7 @@ import time
 from typing import Optional
 
 from ..link import Channel, Decoder, LoopbackTransport, MAX_PAYLOAD, Status, encode
+from ..link.scope_sample import pack_scope_i32_to_payload
 from ..model import MotorParams, PiGains, mpz_design
 from ..protocol import AxisStateFlag, Op, ParamId
 from ..protocol.tuner import TUNER_FIRMWARE_TYPE_TSGX
@@ -104,8 +105,8 @@ class DemoFirmware(threading.Thread):
             return (self.target_iq, self._i_actual, time.monotonic())
 
     # Configurable set of channels the demo streams on the SCOPE channel.
-    # The firmware's esp_foc_scope.c emits CSV text as the payload; we do
-    # the same here so the host-side ScopePanel can share the parser.
+    # The firmware's esp_foc_scope.c emits SCOPE v1 binary; the demo
+    # matches so the same decoder runs on the host.
     # Sub-iterations of the synthetic plant per wall-clock tick. With
     # ts_s = 25 us this gives a wall-clock budget of 1 ms per outer
     # loop iteration, matching the previous demo cadence so the scope
@@ -114,9 +115,19 @@ class DemoFirmware(threading.Thread):
     SUB_STEPS = 40
     SCOPE_DECIMATION = 4
 
-    def _scope_frame_csv(self) -> bytes:
-        """Reproduce the firmware's esp_foc_scope.c payload format:
-        comma-separated floats terminated with a newline.
+    @staticmethod
+    def _float_to_q16_i32(f: float) -> int:
+        d = f * 65536.0
+        vi = int(round(d))
+        if vi > 0x7FFFFFFF:
+            return 0x7FFFFFFF
+        if vi < -0x80000000:
+            return -0x80000000
+        return vi
+
+    def _scope_frame_payload(self) -> bytes:
+        """SCOPE v1: same channel order as the real firmware (six channels
+        in this demo).
 
         Channel convention (shared with the real firmware):
           ch0 = u_u, ch1 = u_v, ch2 = u_w  (SVPWM three-phase, for the
@@ -164,8 +175,8 @@ class DemoFirmware(threading.Thread):
                   self.target_iq,  # ch3: current ref
                   self._i_actual,  # ch4: i_q measured
                   u_q_cmd)         # ch5: u_q command
-        text = ",".join(f"{v:.6f}" for v in fields) + "\n"
-        return text.encode("ascii")
+        return pack_scope_i32_to_payload(
+            [self._float_to_q16_i32(f) for f in fields])
 
     # --- Thread lifecycle --------------------------------------------------
 
@@ -212,7 +223,7 @@ class DemoFirmware(threading.Thread):
             sub_counter += 1
             if sub_counter >= self.SCOPE_DECIMATION:
                 sub_counter = 0
-                payload = self._scope_frame_csv()
+                payload = self._scope_frame_payload()
                 if len(payload) <= MAX_PAYLOAD:
                     try:
                         self._t.send_bytes(

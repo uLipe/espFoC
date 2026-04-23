@@ -31,7 +31,7 @@ MAX_FRAME = HEADER_BYTES + MAX_PAYLOAD + TRAILER_BYTES
 
 class Channel(IntEnum):
     TUNER = 0x01
-    SCOPE = 0x02
+    SCOPE = 0x02  # payload: SCOPE v1 (see link.scope_sample) or legacy CSV line
     LOG = 0x03
 
 

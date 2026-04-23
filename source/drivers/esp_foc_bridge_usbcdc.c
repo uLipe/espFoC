@@ -39,13 +39,6 @@ static void rx_cb(int itf, cdcacm_event_t *event)
     }
 }
 
-static void line_state_cb(int itf, cdcacm_event_t *event)
-{
-    int dtr = event->line_state_changed_data.dtr;
-    int rts = event->line_state_changed_data.rts;
-    ESP_LOGI(TAG, "CDC line state: itf=%d DTR=%d RTS=%d", itf, dtr, rts);
-}
-
 void esp_foc_tuner_init_bus_callback(void)
 {
     if (s_bus_ready) {
@@ -62,10 +55,8 @@ void esp_foc_tuner_init_bus_callback(void)
         .callback_line_coding_changed = NULL,
     };
     ESP_ERROR_CHECK(tinyusb_cdcacm_init(&acm_cfg));
-    ESP_ERROR_CHECK(tinyusb_cdcacm_register_callback(
-                        TINYUSB_CDC_ACM_0,
-                        CDC_EVENT_LINE_STATE_CHANGED,
-                        &line_state_cb));
+    /* Intentionally no LINE_STATE_CHANGED handler: logging DTR/RTS at INFO
+     * on every host open/toggle flooded the link task and starved scope. */
 
     esp_foc_tuner_reactor_reset();
     s_bus_ready = true;
@@ -100,7 +91,7 @@ void esp_foc_tuner_send_callback(const uint8_t *buf, size_t len)
 }
 
 #if defined(CONFIG_ESP_FOC_SCOPE)
-/* Mirror of the UART bridge: wrap scope CSV in a SCOPE-channel link
+/* Mirror of the UART bridge: wrap scope samples in a SCOPE-channel link
  * frame so the host sees both streams demuxed on the same USB pipe. */
 static uint8_t s_scope_seq = 0;
 
@@ -115,7 +106,7 @@ void esp_foc_send_buffer_callback(const uint8_t *buffer, int size)
         return;
     }
     if ((size_t)size > ESP_FOC_LINK_MAX_PAYLOAD) {
-        ESP_LOGW(TAG, "scope CSV %d > max %u, dropped",
+        ESP_LOGW(TAG, "scope frame %d > max %u, dropped",
                  size, (unsigned)ESP_FOC_LINK_MAX_PAYLOAD);
         return;
     }

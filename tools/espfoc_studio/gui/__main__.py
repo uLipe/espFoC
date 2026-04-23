@@ -12,6 +12,7 @@ Closing the window stops the demo threads and exits cleanly.
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import sys
 from typing import Optional
@@ -34,6 +35,9 @@ def _parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
                    help="baud rate when --port is used")
     p.add_argument("--axis", type=int, default=0,
                    help="axis id the GUI should attach to (0..3)")
+    p.add_argument(
+        "--scope-csv", action="store_true",
+        help="decode legacy SCOPE as CSV (match CONFIG_ESP_FOC_SCOPE_LEGACY_CSV on device)")
     return p.parse_args(argv)
 
 
@@ -72,6 +76,10 @@ def _setup_serial(port: str, baud: int, axis: int
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = _parse_args(argv)
+    if getattr(args, "scope_csv", False):
+        # Host-side mirror of firmware Kconfig: decode comma floats only when
+        # explicit (avoids a CSV code path in the default binary-only case).
+        os.environ["ESP_FOC_STUDIO_SCOPE_CSV"] = "1"
 
     # Import Qt lazily so tests that only exercise the library layers do
     # not have to pay the GUI import cost.

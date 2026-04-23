@@ -29,7 +29,13 @@ from espfoc_studio.gui.demo_firmware import DemoFirmware
 from espfoc_studio.gui.main_window import MainWindow
 from espfoc_studio.gui.theme import apply_dark_theme
 from espfoc_studio.link import LinkReader, LoopbackTransport
+from espfoc_studio.link.scope_sample import pack_scope_i32_to_payload
 from espfoc_studio.protocol import TunerClient
+
+
+def _scope_bin_32(*vals: float) -> bytes:
+    q = [int(round(f * 65536.0)) for f in vals]
+    return pack_scope_i32_to_payload(q)
 
 
 def test_mainwindow_demo_boots_polls_and_streams_scope():
@@ -97,7 +103,8 @@ def test_scope_panel_wallclock_and_autoset():
     for i in range(200):
         # Patch the inbox directly so we control the timestamps.
         with panel._inbox_lock:
-            panel._inbox.append((base + i * 1e-3, b"1.0,2.0,3.0\n"))
+            panel._inbox.append((
+                base + i * 1e-3, _scope_bin_32(1.0, 2.0, 3.0)))
     panel._render_tick()
     assert panel._n_channels == 3
     assert len(panel._time_buf) == 200
@@ -113,7 +120,7 @@ def test_scope_panel_wallclock_and_autoset():
         assert len(buf) == 0
     # Subsequent injection lands at near-zero relative time.
     with panel._inbox_lock:
-        panel._inbox.append((time.monotonic(), b"4.0,5.0,6.0\n"))
+        panel._inbox.append((time.monotonic(), _scope_bin_32(4.0, 5.0, 6.0)))
     panel._render_tick()
     assert len(panel._time_buf) == 1
     assert panel._time_buf[0] < 0.05  # fresh origin
@@ -214,9 +221,10 @@ def test_scope_panel_roll_mode_x_axis_stays_bounded():
     # arrives one tick before "now".
     panel._t0 = time.monotonic() - 3600.0
     with panel._inbox_lock:
-        panel._inbox.append((time.monotonic() - 0.010, b"1.0,2.0\n"))
-        panel._inbox.append((time.monotonic() - 0.005, b"1.5,2.5\n"))
-        panel._inbox.append((time.monotonic(),         b"2.0,3.0\n"))
+        panel._inbox.append((time.monotonic() - 0.010, _scope_bin_32(1.0, 2.0)))
+        panel._inbox.append((
+            time.monotonic() - 0.005, _scope_bin_32(1.5, 2.5)))
+        panel._inbox.append((time.monotonic(), _scope_bin_32(2.0, 3.0)))
     panel._render_tick()
     assert panel._n_channels == 2
     # Pull the rendered X data from the first curve and check that

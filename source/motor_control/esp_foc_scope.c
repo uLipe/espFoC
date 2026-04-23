@@ -22,14 +22,42 @@
  * SOFTWARE.
  */
 
+#include <assert.h>
 #include <string.h>
-#include <math.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include "espFoC/esp_foc.h"
+#include "espFoC/esp_foc_link.h"
 #include "esp_log.h"
+#if defined(CONFIG_ESP_FOC_SCOPE_LEGACY_CSV) && CONFIG_ESP_FOC_SCOPE_LEGACY_CSV
+#include <stdio.h>
+#include "espFoC/utils/esp_foc_q16.h"
+#endif
 
 const char *TAG = "ESP_FOC_SCOPE";
+
+#if !defined(CONFIG_ESP_FOC_SCOPE_LEGACY_CSV) || !CONFIG_ESP_FOC_SCOPE_LEGACY_CSV
+/* Binary SCOPE v1: 0xFF 'S' 'C' 0x01, uint16le n, n × int32le (q16_t). */
+#define SCOPE_WIRE_V1 0x01U
+/* No cast: #if and constexpr-like checks in some GCC builds reject
+ * (unsigned) around CONFIG_* in the preprocessor. */
+#define SCOPE_BIN_BODY_LEN  (6U + 4U * CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS)
+_Static_assert(SCOPE_BIN_BODY_LEN <= ESP_FOC_LINK_MAX_PAYLOAD,
+    "Scope v1 frame exceeds link payload; reduce CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS");
+
+static inline void put_u16_le(uint8_t *d, uint16_t v)
+{
+    d[0] = (uint8_t)(v & 0xFFU);
+    d[1] = (uint8_t)((v >> 8) & 0xFFU);
+}
+
+static inline void put_i32_le(uint8_t *d, int32_t v)
+{
+    d[0] = (uint8_t)((uint32_t)v & 0xFFU);
+    d[1] = (uint8_t)(((uint32_t)v >> 8) & 0xFFU);
+    d[2] = (uint8_t)(((uint32_t)v >> 16) & 0xFFU);
+    d[3] = (uint8_t)(((uint32_t)v >> 24) & 0xFFU);
+}
+#endif
 
 struct scope_frame {
     /* Buffered as raw Q16 so the data_push path stays float-free —
@@ -50,9 +78,9 @@ static uint32_t wr_buff_index = 0;
 
 static void esp_foc_scope_daemon_thread(void *arg)
 {
-    int idx = 0;
-    char out_buf[512] = {0,};
     struct scope_frame *next_sample;
+
+    (void)arg;
     memset(&scope_buffer, 0, sizeof(scope_buffer));
     scope_ev = esp_foc_get_event_handle();
     esp_foc_wait_notifier();
@@ -63,26 +91,51 @@ static void esp_foc_scope_daemon_thread(void *arg)
             esp_foc_wait_notifier();
         }
 
-        idx = 0;
         next_sample = &scope_buffer[ping_pong_switch][rd_buff_index];
+#if defined(CONFIG_ESP_FOC_SCOPE_LEGACY_CSV) && CONFIG_ESP_FOC_SCOPE_LEGACY_CSV
+    {
+        int idx = 0;
+        char line_buf[512];
+
         if(used_channels != 0) {
-            for(int i = 0; i < CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS; i++) {
-                if(used_channels & (1 << i)) {
-                    idx += sprintf(&out_buf[idx],"%f,",
-                                   q16_to_float(next_sample->data[i]));
+            for (int j = 0; j < CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS; j++) {
+                if(used_channels & (1U << j)) {
+                    idx += sprintf(&line_buf[idx], "%f,",
+                        q16_to_float(next_sample->data[j]));
                 }
             }
-            out_buf[idx-1] = '\n';
-            out_buf[idx] = 0;
+            if (idx > 0) {
+                line_buf[idx - 1] = '\n';
+            }
         } else {
-            /* send at least one channel */
-            idx += sprintf(&out_buf[idx],"%f,",
-                           q16_to_float(next_sample->data[0]));
-            out_buf[idx-1] = '\n';
-            out_buf[idx] = 0;
+            idx = sprintf(&line_buf[0], "%f",
+                q16_to_float(next_sample->data[0]));
+            line_buf[idx++] = '\n';
+            line_buf[idx]   = 0;
         }
+        esp_foc_send_buffer_callback((const uint8_t *)line_buf, (size_t)idx);
+    }
+#else
+    {
+        static uint8_t out_buf[ESP_FOC_LINK_MAX_PAYLOAD];
+        const size_t olen = SCOPE_BIN_BODY_LEN;
+        uint8_t *wp;
+        int i;
 
-        esp_foc_send_buffer_callback((const uint8_t *)out_buf, idx);
+        wp = out_buf;
+        *wp++ = 0xFFU;
+        *wp++ = (uint8_t) 'S';
+        *wp++ = (uint8_t) 'C';
+        *wp++ = SCOPE_WIRE_V1;
+        put_u16_le(wp, (uint16_t) CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS);
+        wp += 2;
+        for (i = 0; i < CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS; i++) {
+            put_i32_le(wp, (int32_t) next_sample->data[i]);
+            wp += 4;
+        }
+        esp_foc_send_buffer_callback((const uint8_t *)out_buf, olen);
+    }
+#endif
         rd_buff_index++;
     }
 }

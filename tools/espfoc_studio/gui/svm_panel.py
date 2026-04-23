@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..link import LinkReader
+from ..link.scope_sample import decode_scope_payload_to_floats_csv_first
 from .crosshair import attach_crosshair
 
 
@@ -272,13 +273,12 @@ class SvmPanel(QWidget):
 
         for t_mono, payload in pending:
             try:
-                tokens = payload.decode("ascii",
-                                       errors="ignore").strip().split(",")
-                vals = [float(t) for t in tokens[:3] if t]
+                allv = decode_scope_payload_to_floats_csv_first(payload)
             except ValueError:
                 continue
-            if len(vals) < 3:
+            if len(allv) < 3:
                 continue
+            vals = allv[:3]
             u_u, u_v, u_w = vals[0], vals[1], vals[2]
             a, b = _clarke(u_u, u_v, u_w)
             self._last_abc = (u_u, u_v, u_w)

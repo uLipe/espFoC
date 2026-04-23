@@ -87,6 +87,18 @@ static void wire_scope_channels(void)
 #endif
 }
 
+#if defined(CONFIG_ESP_FOC_SCOPE)
+/* Before esp_foc_run, no control ISR calls esp_foc_scope_data_push, so the scope
+ * ring does not complete a batch and the daemon can block; pump here so
+ * TunerStudio still receives samples in the pre-align "init" state. */
+static void tuner_pump_scope_idle(void)
+{
+    for (int n = 0; n < CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE; n++) {
+        esp_foc_scope_data_push();
+    }
+}
+#endif
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "boot — tuner_studio_target");
@@ -180,6 +192,9 @@ void app_main(void)
     }
 
     wire_scope_channels();
+#if defined(CONFIG_ESP_FOC_SCOPE)
+    tuner_pump_scope_idle();
+#endif
 
     esp_foc_set_regulation_callback(&s_axis, parked_regulation_cb);
     ESP_ERROR_CHECK(esp_foc_tuner_attach_axis(0, &s_axis));
@@ -196,6 +211,9 @@ void app_main(void)
             esp_foc_run(&s_axis);
             break;
         }
+#if defined(CONFIG_ESP_FOC_SCOPE)
+        tuner_pump_scope_idle();
+#endif
         vTaskDelay(pdMS_TO_TICKS(200));
     }
 

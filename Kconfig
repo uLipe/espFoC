@@ -27,6 +27,15 @@ menu "espFoC Settings"
             int "Max scope channels"
             default 8
 
+        config ESP_FOC_SCOPE_LEGACY_CSV
+            bool "Use legacy SCOPE as CSV floats (sprintf)"
+            depends on ESP_FOC_SCOPE
+            default n
+            help
+                When n (default) the link sends SCOPE v1 binary (Q16 int32
+                per channel, see host scope_sample.py). When y, the old
+                comma-separated %f line is used for a matching host build.
+
         config ESP_FOC_SCOPE_BUFFER_SIZE
             int "Scope ring buffer (frames per half-buffer)"
             default 4096 if ESP_FOC_SCOPE_NUM_CHANNELS = 8

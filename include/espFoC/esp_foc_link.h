@@ -46,7 +46,7 @@ extern "C" {
 
 typedef enum {
     ESP_FOC_LINK_CH_TUNER  = 0x01,  /* tuner request / response */
-    ESP_FOC_LINK_CH_SCOPE  = 0x02,  /* scope sample stream */
+    ESP_FOC_LINK_CH_SCOPE  = 0x02,  /* scope: binary Q16, see SCOPE v1 in esp_foc_scope.c */
     ESP_FOC_LINK_CH_LOG    = 0x03,  /* free-form log lines */
 } esp_foc_link_channel_t;
 
