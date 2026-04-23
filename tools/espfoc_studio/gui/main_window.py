@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..link import LinkReader
-from ..protocol import TunerClient, TunerError
+from ..protocol import AxisStateFlag, TunerClient, TunerError
 from ..protocol.tuner import TUNER_FIRMWARE_TYPE_TSGX
 from .theme import make_badge_qss
 from .analysis_panel import AnalysisPanel
@@ -121,12 +121,11 @@ class MainWindow(QMainWindow):
         else:
             self._set_link_badge("LINK_WAIT")
 
-        # Live gains readout — every 500 ms is plenty for human perception
-        # and leaves headroom for the 50 FPS scope. Each poll issues five
-        # short tuner round-trips; 0.5 s keeps CPU usage near the noise
-        # floor on real serial links.
+        # Live gains: the poll does several serial round-trips on the UI
+        # thread. While the axis is not yet aligned, refresh at 1 s to keep
+        # the window responsive; after align, 500 ms matches the old feel.
         self._timer = QTimer(self)
-        self._timer.setInterval(500)
+        self._timer.setInterval(1000)
         self._timer.timeout.connect(self._poll)
         self._timer.start()
 
@@ -240,6 +239,12 @@ class MainWindow(QMainWindow):
                 and not self._client.reader.is_running):
             self._tuning.last_poll_ok = False
         self._tuning.poll()
+        st = self._tuning.last_axis_state
+        if (self._link_mode != "demo" and st is not None
+                and (st & AxisStateFlag.ALIGNED)):
+            self._timer.setInterval(500)
+        else:
+            self._timer.setInterval(1000)
         self._update_link_badge()
         if (self._serial_config is not None
                 and not self._tuning.last_poll_ok

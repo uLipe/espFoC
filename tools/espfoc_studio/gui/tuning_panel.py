@@ -91,6 +91,10 @@ class TuningPanel(QWidget):
         self._cal_present = False
         self._align_thread: Optional[_AlignAxisThread] = None
         self._align_progress: Optional[AlignmentProgressDialog] = None
+        self.last_axis_state: Optional[AxisStateFlag] = None
+        self._tuner_poll_serial = 0
+        self._tuner_want_full_read: bool = True
+        self._tuner_last_vmax: float = 0.0
 
         # The whole panel sits inside a QScrollArea so a small window
         # gets a vertical scroll bar instead of clipping content. Keeps
@@ -273,20 +277,39 @@ class TuningPanel(QWidget):
         except Exception:
             pass
 
+    def request_full_tuner_poll(self) -> None:
+        """Next :meth:`poll` also fetches Vmax and NVS-present. Those change
+        rarely, so the common path uses five serial round-trips only (still
+        blocking the UI thread) instead of seven."""
+        self._tuner_want_full_read = True
+
     def poll(self) -> None:
-        """Refresh the live readout. Called periodically by MainWindow."""
+        """Refresh the live readout. Called periodically by MainWindow.
+
+        Kp, Ki, ILim, I-LPF, and axis state are read every tick. Vmax and
+        NVS-present are refreshed every fourth tick, or on demand via
+        :meth:`request_full_tuner_poll`.
+        """
+        self._tuner_poll_serial += 1
+        want_full = self._tuner_want_full_read
+        if not want_full and self._tuner_poll_serial % 4 == 0:
+            want_full = True
         try:
             kp = self._client.read_kp()
             ki = self._client.read_ki()
             lim = self._client.read_int_lim()
-            vmax = self._client.read_v_max()
             fc = self._client.read_current_filter_fc()
             state = self._client.read_axis_state()
-            present = self._client.is_calibration_present()
+            if want_full:
+                self._tuner_last_vmax = self._client.read_v_max()
+                self._cal_present = self._client.is_calibration_present()
+            vmax = self._tuner_last_vmax
+            present = self._cal_present
         except TunerError as e:
             self._status.setText(str(e))
             self.last_poll_ok = False
             return
+        self._tuner_want_full_read = False
         self.last_poll_ok = True
         self._status.setText("")
         self._kp_label.setText(f"{kp:9.4f}")
@@ -294,12 +317,12 @@ class TuningPanel(QWidget):
         self._lim_label.setText(f"{lim:9.3f}")
         self._vmax_label.setText(f"{vmax:9.3f}")
         self._fc_label.setText(f"{fc:9.1f}")
+        self.last_axis_state = state
         # Single colored badge driven by the dominant flag.
         badge_key = self._badge_key_for_state(state)
         label, qss = make_badge_qss(badge_key)
         self._state_label.setText(label)
         self._state_label.setStyleSheet(qss)
-        self._cal_present = present
         self._cal_label.setText("calibration: " +
                                 ("\u2713 present in NVS" if present
                                  else "\u2717 none stored"))
@@ -423,6 +446,7 @@ class TuningPanel(QWidget):
         self.long_operation.emit(False)
         self._align_thread = None
         try:
+            self.request_full_tuner_poll()
             self.poll()
         except Exception:
             pass
@@ -442,6 +466,8 @@ class TuningPanel(QWidget):
             self._status.setText(str(e))
             return
         self._status.setText("")
+        self.request_full_tuner_poll()
+        self.poll()
 
     def _on_load(self) -> None:
         try:
@@ -449,6 +475,7 @@ class TuningPanel(QWidget):
         except TunerError as e:
             self._status.setText(str(e))
             return
+        self.request_full_tuner_poll()
         self.poll()
 
     def _on_erase(self) -> None:
@@ -457,6 +484,7 @@ class TuningPanel(QWidget):
         except TunerError as e:
             self._status.setText(str(e))
             return
+        self.request_full_tuner_poll()
         self.poll()
 
     # --- LOG channel viewer --------------------------------------------
