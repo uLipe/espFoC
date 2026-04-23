@@ -30,6 +30,20 @@ menu "TunerStudio target — pin map"
         range 0 54
         default 17
 
+    config TUNER_TARGET_PWM_EN_PIN
+        int "Gate enable GPIO (set to -1 if the driver is not brought out to a GPIO)"
+        range -1 54
+        default -1
+        help
+            When set to 0 or a positive value, the MCPWM driver drives that GPIO for enable.
+            If "Active-low enable" is set, the GPIO number is the same but the line is driven
+            with inverted logic (typical n-FET / driver chip with active-low EN).
+
+    config TUNER_TARGET_PWM_EN_ACT_LOW
+        bool "Active-low enable (inverted relative to 'driver enabled')"
+        default n
+        depends on TUNER_TARGET_PWM_EN_PIN >= 0
+
     config TUNER_TARGET_PWM_FREQ_HZ
         int "PWM frequency [Hz]"
         default 20000

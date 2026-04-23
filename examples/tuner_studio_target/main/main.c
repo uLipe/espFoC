@@ -81,6 +81,20 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "boot — tuner_studio_target");
 
+    int en_gpio;
+    if (CONFIG_TUNER_TARGET_PWM_EN_PIN < 0) {
+        en_gpio = -1;
+    } else {
+#ifdef CONFIG_TUNER_TARGET_PWM_EN_ACT_LOW
+        if (CONFIG_TUNER_TARGET_PWM_EN_ACT_LOW) {
+            en_gpio = -CONFIG_TUNER_TARGET_PWM_EN_PIN;
+        } else
+#endif
+        {
+            en_gpio = CONFIG_TUNER_TARGET_PWM_EN_PIN;
+        }
+    }
+
     s_inverter = inverter_6pwm_mpcwm_new(
         CONFIG_TUNER_TARGET_PWM_U_HI,
         CONFIG_TUNER_TARGET_PWM_U_LO,
@@ -88,7 +102,7 @@ void app_main(void)
         CONFIG_TUNER_TARGET_PWM_V_LO,
         CONFIG_TUNER_TARGET_PWM_W_HI,
         CONFIG_TUNER_TARGET_PWM_W_LO,
-        -1,
+        en_gpio,
         (float)CONFIG_TUNER_TARGET_DC_LINK_V,
         0);
     if (s_inverter == NULL) {

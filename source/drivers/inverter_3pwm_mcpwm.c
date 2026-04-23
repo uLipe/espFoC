@@ -32,6 +32,7 @@
 
 typedef struct {
     int enable_gpio;
+    int enable_inverted;
     mcpwm_timer_handle_t timer;
     mcpwm_oper_handle_t operators[3];
     mcpwm_cmpr_handle_t comparators[3];
@@ -125,17 +126,21 @@ static uint32_t get_inverter_pwm_rate(esp_foc_inverter_t *self)
 static void inverter_enable(esp_foc_inverter_t *self)
 {
     esp_foc_mcpwm_inverter_t *obj =
-    __containerof(self, esp_foc_mcpwm_inverter_t, interface);
-
-    gpio_set_level(obj->enable_gpio, true);
+        __containerof(self, esp_foc_mcpwm_inverter_t, interface);
+    if (obj->enable_gpio < 0) {
+        return;
+    }
+    gpio_set_level(obj->enable_gpio, obj->enable_inverted ? 0 : 1);
 }
 
 static void inverter_disable(esp_foc_inverter_t *self)
 {
     esp_foc_mcpwm_inverter_t *obj =
-    __containerof(self, esp_foc_mcpwm_inverter_t, interface);
-
-    gpio_set_level(obj->enable_gpio, false);
+        __containerof(self, esp_foc_mcpwm_inverter_t, interface);
+    if (obj->enable_gpio < 0) {
+        return;
+    }
+    gpio_set_level(obj->enable_gpio, obj->enable_inverted ? 1 : 0);
 }
 
 
@@ -146,16 +151,29 @@ esp_foc_inverter_t *inverter_3pwm_mpcwm_new(int gpio_u, int gpio_v, int gpio_w, 
         return NULL;
     }
 
-    gpio_config_t drv_en_config = {
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = 1ULL << gpio_enable,
-    };
+    if (gpio_enable == -1) {
+        mcpwms[port].enable_gpio = -1;
+        mcpwms[port].enable_inverted = 0;
+    } else if (gpio_enable < -1) {
+        mcpwms[port].enable_gpio = -gpio_enable;
+        mcpwms[port].enable_inverted = 1;
+    } else {
+        mcpwms[port].enable_gpio = gpio_enable;
+        mcpwms[port].enable_inverted = 0;
+    }
 
-    gpio_config(&drv_en_config);
-    gpio_set_level(gpio_enable, false);
+    if (mcpwms[port].enable_gpio >= 0) {
+        gpio_config_t drv_en_config = {
+            .mode = GPIO_MODE_OUTPUT,
+            .pin_bit_mask = 1ULL << (unsigned int)mcpwms[port].enable_gpio,
+        };
+        gpio_config(&drv_en_config);
+        gpio_set_level(
+            mcpwms[port].enable_gpio,
+            mcpwms[port].enable_inverted ? 1 : 0);
+    }
 
     /* the PWM arguments now are limited to range 0 -- 1.0 */
-    mcpwms[port].enable_gpio = gpio_enable;
     mcpwms[port].dc_link_voltage_nominal = dc_link_voltage;
     mcpwms[port].interface.get_dc_link_voltage = get_dc_link_voltage;
     mcpwms[port].interface.set_voltages = set_voltages;

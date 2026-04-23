@@ -169,14 +169,19 @@ esp_foc_inverter_t *inverter_6pwm_mpcwm_new(int gpio_u_high, int gpio_u_low,
     esp_foc_mcpwm6_inverter_t *obj = &mcpwm6s[port];
     memset(obj, 0, sizeof(*obj));
 
-    if(gpio_enable < 0) {
-        gpio_enable = -gpio_enable;
+    if (gpio_enable == -1) {
+        /* No enable output (MOSFET drivers always enabled or not wired to MCU). */
+        obj->enable_gpio = -1;
+        obj->enable_inverted = 0;
+    } else if (gpio_enable < -1) {
+        /* e.g. -8 -> GPIO8, active low (inverted) */
+        obj->enable_gpio = -gpio_enable;
         obj->enable_inverted = 1;
     } else {
+        /* >= 0: pin gpio_enable, active high */
+        obj->enable_gpio = gpio_enable;
         obj->enable_inverted = 0;
     }
-
-    obj->enable_gpio = gpio_enable;
     obj->dc_link_voltage_nominal = dc_link_voltage;
 
     obj->interface.get_dc_link_voltage = get_dc_link_voltage;

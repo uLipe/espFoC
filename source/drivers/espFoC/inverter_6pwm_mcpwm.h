@@ -41,7 +41,9 @@
  * @param gpio_v_low   GPIO for phase V low-side PWM
  * @param gpio_w_high  GPIO for phase W high-side PWM
  * @param gpio_w_low   GPIO for phase W low-side PWM
- * @param gpio_enable  Optional enable GPIO (set HIGH on enable, LOW on disable). Pass -1 to ignore.
+ * @param gpio_enable  Gate enable GPIO: -1 to skip (no EN output).  If >= 0, that pin, active
+ *                    high: drive HIGH=enabled, LOW=disabled.  If < -1 (e.g. -8), use GPIO (-arg)
+ *                    with inverted drive (active low).
  * @param dc_link_voltage DC bus voltage used for duty scaling
  * @param port         Axis/port index (0..CONFIG_NOOF_AXIS-1). Also selects MCPWM group id.
  *

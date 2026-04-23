@@ -26,6 +26,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
+    QCheckBox,
     QFormLayout,
     QGroupBox,
     QSpinBox,
@@ -61,6 +62,8 @@ class HardwareConfig:
     pwm_type: str = "6pwm_mcpwm"
     pwm_freq_hz: int = 20000
     dc_link_v: float = 12.0
+    inverter_en_pin: int = -1
+    inverter_en_inverted: bool = False
     pin_u_hi: int = 5
     pin_v_hi: int = 6
     pin_w_hi: int = 7
@@ -217,6 +220,20 @@ class HardwarePanel(QWidget):
         pf.addRow("U low pin",  self._pin_u_lo)
         pf.addRow("V low pin",  self._pin_v_lo)
         pf.addRow("W low pin",  self._pin_w_lo)
+        self._en_enable_pin = QSpinBox()
+        self._en_enable_pin.setRange(-1, 54)
+        self._en_enable_pin.setValue(self._cfg.inverter_en_pin)
+        self._en_enable_pin.setToolTip(
+            "Driver enable GPIO, or -1 to leave the enable output unused.")
+        self._en_invert = QCheckBox("Enable inverted (active low)")
+        self._en_invert.setToolTip(
+            "C API: a negative pin encodes the same, e.g. -8 = GPIO8 active low.")
+        self._en_invert.setChecked(self._cfg.inverter_en_inverted)
+        self._en_enable_pin.valueChanged.connect(self._on_en_pin_en_changed)
+        self._on_en_pin_en_changed()
+        self._en_invert.toggled.connect(self._on_en_invert_toggled)
+        pf.addRow("Enable pin (–1 = none)", self._en_enable_pin)
+        pf.addRow("", self._en_invert)
         root.addWidget(pwm_box)
 
         # --- Rotor sensor ---
@@ -393,6 +410,16 @@ class HardwarePanel(QWidget):
             _populate_adc_combo(c, target)
         self.configChanged.emit()
 
+    def _on_en_pin_en_changed(self) -> None:
+        en = self._en_enable_pin.value() >= 0
+        self._en_invert.setEnabled(en)
+        if not en:
+            self._en_invert.setChecked(False)
+        self.configChanged.emit()
+
+    def _on_en_invert_toggled(self) -> None:
+        self.configChanged.emit()
+
     def _on_pwm_type_changed(self, *_) -> None:
         is_6pwm = (self._pwm_type.currentData() == "6pwm_mcpwm")
         for c in (self._pin_u_lo, self._pin_v_lo, self._pin_w_lo):
@@ -411,6 +438,9 @@ class HardwarePanel(QWidget):
             pwm_type=self._pwm_type.currentData(),
             pwm_freq_hz=self._pwm_freq.value(),
             dc_link_v=self._dc_link.value(),
+            inverter_en_pin=self._en_enable_pin.value(),
+            inverter_en_inverted=self._en_invert.isChecked() and (
+                self._en_enable_pin.value() >= 0),
             pin_u_hi=self._pin_u_hi.currentData(),
             pin_v_hi=self._pin_v_hi.currentData(),
             pin_w_hi=self._pin_w_hi.currentData(),

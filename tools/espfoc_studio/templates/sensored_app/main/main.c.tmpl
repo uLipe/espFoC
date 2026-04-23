@@ -61,7 +61,7 @@ void app_main(void)
         {pin_u_hi}, {pin_u_lo},
         {pin_v_hi}, {pin_v_lo},
         {pin_w_hi}, {pin_w_lo},
-        -1, {dc_link_v}f, 0);
+        {inverter_en_gpio}, {dc_link_v}f, 0);
     if (s_inverter == NULL) {{
         ESP_LOGE(TAG, "inverter init failed");
         return;

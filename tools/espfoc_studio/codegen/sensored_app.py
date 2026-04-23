@@ -160,6 +160,12 @@ def generate_sensored_app(cfg: HardwareConfig,
     profile_hash = _fnv1a_32(f"{cfg.motor_profile}:1")
     sda = cfg.sensor_cfg.get("sda", 4)
     scl = cfg.sensor_cfg.get("scl", 5)
+    if cfg.inverter_en_pin < 0:
+        inv_en_gpio = -1
+    else:
+        inv_en_gpio = (
+            -cfg.inverter_en_pin
+            if cfg.inverter_en_inverted else cfg.inverter_en_pin)
 
     subs = {
         "app_name": app_name,
@@ -191,6 +197,7 @@ def generate_sensored_app(cfg: HardwareConfig,
         "bw_hz": bw_hz,
         "current_filter_fc_hz": current_filter_fc_hz,
         "timestamp_iso": _dt.datetime.now().replace(microsecond=0).isoformat(),
+        "inverter_en_gpio": inv_en_gpio,
     }
 
     written: List[str] = []

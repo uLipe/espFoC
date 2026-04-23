@@ -47,6 +47,7 @@ def _build_assignments(cfg: HardwareConfig) -> List[Tuple[str, str]]:
         ("CONFIG_TUNER_TARGET_PWM_U_LO", str(int(cfg.pin_u_lo))),
         ("CONFIG_TUNER_TARGET_PWM_V_LO", str(int(cfg.pin_v_lo))),
         ("CONFIG_TUNER_TARGET_PWM_W_LO", str(int(cfg.pin_w_lo))),
+        ("CONFIG_TUNER_TARGET_PWM_EN_PIN", str(int(cfg.inverter_en_pin))),
         ("CONFIG_TUNER_TARGET_PWM_FREQ_HZ", str(int(cfg.pwm_freq_hz))),
         ("CONFIG_TUNER_TARGET_DC_LINK_V", str(dcv)),
         ("CONFIG_TUNER_TARGET_ENC_SDA", str(sda)),
@@ -60,6 +61,14 @@ def _build_assignments(cfg: HardwareConfig) -> List[Tuple[str, str]]:
         ("CONFIG_ESP_FOC_MOTOR_PROFILE", f'"{pr}"'),
         ("CONFIG_ESP_FOC_AUTOGEN_PWM_RATE_HZ", str(int(cfg.pwm_freq_hz))),
     ]
+
+
+def _tuner_en_act_low_sdkconfig_line(cfg: HardwareConfig) -> str:
+    if cfg.inverter_en_pin < 0:
+        return "# CONFIG_TUNER_TARGET_PWM_EN_ACT_LOW is not set\n"
+    if cfg.inverter_en_inverted:
+        return "CONFIG_TUNER_TARGET_PWM_EN_ACT_LOW=y\n"
+    return "# CONFIG_TUNER_TARGET_PWM_EN_ACT_LOW is not set\n"
 
 
 def _remove_keys(lines: List[str], keys: Set[str]) -> List[str]:
@@ -86,6 +95,7 @@ def apply_hardware_to_sdkconfig(path: str, cfg: HardwareConfig) -> None:
 
     asg = _build_assignments(cfg)
     keys: Set[str] = {a[0] for a in asg}
+    keys.add("CONFIG_TUNER_TARGET_PWM_EN_ACT_LOW")
     if not keys:
         return
     filtered = _remove_keys(list(lines), keys)
@@ -100,6 +110,7 @@ def apply_hardware_to_sdkconfig(path: str, cfg: HardwareConfig) -> None:
     ]
     for k, v in asg:
         block.append(f"{k}={v}\n")
+    block.append(_tuner_en_act_low_sdkconfig_line(cfg))
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(filtered)
         f.writelines(block)
