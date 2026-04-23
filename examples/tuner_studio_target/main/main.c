@@ -73,6 +73,16 @@ static void wire_scope_channels(void)
     esp_foc_scope_add_channel(&s_axis.target_i_q.raw, 3);
     esp_foc_scope_add_channel(&s_axis.i_q.raw, 4);
     esp_foc_scope_add_channel(&s_axis.u_q.raw, 5);
+#if CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS >= 12
+    /* TunerStudio "Sensores" tab (tools/espfoc_studio/gui/sensors_debug_panel)
+     * — same Q16 float wire as ch0..5, engineering units in the host. */
+    esp_foc_scope_add_channel(&s_axis.rotor_shaft_ticks, 6);
+    esp_foc_scope_add_channel(&s_axis.current_speed, 7);
+    esp_foc_scope_add_channel(&s_axis.i_u, 8);
+    esp_foc_scope_add_channel(&s_axis.i_v, 9);
+    esp_foc_scope_add_channel(&s_axis.i_alpha.raw, 10);
+    esp_foc_scope_add_channel(&s_axis.i_beta.raw, 11);
+#endif
     esp_foc_scope_initalize();
 #endif
 }

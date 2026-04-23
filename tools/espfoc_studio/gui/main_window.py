@@ -25,6 +25,7 @@ from ..protocol.tuner import TUNER_FIRMWARE_TYPE_TSGX
 from .theme import make_badge_qss, make_reset_board_button_qss
 from .analysis_panel import AnalysisPanel
 from .generate_app_panel import GenerateAppPanel
+from .sensors_debug_panel import SensorsDebugPanel
 from .scope_panel import ScopePanel
 from .svm_panel import SvmPanel
 from .tuning_panel import TuningPanel
@@ -63,6 +64,7 @@ class MainWindow(QMainWindow):
         # voltages, which the SVM panel reads exclusively.
         self._scope = ScopePanel(reader=self._client.reader)
         self._svm = SvmPanel(reader=self._client.reader)
+        self._sensors = SensorsDebugPanel(reader=self._client.reader)
 
         # Analysis plots are expensive (step sim + bode + root locus).
         # Debounce spinbox storms so one nudge of the mouse wheel doesn't
@@ -83,6 +85,7 @@ class MainWindow(QMainWindow):
 
         tabs = QTabWidget()
         tabs.addTab(self._analysis, "Analysis")
+        tabs.addTab(self._sensors, "Sensors")
         tabs.addTab(self._scope, "Scope")
         tabs.addTab(self._svm, "SVM Hexagon")
 
@@ -163,6 +166,7 @@ class MainWindow(QMainWindow):
 
         if link_mode == "hw":
             self._update_link_badge()
+        self._set_sensors_interactive()
 
     def _on_reset_board_clicked(self) -> None:
         r = QMessageBox.question(
@@ -176,6 +180,14 @@ class MainWindow(QMainWindow):
             self._client.reset_board()
         except TunerError as e:
             QMessageBox.warning(self, "Reset failed", str(e))
+
+    def _set_sensors_interactive(self) -> None:
+        if self._link_mode == "demo":
+            self._sensors.set_interactive(False)
+            return
+        r = self._client.reader
+        ok = bool(r and r.is_running and self._tuning.last_poll_ok)
+        self._sensors.set_interactive(ok)
 
     def _set_link_badge(self, key: str) -> None:
         text, qss = make_badge_qss(key)
@@ -222,6 +234,7 @@ class MainWindow(QMainWindow):
         self._client.replace_reader(r)
         self._scope.attach_reader(r)
         self._svm.attach_reader(r)
+        self._sensors.attach_reader(r)
         self._tuning.rebind_log_reader()
         self._link_fail_streak = 0
         try:
@@ -270,6 +283,7 @@ class MainWindow(QMainWindow):
         else:
             self._timer.setInterval(1000)
         self._update_link_badge()
+        self._set_sensors_interactive()
         if (self._serial_config is not None
                 and not self._tuning.last_poll_ok
                 and self._maybe_reconnect()):
