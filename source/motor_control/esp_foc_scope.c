@@ -48,21 +48,6 @@ static bool ping_pong_switch = false;
 static uint32_t rd_buff_index = 0;
 static uint32_t wr_buff_index = 0;
 
-__attribute__((weak)) void esp_foc_init_bus_callback(void)
-{
-    ESP_LOGW("ESP_FOC_SCOPE", "Missing implementation of the init buffer callback for the scope!");
-    esp_foc_sleep_ms(100);
-}
-
-
-__attribute__((weak)) void esp_foc_send_buffer_callback(const uint8_t *buffer, int size)
-{
-    (void)buffer;
-    (void)size;
-    ESP_LOGW("ESP_FOC_SCOPE", "Missing implementation of the buffer callback for the scope!");
-    esp_foc_sleep_ms(100);
-}
-
 static void esp_foc_scope_daemon_thread(void *arg)
 {
     int idx = 0;
