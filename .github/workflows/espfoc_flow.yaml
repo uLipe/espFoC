@@ -117,10 +117,7 @@ jobs:
         QT_QPA_PLATFORM: offscreen
         PYTHONPATH: ${{ github.workspace }}/tools
       run: |
-        for t in tools/espfoc_studio/tests/test_*.py; do
-          echo "=== $(basename $t) ==="
-          python "$t"
-        done
+        python -m pytest tools/espfoc_studio/tests/ -v --tb=short
 
   unit_tests:
     name: Unit tests (build and run on QEMU)
