@@ -33,10 +33,12 @@ from .scope_panel import ScopePanel
 
 SENSOR_CH_FIRST = 6
 SENSOR_N = 6
+HOT_PATH_US_CH = 12
 WINDOW_S = ScopePanel.WINDOW_S
 BUFFER_CAP = ScopePanel.BUFFER_CAP
 INBOX_CAP = ScopePanel.INBOX_CAP
 RENDER_INTERVAL_MS = ScopePanel.RENDER_INTERVAL_MS
+MAX_FRAMES_PER_UI_TICK = ScopePanel.MAX_FRAMES_PER_UI_TICK
 # Tall strip chart; scroll the page to see numeric readouts below.
 PLOT_MIN_HEIGHT = 220
 
@@ -107,14 +109,26 @@ class SensorsDebugPanel(QWidget):
 
         root = QVBoxLayout(self)
         intro = (
-            f"Requires SCOPE stream with at least 12 fields. Traces: degrees "
-            f"({SENSOR_CH_FIRST}), rad/s ({SENSOR_CH_FIRST + 1}), A ({SENSOR_CH_FIRST + 2}…). "
+            f"Requires SCOPE stream with at least 12 fields (13 for hot-path µs). "
+            f"Traces: degrees ({SENSOR_CH_FIRST}), rad/s ({SENSOR_CH_FIRST + 1}), "
+            f"A ({SENSOR_CH_FIRST + 2}…). ch{HOT_PATH_US_CH}: FOC hot-path time [µs]. "
             f"Time window: {WINDOW_S:.0f} s (same as Scope tab)."
         )
         l0 = QLabel(intro)
         l0.setWordWrap(True)
         l0.setStyleSheet("color: #9aa0a6; font-size: 11px;")
         root.addWidget(l0)
+
+        hp = QHBoxLayout()
+        hp.addWidget(QLabel("FOC hot path"))
+        self._hot_path_us = QLineEdit()
+        self._hot_path_us.setReadOnly(True)
+        self._hot_path_us.setPlaceholderText("—")
+        self._hot_path_us.setToolTip(
+            f"Last channel (ch {HOT_PATH_US_CH}): execution time of the FOC hot "
+            "path on the target (µs), from esp_foc_now_useconds().")
+        hp.addWidget(self._hot_path_us, 1)
+        root.addLayout(hp)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -146,14 +160,14 @@ class SensorsDebugPanel(QWidget):
         plot.setLabel("bottom", "time", units="s")
         plot.showGrid(x=True, y=True, alpha=0.25)
         plot.setMinimumHeight(PLOT_MIN_HEIGHT)
-        plot.setXRange(-WINDOW_S, 0.0, padding=0)
+        plot.setXRange(0.0, WINDOW_S, padding=0)
         plot.enableAutoRange(axis="x", enable=False)
         plot.enableAutoRange(axis="y", enable=True)
         vb = plot.getViewBox()
         vb.setMouseEnabled(x=False, y=True)
         c = plot.plot(pen=pg.mkPen(QColor("#4fc3f7"), width=1.5))
         _ = attach_crosshair(
-            plot, fmt=lambda x, y: f"t = {x:+.3f} s\ny = {y:+.5g}")
+            plot, fmt=lambda x, y: f"t = {x:.3f} s\ny = {y:+.5g}")
         self._plots.append(plot)
         self._curves.append(c)
         v_l.addWidget(plot, 0)
@@ -195,8 +209,8 @@ class SensorsDebugPanel(QWidget):
         with self._inbox_lock:
             if not self._inbox:
                 return
-            batch = list(self._inbox)
-            self._inbox.clear()
+            n_take = min(MAX_FRAMES_PER_UI_TICK, len(self._inbox))
+            batch = [self._inbox.popleft() for _ in range(n_take)]
         need = SENSOR_CH_FIRST + SENSOR_N
         last_vals: Optional[List[float]] = None
         for t_mono, payload in batch:
@@ -217,6 +231,15 @@ class SensorsDebugPanel(QWidget):
                 f = last_vals[SENSOR_CH_FIRST + r]
                 self._raw_fields[r].setText(str(_float_to_q16_int(f)))
                 self._eng_labels[r].setText(_eng_text(r, f))
+            if len(last_vals) > HOT_PATH_US_CH:
+                self._hot_path_us.setText(
+                    f"{last_vals[HOT_PATH_US_CH]:.2f} µs")
+            else:
+                self._hot_path_us.clear()
+                self._hot_path_us.setPlaceholderText("—")
+        elif self._active:
+            self._hot_path_us.clear()
+            self._hot_path_us.setPlaceholderText("—")
         while (self._time_buf
                and (self._time_buf[-1] - self._time_buf[0] > WINDOW_S)):
             self._time_buf.popleft()
@@ -225,22 +248,21 @@ class SensorsDebugPanel(QWidget):
                     pb.popleft()
         if not self._time_buf or not self._active:
             for p in self._plots:
-                p.setXRange(-WINDOW_S, 0.0, padding=0)
+                p.setXRange(0.0, WINDOW_S, padding=0)
             return
-        t_now_rel = time.monotonic() - self._t0
-        t_arr = (np.fromiter(
-            self._time_buf, dtype=float, count=len(self._time_buf)
-        ) - t_now_rel)
+        t_rels = np.fromiter(
+            self._time_buf, dtype=float, count=len(self._time_buf))
+        t_arr = t_rels - float(t_rels[0])
         n = min(len(t_arr), min(len(b) for b in self._plot_bufs))
         if n <= 0:
             for c in self._curves:
                 c.setData([], [])
             for p in self._plots:
-                p.setXRange(-WINDOW_S, 0.0, padding=0)
+                p.setXRange(0.0, WINDOW_S, padding=0)
             return
         t_arr = t_arr[-n:]
         for p in self._plots:
-            p.setXRange(-WINDOW_S, 0.0, padding=0)
+            p.setXRange(0.0, WINDOW_S, padding=0)
         for r, c in enumerate(self._curves):
             y = np.fromiter(
                 list(self._plot_bufs[r])[-n:], dtype=float, count=n)

@@ -13,14 +13,13 @@ CONFIG_ESP_FOC_BRIDGE_USBCDC=y
 # TinyUSB CDC needed by the USB-CDC bridge.
 CONFIG_TINYUSB_CDC_ENABLED=y
 
-# Scope + injection so the GUI's hexagon and step buttons just work.
+# Scope so the GUI's hexagon view works.
 # Default scope buffer is 4096 frames * 8 channels which fits big SRAM
 # parts but blows DRAM on plain ESP32 / S3. 512 frames is plenty for
 # the GUI's 50 FPS rolling view and keeps RAM headroom.
 CONFIG_ESP_FOC_SCOPE=y
-CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS=12
+CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS=13
 CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE=512
-CONFIG_ESP_FOC_INJECTION_ENABLE=y
 
 # Calibration overlay so persisted gains survive reboots.
 CONFIG_ESP_FOC_CALIBRATION_NVS=y

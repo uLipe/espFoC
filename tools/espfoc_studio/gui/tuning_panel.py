@@ -83,7 +83,7 @@ class TuningPanel(QWidget):
                                                        float, float], None]] = None) -> None:
         super().__init__()
         self._client = client
-        self.last_poll_ok: bool = True
+        self.last_poll_ok: bool = False
         self._on_params_changed = on_params_changed
         self._last_motor_r = 1.08
         self._last_motor_l = 0.0018
@@ -208,13 +208,31 @@ class TuningPanel(QWidget):
         target_form = QFormLayout()
         self._iq_spin = _spin(-50.0, 50.0, 4, 0.0, step=0.1, suffix=" A")
         self._id_spin = _spin(-50.0, 50.0, 4, 0.0, step=0.1, suffix=" A")
+        self._uq_spin = _spin(-50.0, 50.0, 4, 0.0, step=0.1, suffix=" V")
+        self._ud_spin = _spin(-50.0, 50.0, 4, 0.0, step=0.1, suffix=" V")
         self._iq_spin.setEnabled(False)
         self._id_spin.setEnabled(False)
+        self._uq_spin.setEnabled(False)
+        self._ud_spin.setEnabled(False)
         self._iq_spin.valueChanged.connect(self._on_iq_changed)
         self._id_spin.valueChanged.connect(self._on_id_changed)
+        self._uq_spin.valueChanged.connect(self._on_uq_changed)
+        self._ud_spin.valueChanged.connect(self._on_ud_changed)
         target_form.addRow("iq ref [A]", self._iq_spin)
         target_form.addRow("id ref [A]", self._id_spin)
+        target_form.addRow("uq ff [V]", self._uq_spin)
+        target_form.addRow("ud ff [V]", self._ud_spin)
         ovr_layout.addLayout(target_form)
+        self._skip_torque_box = QCheckBox("Open-loop voltage (no current PI)")
+        self._skip_torque_box.setToolTip(
+            "Preference for when override is on: send u_d/u_q without current-loop PI. "
+            "Applied on the device only while Override active; cleared when override turns off."
+        )
+        self._skip_torque_box.blockSignals(True)
+        self._skip_torque_box.setChecked(True)
+        self._skip_torque_box.blockSignals(False)
+        self._skip_torque_box.toggled.connect(self._on_skip_torque_toggled)
+        ovr_layout.addWidget(self._skip_torque_box)
         root.addWidget(ovr)
 
         # --- Alignment + calibration ---
@@ -300,6 +318,10 @@ class TuningPanel(QWidget):
             lim = self._client.read_int_lim()
             fc = self._client.read_current_filter_fc()
             state = self._client.read_axis_state()
+            override_active = bool(state & AxisStateFlag.TUNER_OVERRIDE)
+            skip_torque = False
+            if override_active:
+                skip_torque = self._client.read_skip_torque()
             if want_full:
                 self._tuner_last_vmax = self._client.read_v_max()
                 self._cal_present = self._client.is_calibration_present()
@@ -327,12 +349,17 @@ class TuningPanel(QWidget):
                                 ("\u2713 present in NVS" if present
                                  else "\u2717 none stored"))
         # Keep the override checkbox in sync without re-emitting signals.
-        override_active = bool(state & AxisStateFlag.TUNER_OVERRIDE)
         self._override_box.blockSignals(True)
         self._override_box.setChecked(override_active)
         self._override_box.blockSignals(False)
         self._iq_spin.setEnabled(override_active)
         self._id_spin.setEnabled(override_active)
+        self._uq_spin.setEnabled(override_active)
+        self._ud_spin.setEnabled(override_active)
+        self._skip_torque_box.blockSignals(True)
+        if override_active:
+            self._skip_torque_box.setChecked(skip_torque)
+        self._skip_torque_box.blockSignals(False)
 
     # --- Handlers ----------------------------------------------------------
 
@@ -399,6 +426,15 @@ class TuningPanel(QWidget):
         self._status.setText("")
         self._iq_spin.setEnabled(checked)
         self._id_spin.setEnabled(checked)
+        self._uq_spin.setEnabled(checked)
+        self._ud_spin.setEnabled(checked)
+        try:
+            if checked:
+                self._client.write_skip_torque(self._skip_torque_box.isChecked())
+            else:
+                self._client.write_skip_torque(False)
+        except TunerError as e:
+            self._status.setText(str(e))
 
     def _on_iq_changed(self, value: float) -> None:
         try:
@@ -411,6 +447,31 @@ class TuningPanel(QWidget):
             self._client.write_target_id(value)
         except TunerError as e:
             self._status.setText(str(e))
+
+    def _on_uq_changed(self, value: float) -> None:
+        try:
+            self._client.write_target_uq(value)
+        except TunerError as e:
+            self._status.setText(str(e))
+
+    def _on_ud_changed(self, value: float) -> None:
+        try:
+            self._client.write_target_ud(value)
+        except TunerError as e:
+            self._status.setText(str(e))
+
+    def _on_skip_torque_toggled(self, checked: bool) -> None:
+        if not self._override_box.isChecked():
+            return
+        try:
+            self._client.write_skip_torque(checked)
+        except TunerError as e:
+            self._status.setText(str(e))
+            self._skip_torque_box.blockSignals(True)
+            self._skip_torque_box.setChecked(not checked)
+            self._skip_torque_box.blockSignals(False)
+            return
+        self._status.setText("")
 
     def _on_align(self) -> None:
         if self._align_thread is not None and self._align_thread.isRunning():

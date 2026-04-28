@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGridLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFormLayout,
+    QGridLayout,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ..model import (
     MotorParams,
@@ -15,19 +23,33 @@ from ..model import (
     root_locus,
     step_response,
 )
+from ..protocol import TunerClient, TunerError
 from .crosshair import attach_crosshair
 
 
 class AnalysisPanel(QWidget):
     """Four plots driven off (R, L, bandwidth, Kp, Ki) emitted by the
-    tuning panel. Updates are cheap — all computations are O(thousands)
-    in numpy so they complete within a single event-loop tick."""
+    tuning panel. A single "Pole pairs count" control talks to the target
+    (Tuning \u2192 Save to NVS persists it). R–L plots do not use p yet."""
 
-    def __init__(self) -> None:
+    def __init__(self, client: Optional[TunerClient] = None) -> None:
         super().__init__()
+        self._client = client
         pg.setConfigOptions(antialias=True)
 
         root = QVBoxLayout(self)
+        top = QFormLayout()
+        self._motor_pole_pairs = QSpinBox()
+        self._motor_pole_pairs.setRange(1, 64)
+        self._motor_pole_pairs.setValue(7)
+        self._motor_pole_pairs.setToolTip(
+            "Number of motor pole pairs p (sent to the target). Use "
+            "Tuning \u2192 Save to NVS to store in flash together with the "
+            "rest of the calibration.")
+        top.addRow("Pole pairs count", self._motor_pole_pairs)
+        self._motor_pole_pairs.valueChanged.connect(
+            self._on_motor_pole_pairs_changed)
+        root.addLayout(top)
         grid = QGridLayout()
         root.addLayout(grid, 1)
 
@@ -139,6 +161,22 @@ class AnalysisPanel(QWidget):
             self._rl_points.setData(pos=np.column_stack(
                 (flat[valid].real, flat[valid].imag)))
         except Exception:
+            pass
+
+    def set_motor_pole_pairs_silent(self, p: int) -> None:
+        p = int(max(1, min(64, p)))
+        self._motor_pole_pairs.blockSignals(True)
+        self._motor_pole_pairs.setValue(p)
+        self._motor_pole_pairs.blockSignals(False)
+
+    def _on_motor_pole_pairs_changed(self) -> None:
+        c = self._client
+        if c is None:
+            return
+        v = int(self._motor_pole_pairs.value())
+        try:
+            c.write_motor_pole_pairs(v)
+        except TunerError:
             pass
 
     def set_loop_rate_hz(self, fs_hz: float) -> None:

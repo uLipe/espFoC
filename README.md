@@ -194,7 +194,7 @@ void app_main(void)
 - `examples/tuner_studio_target` — service-mode firmware for live
   tuning + Generate App.
 - `examples/tuner_demo` — runs in QEMU, exercises autogen gains,
-  runtime retune, the tuner protocol and signal injection.
+  runtime retune and the tuner protocol.
 - `examples/unit_test_runner` — Unity suite for CI / QEMU.
 - `examples/test_drivers` — inverter / encoder / shunt bring-up.
 
@@ -226,7 +226,7 @@ espFoC/
 ├── source/
 │   ├── drivers/        # platform drivers (inverters, encoders, shunts)
 │   ├── motor_control/  # axis core, MPZ design, calibration, tuner,
-│   │                   # injection, link codec
+│   │                   # link codec
 │   └── osal/           # OS abstraction
 ├── test/               # Unity unit tests (run via examples/unit_test_runner)
 └── tools/espfoc_studio # PySide6 + pyqtgraph GUI, CLI, codegen, templates

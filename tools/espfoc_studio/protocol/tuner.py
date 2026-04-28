@@ -54,20 +54,24 @@ class ParamId(IntEnum):
     MOTOR_R_OHM     = 0x0016
     MOTOR_L_H       = 0x0017
     MOTOR_BW_HZ     = 0x0018
+    MOTOR_POLE_PAIRS = 0x0019
     AXIS_STATE      = 0x0040
     AXIS_LAST_ERR   = 0x0041
     NVS_PRESENT     = 0x0042
+    SKIP_TORQUE     = 0x0043
     FIRMWARE_TYPE   = 0x0050
     # Gain writes (atomic swap)
     WRITE_KP        = 0x0020
     WRITE_KI        = 0x0021
     WRITE_INT_LIM   = 0x0022
     WRITE_I_FILTER_FC = 0x0023
+    WRITE_MOTOR_POLE_PAIRS = 0x0024
     # Motion targets (only honored while override is on)
     WRITE_TARGET_ID = 0x0060
     WRITE_TARGET_IQ = 0x0061
     WRITE_TARGET_UD = 0x0062
     WRITE_TARGET_UQ = 0x0063
+    WRITE_SKIP_TORQUE = 0x0064
     # Commands (exec)
     CMD_RECOMPUTE_GAINS = 0x0080
     CMD_OVERRIDE_ON     = 0x00A0
@@ -169,10 +173,13 @@ class TunerClient:
 
     def replace_reader(self, new_reader: LinkReader) -> None:
         """Swap the active LinkReader after a transport failure / reconnect
-        (same TunerClient instance; axis and sequence counter stay put)."""
+        (same TunerClient instance; axis ID unchanged). The sequence
+        counter resets so a fresh port session and firmware boot share a
+        clear round-trip key space."""
         if new_reader is None:  # pragma: no cover - guard for callers
             raise ValueError("replace_reader: reader is None")
         self._reader = new_reader
+        self._seq = 0
 
     def close(self) -> None:
         if self._owns_reader:
@@ -261,6 +268,23 @@ class TunerClient:
                 f"axis state response has {len(r.payload)} bytes, want 1")
         return AxisStateFlag(r.payload[0])
 
+    def read_skip_torque(self) -> bool:
+        r = self._round_trip(Op.READ, ParamId.SKIP_TORQUE)
+        if r.status != ESP_FOC_OK:
+            raise TunerError(f"read skip_torque failed: {_err_name(r.status)}")
+        if len(r.payload) != 1:
+            raise TunerError(
+                f"skip_torque: expected 1 byte, got {len(r.payload)}")
+        return r.payload[0] != 0
+
+    def write_skip_torque(self, skip: bool) -> None:
+        r = self._round_trip(
+            Op.WRITE, ParamId.WRITE_SKIP_TORQUE,
+            bytes([1 if skip else 0]))
+        if r.status != ESP_FOC_OK:
+            raise TunerError(
+                f"write skip_torque failed: {_err_name(r.status)}")
+
     def read_last_error(self) -> int:
         r = self._round_trip(Op.READ, ParamId.AXIS_LAST_ERR)
         if r.status != ESP_FOC_OK:
@@ -296,6 +320,16 @@ class TunerClient:
         """Last current-loop bandwidth [Hz] from NVS; 0 if not stored."""
         return self._read_q16(ParamId.MOTOR_BW_HZ)
 
+    def read_motor_pole_pairs(self) -> int:
+        r = self._round_trip(Op.READ, ParamId.MOTOR_POLE_PAIRS)
+        if r.status != ESP_FOC_OK:
+            raise TunerError(
+                f"read motor_pole_pairs failed: {_err_name(r.status)}")
+        if len(r.payload) != 4:
+            raise TunerError(
+                f"motor_pole_pairs response has {len(r.payload)} bytes, want 4")
+        return struct.unpack("<i", r.payload[:4])[0]
+
     def write_current_filter_fc(self, fc_hz: float) -> None:
         """Re-design the per-phase biquad with the supplied cutoff (Hz).
         fs is fixed by the firmware to the loop rate captured at init."""
@@ -303,6 +337,15 @@ class TunerClient:
 
     def write_int_lim(self, lim: float) -> None:
         self._write_q16(ParamId.WRITE_INT_LIM, lim)
+
+    def write_motor_pole_pairs(self, pole_pairs: int) -> None:
+        if not (1 <= int(pole_pairs) <= 64):
+            raise TunerError("motor pole pairs must be 1..64")
+        p = struct.pack("<i", int(pole_pairs))
+        r = self._round_trip(Op.WRITE, ParamId.WRITE_MOTOR_POLE_PAIRS, p)
+        if r.status != ESP_FOC_OK:
+            raise TunerError(
+                f"write motor_pole_pairs failed: {_err_name(r.status)}")
 
     def write_target_id(self, id_amps: float) -> None:
         self._write_q16(ParamId.WRITE_TARGET_ID, id_amps)
@@ -346,9 +389,8 @@ class TunerClient:
         return bool(r.payload[0]) if r.payload else False
 
     def align_axis(self, timeout: float = 8.0) -> None:
-        """Triggers blocking alignment on the firmware. Bumps the
-        round-trip timeout because the firmware sequence takes ~3 s
-        and we want comfortable headroom on a slow link."""
+        """Triggers blocking alignment on the firmware. Default timeout
+        is generous: open-loop sweeps and re-park take several seconds."""
         self._exec(ParamId.CMD_ALIGN_AXIS, timeout=timeout)
 
     def persist_calibration(self, motor_r: float = 0.0,

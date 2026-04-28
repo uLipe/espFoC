@@ -112,7 +112,8 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
     /* Single-byte responses */
     if (id == ESP_FOC_TUNER_PARAM_AXIS_STATE ||
         id == ESP_FOC_TUNER_PARAM_AXIS_LAST_ERR ||
-        id == ESP_FOC_TUNER_PARAM_NVS_PRESENT) {
+        id == ESP_FOC_TUNER_PARAM_NVS_PRESENT ||
+        id == ESP_FOC_TUNER_PARAM_SKIP_TORQUE_U8) {
         if (*response_len < 1) {
             return ESP_FOC_ERR_INVALID_ARG;
         }
@@ -126,6 +127,9 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
             break;
         case ESP_FOC_TUNER_PARAM_NVS_PRESENT:
             b[0] = esp_foc_calibration_present(axis->nvs_axis_id) ? 1 : 0;
+            break;
+        case ESP_FOC_TUNER_PARAM_SKIP_TORQUE_U8:
+            b[0] = axis->skip_torque_control ? 1u : 0u;
             break;
         default: break;
         }
@@ -146,6 +150,21 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
         b[1] = (uint8_t)(v >> 8);
         b[2] = (uint8_t)(v >> 16);
         b[3] = (uint8_t)(v >> 24);
+        *response_len = 4;
+        return ESP_FOC_OK;
+    }
+
+    if (id == ESP_FOC_TUNER_PARAM_MOTOR_POLE_PAIRS) {
+        if (*response_len < 4) {
+            return ESP_FOC_ERR_INVALID_ARG;
+        }
+        int32_t pp = (int32_t)axis->motor_pole_pairs;
+        uint8_t *b = (uint8_t *)response;
+        uint32_t u = (uint32_t)pp;
+        b[0] = (uint8_t)(u & 0xFFu);
+        b[1] = (uint8_t)((u >> 8) & 0xFFu);
+        b[2] = (uint8_t)((u >> 16) & 0xFFu);
+        b[3] = (uint8_t)((u >> 24) & 0xFFu);
         *response_len = 4;
         return ESP_FOC_OK;
     }
@@ -177,8 +196,38 @@ static esp_foc_err_t handle_write(esp_foc_axis_t *axis,
                                   esp_foc_tuner_id_t id,
                                   const void *payload, size_t payload_len)
 {
-    if (payload == NULL || payload_len < 4) {
+    if (payload == NULL) {
         return ESP_FOC_ERR_INVALID_ARG;
+    }
+    if (id == ESP_FOC_TUNER_WRITE_SKIP_TORQUE_U8) {
+        if (payload_len < 1) {
+            return ESP_FOC_ERR_INVALID_ARG;
+        }
+        const uint8_t *p = (const uint8_t *)payload;
+        esp_foc_critical_enter();
+        axis->skip_torque_control = (p[0] != 0) ? 1 : 0;
+        esp_foc_critical_leave();
+        return ESP_FOC_OK;
+    }
+    if (payload_len < 4) {
+        return ESP_FOC_ERR_INVALID_ARG;
+    }
+    if (id == ESP_FOC_TUNER_WRITE_MOTOR_POLE_PAIRS) {
+        const uint8_t *p = (const uint8_t *)payload;
+        uint32_t u = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+        int32_t pp = (int32_t)u;
+        if (pp < 1 || pp > 64) {
+            return ESP_FOC_ERR_INVALID_ARG;
+        }
+        axis->motor_pole_pairs = (int)pp;
+        {
+            char msg[56];
+            (void)snprintf(msg, sizeof(msg),
+                "motor: pole pairs = %d", (int)axis->motor_pole_pairs);
+            tuner_log(msg);
+        }
+        return ESP_FOC_OK;
     }
     q16_t v = read_q16(payload);
 
@@ -305,10 +354,9 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
     }
 
     if (id == ESP_FOC_TUNER_CMD_ALIGN_AXIS) {
-        /* Blocking — alignment takes ~3 s with the parking + probe +
-         * re-park sequence. The host should bump its timeout for this
-         * specific command (TunerStudio uses 6 s). LOG frames bracket
-         * the call so the GUI's progress dialog has something to show. */
+        /* Blocking — parking + Vq-sweep direction + re-park takes ~4-5 s
+         * with default sweep steps. The host should use a long timeout
+         * for this command; LOG frames bracket the call. */
         tuner_log("alignment: started");
         esp_foc_err_t err = esp_foc_align_axis(axis);
         if (err == ESP_FOC_OK) {
@@ -339,15 +387,24 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
             data.motor_l_h = read_q16(p + 4);
             data.bandwidth_hz = read_q16(p + 8);
         }
+        esp_foc_calibration_pack_pole_pairs(
+            &data, (int32_t)axis->motor_pole_pairs);
         esp_foc_err_t err = esp_foc_calibration_save(axis->nvs_axis_id, &data);
         if (err == ESP_FOC_OK) {
             axis->nvs_motor_r_ohm = data.motor_r_ohm;
             axis->nvs_motor_l_h = data.motor_l_h;
             axis->nvs_bandwidth_hz = data.bandwidth_hz;
         }
-        tuner_log(err == ESP_FOC_OK
-                  ? "calibration: saved to NVS"
-                  : "calibration: save failed");
+        if (err == ESP_FOC_OK) {
+            char msg[72];
+            (void)snprintf(
+                msg, sizeof(msg),
+                "calibration: saved to NVS (pole pairs=%d)",
+                axis->motor_pole_pairs);
+            tuner_log(msg);
+        } else {
+            tuner_log("calibration: save failed");
+        }
         return err;
     }
 
@@ -374,6 +431,12 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
             axis->nvs_motor_l_h = data.motor_l_h;
             axis->nvs_bandwidth_hz = data.bandwidth_hz;
             {
+                int32_t ppn = esp_foc_calibration_get_pole_pairs(&data);
+                if (ppn >= 1 && ppn <= 64) {
+                    axis->motor_pole_pairs = (int)ppn;
+                }
+            }
+            {
                 uint8_t af;
                 uint16_t eraw;
                 q16_t nstore;
@@ -382,9 +445,10 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
                     (nstore == Q16_MINUS_ONE)         ? "CCW" : "?";
                 ESP_LOGI(
                     tun_tag,
-                    "LOAD_NVS axis %u: PI+audit R=%.4f ohm L=%.4e H bw=%.1f  "
-                    "align: off=%d enc=%u dir=%d %s",
+                    "LOAD_NVS axis %u: pole pairs=%d  R=%.4f ohm L=%.4e H "
+                    "bw=%.1f  align: off=%d enc=%u dir=%d %s",
                     (unsigned)axis->nvs_axis_id,
+                    axis->motor_pole_pairs,
                     (double)q16_to_float(data.motor_r_ohm),
                     (double)q16_to_float(data.motor_l_h),
                     (double)q16_to_float(data.bandwidth_hz),
@@ -394,9 +458,16 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
                     (af & ESP_FOC_CAL_ALIGN_FLAG_DIR) ? cw : "—");
             }
         }
-        tuner_log(err == ESP_FOC_OK
-                  ? "calibration: NVS overlay applied"
-                  : "calibration: apply failed");
+        if (err == ESP_FOC_OK) {
+            char tmsg[80];
+            (void)snprintf(
+                tmsg, sizeof(tmsg),
+                "calibration: NVS applied (pole pairs=%d)",
+                axis->motor_pole_pairs);
+            tuner_log(tmsg);
+        } else {
+            tuner_log("calibration: apply failed");
+        }
         return err;
     }
 

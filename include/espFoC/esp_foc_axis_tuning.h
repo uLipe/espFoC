@@ -64,32 +64,6 @@ void esp_foc_axis_get_current_pi_gains_q16(
     q16_t *ki,
     q16_t *integrator_limit);
 
-/**
- * @brief Arm a step injection on the q-axis current reference.
- *
- * Only active when CONFIG_ESP_FOC_INJECTION_ENABLE is set; otherwise
- * returns ESP_FOC_ERR_NOT_ALIGNED (compile-time disabled).
- */
-esp_foc_err_t esp_foc_axis_inject_step_q16(
-    esp_foc_axis_t *axis,
-    q16_t amplitude,
-    uint32_t duration_ms);
-
-/**
- * @brief Arm a linear chirp injection on the q-axis current reference.
- */
-esp_foc_err_t esp_foc_axis_inject_chirp_q16(
-    esp_foc_axis_t *axis,
-    q16_t amplitude,
-    q16_t freq_start_hz,
-    q16_t freq_end_hz,
-    uint32_t duration_ms);
-
-/**
- * @brief Disable any active injection.
- */
-esp_foc_err_t esp_foc_axis_inject_stop(esp_foc_axis_t *axis);
-
 #ifdef __cplusplus
 }
 #endif

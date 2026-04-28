@@ -4,8 +4,5 @@ CONFIG_ESP_TASK_WDT_EN=n
 # Enable tuner backend for unit tests
 CONFIG_ESP_FOC_TUNER_ENABLE=y
 
-# Enable signal injection hook for unit tests
-CONFIG_ESP_FOC_INJECTION_ENABLE=y
-
 # Enable NVS calibration overlay for unit tests
 CONFIG_ESP_FOC_CALIBRATION_NVS=y

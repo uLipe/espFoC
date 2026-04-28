@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Horizontal)
         root.addWidget(splitter, 1)
 
-        self._analysis = AnalysisPanel()
+        self._analysis = AnalysisPanel(client=self._client)
         # The scope and the SVM hexagon both subscribe to the same shared
         # LinkReader. ch0/1/2 are (by convention) the three-phase SVPWM
         # voltages, which the SVM panel reads exclusively.
@@ -161,12 +161,14 @@ class MainWindow(QMainWindow):
                 self._tuning.sync_motor_from_nvs_shadows()
         except TunerError:
             pass
+        self._try_sync_motor_pole_pairs()
         # Prime the analysis view (including after optional NVS sync).
         self._tuning._notify_params_changed()
 
         if link_mode == "hw":
             self._update_link_badge()
         self._set_sensors_interactive()
+        QTimer.singleShot(0, self._poll)
 
     def _on_reset_board_clicked(self) -> None:
         r = QMessageBox.question(
@@ -218,6 +220,8 @@ class MainWindow(QMainWindow):
     def _reconnect_serial(self) -> bool:
         assert self._serial_config is not None
         from ..link.transport_serial import SerialTransport
+        self._tuning.last_poll_ok = False
+        self._link_fail_streak = 0
         self._tuning.detach_log_reader()
         old = self._client.reader
         try:
@@ -249,8 +253,17 @@ class MainWindow(QMainWindow):
                 self._tuning.sync_motor_from_nvs_shadows()
         except TunerError:
             pass
+        self._try_sync_motor_pole_pairs()
         self._tuning._notify_params_changed()
         return True
+
+    def _try_sync_motor_pole_pairs(self) -> None:
+        try:
+            p = int(self._client.read_motor_pole_pairs())
+            if 1 <= p <= 64:
+                self._analysis.set_motor_pole_pairs_silent(p)
+        except TunerError:
+            pass
 
     def _maybe_reconnect(self) -> bool:
         if self._serial_config is None:

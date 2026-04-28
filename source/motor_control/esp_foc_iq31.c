@@ -23,6 +23,7 @@
  */
 
 #include "espFoC/utils/esp_foc_iq31.h"
+#include "espFoC/utils/esp_foc_int_sqrt.h"
 #include <stdint.h>
 
 #define IQ31_SIN_LUT_SIZE   8192
@@ -36,29 +37,15 @@ static const iq31_t iq31_sin_lut[IQ31_SIN_LUT_SIZE] = {
 
 /**
  * Reciprocal sqrt: input x in Q1.31 (positive), output in Q2.30.
- * Integer-only: Newton isqrt then scale. Returns 0 if x <= 0.
+ * Integer-only: esp_foc_u32_isqrt + fixed divisions (deterministic).
  */
-static inline uint32_t isqrt32(uint32_t x)
-{
-    if (x == 0) {
-        return 0;
-    }
-    uint32_t y = x;
-    uint32_t z = (x + 1) >> 1;
-    while (z < y) {
-        y = z;
-        z = (x / z + z) >> 1;
-    }
-    return y;
-}
-
 iq31_t iq31_rsqrt_fast(iq31_t x)
 {
     if (x <= 0) {
         return 0;
     }
     uint32_t u = (uint32_t)x;
-    uint32_t s = isqrt32(u);
+    uint32_t s = esp_foc_u32_isqrt(u);
     if (s == 0) {
         return (iq31_t)0x7FFFFFFF; /* saturate to max Q2.30 representable */
     }

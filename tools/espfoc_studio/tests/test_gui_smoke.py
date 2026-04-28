@@ -97,7 +97,7 @@ def test_scope_panel_wallclock_and_autoset():
     from espfoc_studio.gui.scope_panel import ScopePanel
 
     app = QApplication.instance() or QApplication(sys.argv)
-    panel = ScopePanel()
+    panel = ScopePanel(async_decode=False)
     # Inject 200 frames at 1 ms wall-clock spacing.
     base = time.monotonic()
     for i in range(200):
@@ -210,13 +210,13 @@ def test_generate_app_build_mode_toggle():
 
 
 def test_scope_panel_roll_mode_x_axis_stays_bounded():
-    """Live cursor must always sit at x = 0 (right edge) even after
-    a long run — the displayed X values are 'seconds before now',
-    not absolute monotonic time, so they can never run off-screen."""
+    """X is seconds within the visible window (0 = oldest on screen);
+    values stay in [0, WINDOW_S] even if the panel has been running
+    for a long time (t0 is not on the plot axis)."""
     from espfoc_studio.gui.scope_panel import ScopePanel
 
     app = QApplication.instance() or QApplication(sys.argv)
-    panel = ScopePanel()
+    panel = ScopePanel(async_decode=False)
     # Pretend the panel has been running for an hour and a frame
     # arrives one tick before "now".
     panel._t0 = time.monotonic() - 3600.0
@@ -231,11 +231,11 @@ def test_scope_panel_roll_mode_x_axis_stays_bounded():
     # the latest sample sits at ~0 and nothing is at +3600 seconds.
     x_data, _ = panel._curves[0].getData()
     assert x_data is not None and len(x_data) == 3
-    assert x_data[-1] > -0.05, f"latest sample at x={x_data[-1]!r}, expected ~0"
-    assert x_data[0] >= -panel.WINDOW_S, (
-        f"oldest sample at x={x_data[0]!r}, outside the window")
-    assert max(abs(v) for v in x_data) < panel.WINDOW_S + 0.1, (
-        "X values escaped the rolling window")
+    assert x_data[0] < 0.02, f"oldest sample at x={x_data[0]!r}, expected ~0"
+    assert x_data[-1] > x_data[0]
+    assert x_data[-1] < panel.WINDOW_S + 0.1, (
+        f"newest x={x_data[-1]!r} past window")
+    assert min(x_data) >= -0.01, "X should be non-negative (time from t_oldest)"
 
 
 def main() -> int:

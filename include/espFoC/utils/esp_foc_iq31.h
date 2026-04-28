@@ -153,7 +153,8 @@ static inline iq31_t iq31_max(iq31_t a, iq31_t b)
 }
 
 /**
- * Reciprocal square root. Input x in Q1.31 (positive); output in Q2.30 (value 1.0 = 1<<30).
+ * Reciprocal square root (1/sqrt(x)) in fixed point. Input x in Q1.31 (positive);
+ * output in Q2.30 (value 1.0 = 1<<30). Uses deterministic esp_foc_u32_isqrt + divides.
  * Use: scale_q31 = iq31_mul_q230(v_q31, iq31_rsqrt_fast(mag_sq_q31)) for normalization.
  * Returns 0 if x <= 0 (invalid).
  */

@@ -60,7 +60,7 @@ typedef struct {
      *   [1]  0
      *   [2,3] uint16_t le encoder zero raw (AS5600: 0..4095, masked by driver)
      *   [4,7] q16_t natural_direction (+1 / -1)
-     *   [8,11] reserved
+     *   [8,11] int32_t LE motor_pole_pairs (0 = not stored, use Kconfig; else 1..64)
      */
     uint8_t reserved[12];
 } esp_foc_calibration_data_t;
@@ -78,6 +78,11 @@ void esp_foc_calibration_get_align(const esp_foc_calibration_data_t *d,
                                   uint8_t *flags,
                                   uint16_t *enc_zero_12b,
                                   q16_t *natural_direction);
+
+void esp_foc_calibration_pack_pole_pairs(esp_foc_calibration_data_t *d,
+                                         int32_t motor_pole_pairs);
+int32_t esp_foc_calibration_get_pole_pairs(
+    const esp_foc_calibration_data_t *d);
 
 /**
  * @brief Hash of the current build's motor profile + schema version.

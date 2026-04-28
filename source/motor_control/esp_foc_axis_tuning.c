@@ -7,7 +7,6 @@
 #include <sdkconfig.h>
 #include "espFoC/esp_foc_axis_tuning.h"
 #include "espFoC/esp_foc_controls.h"
-#include "espFoC/esp_foc_injection.h"
 
 /* Apply (kp, ki, integrator_limit) to both torque controllers atomically.
  * Called with the axis lock held. */
@@ -120,69 +119,4 @@ void esp_foc_axis_get_current_pi_gains_q16(
     if (integrator_limit != NULL) {
         *integrator_limit = axis->torque_controller[0].integrator_limit;
     }
-}
-
-esp_foc_err_t esp_foc_axis_inject_step_q16(
-    esp_foc_axis_t *axis,
-    q16_t amplitude,
-    uint32_t duration_ms)
-{
-#if !defined(CONFIG_ESP_FOC_INJECTION_ENABLE)
-    (void)axis; (void)amplitude; (void)duration_ms;
-    return ESP_FOC_ERR_AXIS_INVALID_STATE;
-#else
-    if (axis == NULL) {
-        return ESP_FOC_ERR_INVALID_ARG;
-    }
-    q16_t ts = axis->torque_controller[0].dt;
-    if (ts <= 0) {
-        return ESP_FOC_ERR_TIMESTEP_TOO_SMALL;
-    }
-    esp_foc_critical_enter();
-    esp_foc_injection_step_setup(&axis->injection, amplitude, duration_ms, ts);
-    esp_foc_critical_leave();
-    return ESP_FOC_OK;
-#endif
-}
-
-esp_foc_err_t esp_foc_axis_inject_chirp_q16(
-    esp_foc_axis_t *axis,
-    q16_t amplitude,
-    q16_t freq_start_hz,
-    q16_t freq_end_hz,
-    uint32_t duration_ms)
-{
-#if !defined(CONFIG_ESP_FOC_INJECTION_ENABLE)
-    (void)axis; (void)amplitude; (void)freq_start_hz;
-    (void)freq_end_hz; (void)duration_ms;
-    return ESP_FOC_ERR_AXIS_INVALID_STATE;
-#else
-    if (axis == NULL) {
-        return ESP_FOC_ERR_INVALID_ARG;
-    }
-    if (freq_start_hz <= 0 || freq_end_hz <= 0) {
-        return ESP_FOC_ERR_INVALID_ARG;
-    }
-    q16_t ts = axis->torque_controller[0].dt;
-    if (ts <= 0) {
-        return ESP_FOC_ERR_TIMESTEP_TOO_SMALL;
-    }
-    esp_foc_critical_enter();
-    esp_foc_injection_chirp_setup(&axis->injection, amplitude,
-                                  freq_start_hz, freq_end_hz,
-                                  duration_ms, ts);
-    esp_foc_critical_leave();
-    return ESP_FOC_OK;
-#endif
-}
-
-esp_foc_err_t esp_foc_axis_inject_stop(esp_foc_axis_t *axis)
-{
-    if (axis == NULL) {
-        return ESP_FOC_ERR_INVALID_ARG;
-    }
-    esp_foc_critical_enter();
-    esp_foc_injection_disable(&axis->injection);
-    esp_foc_critical_leave();
-    return ESP_FOC_OK;
 }

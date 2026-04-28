@@ -32,6 +32,10 @@
 #endif
 #include "espFoC/utils/esp_foc_q16.h"
 
+#if defined(CONFIG_ESP_FOC_SCOPE) && CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS >= 13
+extern q16_t esp_foc_debug_scope_hot_path_dt_us_q16;
+#endif
+
 static const char *TAG = "tuner-target";
 
 static esp_foc_axis_t s_axis;
@@ -82,6 +86,10 @@ static void wire_scope_channels(void)
     esp_foc_scope_add_channel(&s_axis.i_v, 9);
     esp_foc_scope_add_channel(&s_axis.i_alpha.raw, 10);
     esp_foc_scope_add_channel(&s_axis.i_beta.raw, 11);
+#if CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS >= 13
+    /* Last channel: FOC hot-path time [µs] (esp_foc_control_current_mode_sensored.c). */
+    esp_foc_scope_add_channel(&esp_foc_debug_scope_hot_path_dt_us_q16, 12);
+#endif
 #endif
     esp_foc_scope_initalize();
 #endif

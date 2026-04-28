@@ -73,6 +73,7 @@ class DemoFirmware(threading.Thread):
         self.lim = initial_gains.int_lim
         self.aligned = True  # demo axis pretends it is ready to run
         self.override = False
+        self.skip_torque = False
         self.target_id = 0.0
         self.target_iq = 0.0
         self.target_ud = 0.0
@@ -85,6 +86,7 @@ class DemoFirmware(threading.Thread):
         # default). The demo doesn't actually run a biquad; we just
         # round-trip the value through the protocol.
         self.current_filter_fc = 300.0
+        self.motor_pole_pairs = 7
         # In-memory NVS overlay; populated by CMD_PERSIST_NVS, cleared
         # by CMD_ERASE_NVS, applied by CMD_LOAD_NVS.
         self.nvs_overlay: Optional[dict] = None
@@ -146,7 +148,12 @@ class DemoFirmware(threading.Thread):
         to the origin as soon as i_q reached its reference."""
         import math
         angle = (time.monotonic() * 2.0 * math.pi * 4.0) % (2.0 * math.pi)
-        u_q_cmd = self.kp * (self.target_iq - self._i_actual)
+        if self.skip_torque:
+            u_q_cmd = self.target_uq if self.override else 0.0
+        else:
+            u_q_cmd = self.kp * (self.target_iq - self._i_actual)
+            if self.override:
+                u_q_cmd += self.target_uq
         u_q_cmd = max(-self.motor.v_max, min(self.motor.v_max, u_q_cmd))
         # Visible magnitude: either the active loop effort or a fraction
         # of the target current, whichever is larger. The sign tracks the
@@ -169,12 +176,19 @@ class DemoFirmware(threading.Thread):
         u_u = u_u_raw - v_cm
         u_v = u_v_raw - v_cm
         u_w = u_w_raw - v_cm
-        fields = (u_u,             # ch0: SVPWM phase U (for hexagon)
-                  u_v,             # ch1: SVPWM phase V
-                  u_w,             # ch2: SVPWM phase W
-                  self.target_iq,  # ch3: current ref
-                  self._i_actual,  # ch4: i_q measured
-                  u_q_cmd)         # ch5: u_q command
+        fields = (u_u,
+                  u_v,
+                  u_w,
+                  self.target_iq,
+                  self._i_actual,
+                  u_q_cmd,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  42.0)
         return pack_scope_i32_to_payload(
             [self._float_to_q16_i32(f) for f in fields])
 
@@ -209,15 +223,22 @@ class DemoFirmware(threading.Thread):
         while not self._stop.is_set():
             with self._state_lock:
                 for _ in range(self.SUB_STEPS):
-                    ref = self.target_iq if self.override else 0.0
-                    err = ref - self._i_actual
-                    u = self.kp * err + self._integ_prev
-                    u = max(-self.motor.v_max, min(self.motor.v_max, u))
-                    self._integ_prev = self._integ
-                    self._integ += self.ki * err * self.motor.ts_s
-                    if self.lim > 0:
-                        self._integ = max(-self.lim,
-                                          min(self.lim, self._integ))
+                    if self.skip_torque:
+                        u = self.target_uq if self.override else 0.0
+                        u = max(-self.motor.v_max, min(self.motor.v_max, u))
+                        self._integ_prev = self._integ
+                    else:
+                        ref = self.target_iq if self.override else 0.0
+                        err = ref - self._i_actual
+                        u = self.kp * err + self._integ_prev
+                        if self.override:
+                            u += self.target_uq
+                        u = max(-self.motor.v_max, min(self.motor.v_max, u))
+                        self._integ_prev = self._integ
+                        self._integ += self.ki * err * self.motor.ts_s
+                        if self.lim > 0:
+                            self._integ = max(-self.lim,
+                                              min(self.lim, self._integ))
                     self._i_actual = (alpha * self._i_actual
                                       + (1.0 - alpha) / self.motor.r_ohm * u)
             sub_counter += 1
@@ -304,12 +325,33 @@ class DemoFirmware(threading.Thread):
         elif pid == int(ParamId.FIRMWARE_TYPE):
             self._send_response(seq, OK,
                                 struct.pack("<I", self.firmware_type))
+        elif pid == int(ParamId.MOTOR_POLE_PAIRS):
+            self._send_response(seq, OK,
+                                struct.pack("<i", int(self.motor_pole_pairs)))
+        elif pid == int(ParamId.SKIP_TORQUE):
+            self._send_response(seq, OK,
+                                bytes([1 if self.skip_torque else 0]))
         else:
             self._send_response(seq, ERR_INVALID_ARG)
 
     def _handle_write(self, seq: int, pid: int, cmd: bytes) -> None:
+        if pid == int(ParamId.WRITE_SKIP_TORQUE):
+            if len(cmd) < 1:
+                self._send_response(seq, ERR_INVALID_ARG)
+                return
+            self.skip_torque = cmd[0] != 0
+            self._send_response(seq, OK)
+            return
         if len(cmd) < 4:
             self._send_response(seq, ERR_INVALID_ARG)
+            return
+        if pid == int(ParamId.WRITE_MOTOR_POLE_PAIRS):
+            p = struct.unpack("<i", cmd[:4])[0]
+            if not (1 <= p <= 64):
+                self._send_response(seq, ERR_INVALID_ARG)
+                return
+            self.motor_pole_pairs = p
+            self._send_response(seq, OK)
             return
         v = _q16_from_bytes(cmd[:4])
         if pid == int(ParamId.WRITE_KP):
@@ -388,6 +430,7 @@ class DemoFirmware(threading.Thread):
                 "kp": self.kp, "ki": self.ki, "lim": self.lim,
                 "r": r, "l": l, "bw": bw,
                 "fc": self.current_filter_fc,
+                "pole_pairs": int(self.motor_pole_pairs),
             }
             self._log("calibration: saved to NVS")
             self._send_response(seq, OK)
@@ -402,6 +445,9 @@ class DemoFirmware(threading.Thread):
             stored_fc = self.nvs_overlay.get("fc", 0.0)
             if stored_fc > 0:
                 self.current_filter_fc = stored_fc
+            pp = int(self.nvs_overlay.get("pole_pairs", 0))
+            if 1 <= pp <= 64:
+                self.motor_pole_pairs = pp
             self._log("calibration: NVS overlay applied")
             self._send_response(seq, OK)
         elif pid == int(ParamId.CMD_ERASE_NVS):

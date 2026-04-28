@@ -151,13 +151,12 @@ TEST_CASE("q16 limit_voltage: zero magnitude is no-op", "[espFoC][q16][stability
     TEST_ASSERT_EQUAL_INT32(0, vq);
 }
 
-TEST_CASE("q16 limit_voltage: zero dc is no-op", "[espFoC][q16][stability]")
+TEST_CASE("q16 limit_voltage: zero dc clamps vector to zero", "[espFoC][q16][stability]")
 {
     q16_t vd = Q16_ONE, vq = Q16_ONE;
-    q16_t vd_before = vd, vq_before = vq;
     esp_foc_limit_voltage_q16(&vd, &vq, 0);
-    TEST_ASSERT_EQUAL_INT32(vd_before, vd);
-    TEST_ASSERT_EQUAL_INT32(vq_before, vq);
+    TEST_ASSERT_EQUAL_INT32(0, vd);
+    TEST_ASSERT_EQUAL_INT32(0, vq);
 }
 
 TEST_CASE("q16 limit_voltage: within limit unchanged", "[espFoC][q16][stability]")

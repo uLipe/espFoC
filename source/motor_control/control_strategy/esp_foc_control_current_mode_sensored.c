@@ -23,10 +23,27 @@
  */
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "esp_log.h"
 #include "esp_attr.h"
 #include "espFoC/esp_foc.h"
+#include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/utils/foc_math_q16.h"
+
+#if defined(CONFIG_ESP_FOC_SCOPE)
+q16_t esp_foc_debug_scope_hot_path_dt_us_q16;
+
+/* Whole microseconds on the scope wire as Q16 float (host: raw/65536). Integer-only
+ * so PWM ISR paths never touch the FPU (Xtensa saves FP context elsewhere). */
+static inline q16_t hot_path_us_elapsed_to_q16(uint64_t el_us)
+{
+    const uint64_t cap = 32767ULL; /* INT32_MAX / Q16_ONE */
+    if (el_us > cap) {
+        el_us = cap;
+    }
+    return (q16_t)((int64_t)el_us * (int64_t)Q16_ONE);
+}
+#endif
 
 static const char * tag = "ESP_FOC_CONTROL";
 
@@ -35,10 +52,10 @@ static const char * tag = "ESP_FOC_CONTROL";
 /* ============================================================
  *  Plan #2: full FOC pipeline runs inside the PWM ISR.
  *
- *  The ADC ISR has already published latest_i_alpha / latest_i_beta
- *  on the axis. The angle predictor lives on the axis too; the outer
- *  task feeds it with fresh encoder readings and we extrapolate
- *  every PWM cycle.
+ *  Per tick: read the previous completed conversion (n-1) from
+ *  latest_i_alpha / latest_i_beta, then re-arm the shunt ADC so the
+ *  next frame runs in parallel with the rest of this ISR. The outer
+ *  task does not call sample_isensors.
  *
  *  set_voltages() down to mcpwm_comparator_set_compare_value() is
  *  IRAM-attributed in IDF v5.5; the rest of the helpers used here
@@ -52,13 +69,22 @@ static const char * tag = "ESP_FOC_CONTROL";
 IRAM_ATTR static void foc_hot_isr(void *data)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)data;
+#if defined(CONFIG_ESP_FOC_SCOPE)
+    uint64_t hot_path_t0 = esp_foc_now_useconds();
+#endif
 
-    /* 1) Snapshot the latest Clarke-published currents. Two volatile
-     *    q16 reads — single-instruction loads, no torn read. */
+    /* 1) Previous sample (n-1), published by the ADC ISR. */
     q16_t i_alpha = axis->latest_i_alpha;
     q16_t i_beta  = axis->latest_i_beta;
 
-    /* 2) Predict electrical angle for "now". This call only touches
+    /* 2) Trigger the next conversion; it completes in parallel with
+     *    the control law below (continuous and one-shot both gate off
+     *    in the ADC ISR until re-armed). */
+    if (axis->isensor_driver != NULL) {
+        axis->isensor_driver->sample_isensors(axis->isensor_driver);
+    }
+
+    /* 3) Predict electrical angle for "now". This call only touches
      *    the predictor's read-only fields; the outer task wraps
      *    update() in a critical section the ISR also honours, so the
      *    snapshot here is consistent. */
@@ -66,45 +92,35 @@ IRAM_ATTR static void foc_hot_isr(void *data)
     q16_t theta_e = esp_foc_angle_predictor_predict_q16(
                         &axis->angle_predictor, now_us);
 
-    /* 3) sin / cos. Backed by the IQ31 LUT in iram, no flash hit. */
+    /* 4) sin / cos. Backed by the IQ31 LUT in iram, no flash hit. */
     q16_t e_sin = q16_sin(theta_e);
     q16_t e_cos = q16_cos(theta_e);
 
-    /* 4) Park transform. */
+    /* 5) Park transform. */
     q16_t i_d, i_q;
     q16_park(e_sin, e_cos, i_alpha, i_beta, &i_d, &i_q);
 
-    /* 5) Publish for scope / status. */
+    /* 6) Publish for scope / status. */
     axis->i_alpha.raw = i_alpha;
     axis->i_beta.raw  = i_beta;
     axis->i_d.raw = i_d;
     axis->i_q.raw = i_q;
     axis->rotor_elec_angle = theta_e;
 
-    /* 6) Current PI (or override / open-loop voltage). */
+    /* 7) Current PI (or open-loop voltage).
+     * Tuner override (CONFIG_ESP_FOC_TUNER_ENABLE): esp_foc_core copies
+     * tuner_override.target_{id,iq,ud,uq} into axis->target_* each outer-loop
+     * tick — id/iq feed the PI, ud/uq add as feed-forward (same as regulation). */
     q16_t u_d, u_q;
 
-#if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
-    if (axis->tuner_override.active) {
-        /* Tuner has the steering wheel — bypass the PI completely. */
-        u_d = axis->tuner_override.target_ud;
-        u_q = axis->tuner_override.target_uq;
-    } else
-#endif
     if (axis->skip_torque_control) {
         /* Open-loop voltage mode: take the operator's u_d / u_q
          * straight through, no integration. */
         u_d = axis->target_u_d.raw;
         u_q = axis->target_u_q.raw;
     } else {
-#if defined(CONFIG_ESP_FOC_INJECTION_ENABLE)
-        q16_t iq_ref = esp_foc_injection_apply_q16(&axis->injection,
-                                                   axis->target_i_q.raw);
-#else
-        q16_t iq_ref = axis->target_i_q.raw;
-#endif
         u_q = esp_foc_pid_update(&axis->torque_controller[0],
-                                 iq_ref, i_q);
+                                 axis->target_i_q.raw, i_q);
         u_d = esp_foc_pid_update(&axis->torque_controller[1],
                                  axis->target_i_d.raw, i_d);
         /* User-provided feed-forward gets stacked on top of the PI
@@ -115,8 +131,8 @@ IRAM_ATTR static void foc_hot_isr(void *data)
     axis->u_q.raw = u_q;
     axis->u_d.raw = u_d;
 
-    /* 7) Inverse Park + SVPWM in one shot. */
-    q16_t u_alpha, u_beta, u_u, u_v, u_w;
+    /* 8) Inverse Park + SVPWM in one shot. */
+    q16_t u_alpha = 0, u_beta = 0, u_u = 0, u_v = 0, u_w = 0;
     esp_foc_modulate_dq_voltage(e_sin, e_cos, u_d, u_q,
                                 &u_alpha, &u_beta,
                                 &u_u, &u_v, &u_w,
@@ -128,17 +144,27 @@ IRAM_ATTR static void foc_hot_isr(void *data)
     axis->u_v.raw = u_v;
     axis->u_w.raw = u_w;
 
-    /* 8) Push duties to the inverter. mcpwm_comparator_set_compare_value
+    /* 9) Push duties to the inverter. mcpwm_comparator_set_compare_value
      *    is IRAM-safe in IDF v5.5. */
     axis->inverter_driver->set_voltages(axis->inverter_driver, u_u, u_v, u_w);
 
-    /* 9) Optionally snapshot every wired channel into the scope ring.
+    /* 10) Optionally snapshot every wired channel into the scope ring.
      *    The from_isr variant uses xTaskNotifyGiveFromISR on rollover. */
 #if defined(CONFIG_ESP_FOC_SCOPE)
+    {
+        uint64_t hot_path_t1 = esp_foc_now_useconds();
+        uint64_t el = (hot_path_t1 >= hot_path_t0)
+                          ? (hot_path_t1 - hot_path_t0)
+                          : 0U;
+        if (el > 10000000U) {
+            el = 10000000U;
+        }
+        esp_foc_debug_scope_hot_path_dt_us_q16 = hot_path_us_elapsed_to_q16(el);
+    }
     esp_foc_scope_data_push_from_isr();
 #endif
 
-    /* 10) Downsample counter. When it expires, wake the outer task
+    /* 11) Downsample counter. When it expires, wake the outer task
      *     so it reads the encoder, updates the predictor and dispatches
      *     the user regulation callback. */
     if (axis->downsampling_low_speed) {
@@ -309,6 +335,9 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
 
     while(1) {
         esp_foc_wait_notifier();
+#if defined(CONFIG_ESP_FOC_SCOPE)
+        uint64_t hot_path_t0 = esp_foc_now_useconds();
+#endif
 
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
        esp_foc_debug_pin_set();
@@ -383,14 +412,8 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
                 /* No EMA on i_q / i_d any more — the per-phase
                  * Butterworth inside the isensor driver has already
                  * shaped the spectrum upstream of Clarke / Park. */
-#if defined(CONFIG_ESP_FOC_INJECTION_ENABLE)
-                q16_t iq_ref = esp_foc_injection_apply_q16(&axis->injection,
-                                                           axis->target_i_q.raw);
-#else
-                q16_t iq_ref = axis->target_i_q.raw;
-#endif
                 q16_t u_q_q16 = esp_foc_pid_update(&axis->torque_controller[0],
-                                                         iq_ref,
+                                                         axis->target_i_q.raw,
                                                          i_q_q16);
                 q16_t u_d_q16 = esp_foc_pid_update(&axis->torque_controller[1],
                                                          axis->target_i_d.raw,
@@ -432,6 +455,17 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
         esp_foc_send_notification(axis->regulator_ev);
 
 #ifdef CONFIG_ESP_FOC_SCOPE
+        {
+            uint64_t hot_path_t1 = esp_foc_now_useconds();
+            uint64_t el = (hot_path_t1 >= hot_path_t0)
+                              ? (hot_path_t1 - hot_path_t0)
+                              : 0U;
+            if (el > 10000000U) {
+                el = 10000000U;
+            }
+            esp_foc_debug_scope_hot_path_dt_us_q16 =
+                hot_path_us_elapsed_to_q16(el);
+        }
         esp_foc_scope_data_push();
 #endif
 

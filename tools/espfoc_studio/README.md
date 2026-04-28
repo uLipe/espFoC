@@ -33,7 +33,7 @@ PYTHONPATH=tools python3 -m espfoc_studio.gui --demo
 The window opens with:
 
 - a **Tuning** panel on the left (live gains, manual edit, MPZ recompute,
-  override toggle, motion targets);
+  override toggle, current refs and voltage feed-forward targets);
 - an **Analysis** tab that redraws the predicted step response, Bode
   magnitude, pole/zero map and root locus every time the motor or gain
   parameters change;

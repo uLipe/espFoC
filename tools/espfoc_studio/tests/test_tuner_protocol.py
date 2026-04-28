@@ -52,7 +52,9 @@ class FakeFirmware(threading.Thread):
         self.vmax = 12.0
         self.aligned = True
         self.override = False
+        self.skip_torque = False
         self.target_iq = 0.0
+        self.motor_pole_pairs = 7
 
     def stop(self):
         self._stop.set()
@@ -95,11 +97,32 @@ class FakeFirmware(threading.Thread):
                 self._send_response(seq, 0, bytes([int(flags)]))
             elif pid == int(ParamId.AXIS_LAST_ERR):
                 self._send_response(seq, 0, struct.pack("<b", 0))
+            elif pid == int(ParamId.MOTOR_POLE_PAIRS):
+                self._send_response(
+                    seq, 0, struct.pack("<i", int(self.motor_pole_pairs)))
+            elif pid == int(ParamId.SKIP_TORQUE):
+                self._send_response(
+                    seq, 0, bytes([1 if self.skip_torque else 0]))
             else:
                 self._send_response(seq, -2)
         elif op == int(Op.WRITE):
+            if pid == int(ParamId.WRITE_SKIP_TORQUE):
+                if len(cmd) < 1:
+                    self._send_response(seq, -2)
+                    return
+                self.skip_torque = cmd[0] != 0
+                self._send_response(seq, 0)
+                return
             if len(cmd) < 4:
                 self._send_response(seq, -2)
+                return
+            if pid == int(ParamId.WRITE_MOTOR_POLE_PAIRS):
+                p = struct.unpack("<i", cmd[:4])[0]
+                if not (1 <= p <= 64):
+                    self._send_response(seq, -2)
+                    return
+                self.motor_pole_pairs = p
+                self._send_response(seq, 0)
                 return
             v = self._from_q16(cmd[:4])
             if pid == int(ParamId.WRITE_KP):
@@ -241,6 +264,17 @@ def test_reset_board():
         fw.stop()
 
 
+def test_motor_pole_pairs_round_trip():
+    cli, fw = _setup()
+    try:
+        assert cli.read_motor_pole_pairs() == 7
+        cli.write_motor_pole_pairs(11)
+        assert cli.read_motor_pole_pairs() == 11
+        assert fw.motor_pole_pairs == 11
+    finally:
+        fw.stop()
+
+
 def main() -> int:
     tests = [
         test_read_pi_gains,
@@ -250,6 +284,7 @@ def main() -> int:
         test_motion_rejected_when_override_off,
         test_recompute_gains,
         test_reset_board,
+        test_motor_pole_pairs_round_trip,
     ]
     failed = 0
     for t in tests:

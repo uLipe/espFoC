@@ -54,19 +54,21 @@ _CHANNEL_COLORS = (
 class ScopePanel(QWidget):
     """Receives SCOPE frames from a LinkReader and plots them.
 
-    Frames are pushed into a bounded inbox by the reader thread; a
-    single timer on the Qt thread drains the inbox, parses all queued
-    frames in one shot and redraws the curves once. Decoupling the
-    firmware's scope rate (hundreds of Hz) from the GUI redraw rate
-    keeps the UI snappy when a current step fires a burst of samples."""
+    Raw payloads go to a bounded inbox; a dedicated decode thread turns
+    them into float tuples so the Qt timer only merges samples and
+    redraws. Decoding off the GUI thread keeps the UI responsive when a
+    burst of scope frames arrives."""
 
     WINDOW_S = 2.0         # rolling window length
     BUFFER_CAP = 4096      # max samples retained per channel
     RENDER_INTERVAL_MS = 20  # 50 FPS render cap
     INBOX_CAP = 2048       # drop oldest when firmware outruns the GUI
+    MAX_PENDING_DECODED = 8192  # cap decoded backlog if the UI falls behind
+    MAX_FRAMES_PER_UI_TICK = 256  # for other panels that decode on the GUI thread
 
     def __init__(self, reader: Optional[LinkReader] = None,
-                 sample_period_s: float = 1e-3 * 4) -> None:
+                 sample_period_s: float = 1e-3 * 4,
+                 async_decode: bool = True) -> None:
         """sample_period_s is kept for backwards compatibility but no
         longer drives the time axis — the panel now timestamps each
         frame on arrival with time.monotonic(), so the visible
@@ -74,6 +76,7 @@ class ScopePanel(QWidget):
         the firmware shipping samples at a slightly different rate
         than advertised."""
         super().__init__()
+        self._async_decode = async_decode
         self._reader = reader
         self._sample_dt = sample_period_s  # kept for backwards-compat only
         self._inbox_lock = threading.Lock()
@@ -82,6 +85,10 @@ class ScopePanel(QWidget):
         # an accumulating "samples seen so far" counter that lags or
         # leads the actual data rate.
         self._inbox: Deque[Tuple[float, bytes]] = deque(maxlen=self.INBOX_CAP)
+        self._pending_lock = threading.Lock()
+        self._pending_decoded: List[Tuple[float, Tuple[float, ...]]] = []
+        self._worker_stop = threading.Event()
+        self._decode_thread: Optional[threading.Thread] = None
         self._t0 = time.monotonic()
         self._time_buf: Deque[float] = deque(maxlen=self.BUFFER_CAP)
         self._channel_bufs: List[Deque[float]] = []
@@ -120,27 +127,21 @@ class ScopePanel(QWidget):
         scroll.setWidget(gutter)
         root.addWidget(scroll)
 
-        # Plot. Roll mode: x axis is "seconds before now" so the live
-        # cursor always sits at x = 0 on the right edge and old data
-        # falls off to the left. The X-data values themselves are
-        # recomputed every render as (sample_time - t_now), so even
-        # with autoRange off after a manual pan/zoom the visible window
-        # stays bounded — no more "scope ran off the right edge of the
-        # universe" after zooming out for a few minutes.
+        # Plot: x is seconds within the rolling window, 0 = oldest sample
+        # on screen, WINDOW_S ≈ newest (right).
         self._plot = pg.PlotWidget(title="Scope — firmware CSV stream")
         self._plot.setLabel('left', "amplitude")
         self._plot.setLabel('bottom', "time", units='s')
         self._plot.showGrid(x=True, y=True, alpha=0.3)
         self._plot.setMinimumHeight(380)
-        self._plot.setXRange(-self.WINDOW_S, 0.0, padding=0)
+        self._plot.setXRange(0.0, self.WINDOW_S, padding=0)
         self._plot.enableAutoRange(axis='x', enable=False)
         self._crosshair = attach_crosshair(
             self._plot,
-            fmt=lambda x, y: f"t = {x:+.3f} s\ny = {y:+.4g}")
+            fmt=lambda x, y: f"t = {x:.3f} s\ny = {y:+.4g}")
         root.addWidget(self._plot, 1)
 
-        # Render timer keeps the Qt thread independent from the reader
-        # thread's frame rate. It drains the inbox and updates curves.
+        # Render timer merges decoded samples and updates curves.
         self._render_timer = QTimer(self)
         self._render_timer.setInterval(self.RENDER_INTERVAL_MS)
         self._render_timer.timeout.connect(self._render_tick)
@@ -148,6 +149,22 @@ class ScopePanel(QWidget):
 
         if reader is not None:
             reader.register_scope_callback(self._on_frame_reader_thread)
+
+        if self._async_decode:
+            self._decode_thread = threading.Thread(
+                target=self._decode_worker_loop,
+                daemon=True,
+                name="espfoc-scope-decode",
+            )
+            self._decode_thread.start()
+        else:
+            self._decode_thread = None
+
+    def closeEvent(self, event) -> None:
+        self._worker_stop.set()
+        if self._decode_thread is not None:
+            self._decode_thread.join(timeout=1.5)
+        super().closeEvent(event)
 
     # --- Public helpers ---------------------------------------------------
 
@@ -165,6 +182,10 @@ class ScopePanel(QWidget):
                     self._on_frame_reader_thread)
             except ValueError:
                 pass
+            with self._inbox_lock:
+                self._inbox.clear()
+            with self._pending_lock:
+                self._pending_decoded.clear()
         self._reader = reader
         reader.register_scope_callback(self._on_frame_reader_thread)
 
@@ -174,67 +195,87 @@ class ScopePanel(QWidget):
         that parked the viewport off the live cursor."""
         with self._inbox_lock:
             self._inbox.clear()
+        with self._pending_lock:
+            self._pending_decoded.clear()
         self._t0 = time.monotonic()
         self._time_buf.clear()
         for buf in self._channel_bufs:
             buf.clear()
         for curve in self._curves:
             curve.setData([], [])
-        # X is the canonical "seconds before now" range; reset it
-        # explicitly so any user zoom is undone. Y goes back to
-        # autorange because the firmware may have switched to a
-        # different signal scale since the last manual zoom.
-        self._plot.setXRange(-self.WINDOW_S, 0.0, padding=0)
+        self._plot.setXRange(0.0, self.WINDOW_S, padding=0)
         self._plot.enableAutoRange(axis='y', enable=True)
 
     # --- Frame path -------------------------------------------------------
 
     def _on_frame_reader_thread(self, channel: int, seq: int,
                                 payload: bytes) -> None:
-        # Stamp the frame at arrival on the reader thread; no Qt call
-        # here. Whatever happens between here and the next render tick
-        # (batching, drop-oldest on the bounded inbox, render-tick
-        # spacing) does not show up on the time axis any more.
         t_mono = time.monotonic()
         with self._inbox_lock:
             self._inbox.append((t_mono, payload))
 
-    def _render_tick(self) -> None:
-        # Drain the inbox under the lock, then release so the reader
-        # thread never waits on rendering.
-        with self._inbox_lock:
-            if not self._inbox:
-                return
-            pending = list(self._inbox)
-            self._inbox.clear()
-
-        # Ingest every pending frame into the per-channel buffers.
-        for t_mono, payload in pending:
+    def _decode_raw_batch(self, batch: List[Tuple[float, bytes]]) -> None:
+        out: List[Tuple[float, Tuple[float, ...]]] = []
+        for t_mono, payload in batch:
             try:
                 values = decode_scope_payload_to_floats_csv_first(payload)
             except ValueError:
                 continue
             if not values:
                 continue
+            out.append((t_mono, tuple(values)))
+        if not out:
+            return
+        with self._pending_lock:
+            self._pending_decoded.extend(out)
+            while len(self._pending_decoded) > self.MAX_PENDING_DECODED:
+                del self._pending_decoded[: len(self._pending_decoded) // 2]
+
+    def _decode_worker_loop(self) -> None:
+        while not self._worker_stop.is_set():
+            batch: List[Tuple[float, bytes]] = []
+            with self._inbox_lock:
+                if self._inbox:
+                    batch = list(self._inbox)
+                    self._inbox.clear()
+            if not batch:
+                if self._worker_stop.wait(0.003):
+                    break
+                continue
+            self._decode_raw_batch(batch)
+
+    def _render_tick(self) -> None:
+        if not self._async_decode:
+            batch: List[Tuple[float, bytes]] = []
+            with self._inbox_lock:
+                if self._inbox:
+                    batch = list(self._inbox)
+                    self._inbox.clear()
+            if batch:
+                self._decode_raw_batch(batch)
+
+        chunk: List[Tuple[float, Tuple[float, ...]]]
+        with self._pending_lock:
+            chunk = self._pending_decoded
+            self._pending_decoded = []
+
+        for t_mono, values in chunk:
             self._ensure_channels(len(values))
             self._time_buf.append(t_mono - self._t0)
             for i, v in enumerate(values):
                 self._channel_bufs[i].append(v)
 
-        # Drop samples older than WINDOW_S in one sweep.
         while self._time_buf and (self._time_buf[-1] - self._time_buf[0]
                                   > self.WINDOW_S):
             self._time_buf.popleft()
             for buf in self._channel_bufs:
                 buf.popleft()
 
-        # Roll-mode display: shift every sample's X by -t_now_rel so
-        # the live cursor sits at x = 0 and old data trails off to
-        # the left. Recomputed every render so nothing drifts off the
-        # right edge regardless of how long the panel has been alive.
-        t_now_rel = time.monotonic() - self._t0
-        t_arr = np.fromiter(self._time_buf, dtype=float,
-                            count=len(self._time_buf)) - t_now_rel
+        if not self._time_buf:
+            return
+        t_rels = np.fromiter(self._time_buf, dtype=float,
+                             count=len(self._time_buf))
+        t_arr = t_rels - float(t_rels[0])
         for i, curve in enumerate(self._curves):
             if self._checkboxes[i].isChecked():
                 y_arr = np.fromiter(self._channel_bufs[i], dtype=float,

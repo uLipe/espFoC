@@ -4,8 +4,8 @@
  * Tests for the natural-direction probe in esp_foc_align_axis.
  *
  * Each scenario primes the mock rotor with a scripted accumulated-tick
- * sequence: the alignment routine reads "before" (after re-zero) and
- * "after" (post Vq probe), and the delta decides the natural direction.
+ * sequence: the routine reads "before" (after re-zero) and "after" the
+ * first open-loop angle sweep; the delta decides the natural direction.
  */
 
 #include <string.h>

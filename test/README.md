@@ -6,7 +6,7 @@ Unity-based unit tests for the espFoC component. They cover logic that does not 
 - **test_foc_math_iq31.c**: FOC math in IQ31 — Clarke, inverse Clarke, Park, inverse Park (trivial + edge + roundtrip), normalize_angle (wrap, 2π), limit_voltage (within limit, exceeds limit, zero vector, convergence vs float), apply_bias.
 - **test_pid_iq31.c**: Canonical PID (`pid_controller.h`) — IQ31 `esp_foc_pid_update`; per-unit ref/measure in [-1,1]; compared to `esp_foc_pid_update_float` in parallel
 - **test_biquad_q16.c**: 2nd-order Butterworth low-pass + DF-II Transposed biquad (`biquad_q16.h`) — bypass, designer guards, DC unity, Nyquist rejection, -3 dB at fc, passband flat, stopband 40 dB/decade, long-run stability, reset semantics
-- **test_modulator_iq31.c**: `esp_foc_svm_set` vs `esp_foc_svm_set_float` in `test_float_modulator_ref.h`; `esp_foc_modulate_dq_voltage` / `esp_foc_get_dq_currents` vs `*_float` helpers; typical, edge, saturation cases
+- **test_modulator_iq31.c**: Q16 `esp_foc_svm_set`, `esp_foc_modulate_dq_voltage`, `esp_foc_get_dq_currents` — duty bounds, limit+inverse-Park consistency vs reference q16 path, Clarke/Park consistency for currents; typical and edge cases
 - **test_axis_iq31_api.c**: Public axis API (`esp_foc_initialize_axis` / `align` / `run` / `set_regulation_callback`) with mocks; valid/invalid arguments and boundary coverage
 - **test_foc_pipeline_iq31.c**: IQ31-only manual FOC pipeline (LPF → PID → modulator): bounded duty cycles, bitwise repeatability across two identical runs, SVM saturation smoke
 - **mock_drivers.c/h**: Inverter, rotor, and current mocks (IQ31-only; records calls and values)

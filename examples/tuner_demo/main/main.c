@@ -3,8 +3,7 @@
  *
  * espFoC tuner demo:
  *   - Walks through the build-time autotuned gains, then the runtime
- *     retune API, the tuner request/response protocol and the q-axis
- *     signal injection.
+ *     retune API and the tuner request/response protocol.
  *   - Uses inline stub drivers so it runs unchanged in QEMU (no hardware).
  *
  * Build/run in QEMU:
@@ -21,7 +20,6 @@
 #include "espFoC/esp_foc.h"
 #include "espFoC/esp_foc_axis_tuning.h"
 #include "espFoC/esp_foc_tuner.h"
-#include "espFoC/esp_foc_injection.h"
 
 static const char *TAG = "tuner-demo";
 
@@ -164,43 +162,6 @@ static void demo_protocol(void)
              (double)q16_to_float(deserialize_q16_le(resp)));
 }
 
-static void demo_injection(esp_foc_axis_t *axis)
-{
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "=== Signal injection (step) ===");
-    esp_foc_err_t err = esp_foc_axis_inject_step_q16(axis,
-        q16_from_float(0.5f), 5 /*ms*/);
-    ESP_LOGI(TAG, "arm_step amplitude=0.5A duration=5ms -> %s",
-             err == ESP_FOC_OK ? "OK" : "FAIL");
-    /* Drive the injection state directly to demonstrate sample shape */
-    for (int i = 0; i < 8; ++i) {
-        q16_t out = esp_foc_injection_apply_q16(&axis->injection,
-                                                q16_from_float(0.0f));
-        ESP_LOGI(TAG, "step sample[%d] = %.3f A",
-                 i, (double)q16_to_float(out));
-    }
-
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "=== Signal injection (chirp 100->500 Hz) ===");
-    err = esp_foc_axis_inject_chirp_q16(axis,
-        q16_from_float(0.25f),
-        q16_from_float(100.0f),
-        q16_from_float(500.0f),
-        10 /*ms*/);
-    ESP_LOGI(TAG, "arm_chirp amplitude=0.25A 100->500Hz over 10ms -> %s",
-             err == ESP_FOC_OK ? "OK" : "FAIL");
-    q16_t peak = 0;
-    for (int i = 0; i < 200; ++i) {
-        q16_t out = esp_foc_injection_apply_q16(&axis->injection, 0);
-        q16_t a = (out < 0) ? -out : out;
-        if (a > peak) {
-            peak = a;
-        }
-    }
-    ESP_LOGI(TAG, "chirp observed peak = %.3f A (expected ~0.25)",
-             (double)q16_to_float(peak));
-}
-
 static void try_retune(esp_foc_axis_t *axis, const char *label,
                        float r, float l, float bw)
 {
@@ -237,7 +198,6 @@ static void demo_task(void *arg)
     try_retune(axis, "above-nyquist demo", 0.5f, 0.001f, 600.0f);
 
     demo_protocol();
-    demo_injection(axis);
 
     ESP_LOGI(TAG, "");
     ESP_LOGI(TAG, "=== Demo complete ===");

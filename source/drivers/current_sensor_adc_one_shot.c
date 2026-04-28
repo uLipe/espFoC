@@ -58,6 +58,7 @@ typedef struct {
     int32_t filtered_count[4];
     esp_foc_biquad_q16_t bq[4];
     float offsets[4];
+    int32_t offset_counts[4];
     /* Optional Clarke publish targets — see current_sensor_adc.c for
      * the same plumbing on the continuous driver. */
     volatile q16_t *publish_alpha;
@@ -106,8 +107,8 @@ static void oneshot_adc_start_sample(isensor_adc_t *isensor, adc_channel_t chann
 static inline void adc_publish_alpha_beta(isensor_adc_t *obj)
 {
     const int32_t adc_rng = 2048;
-    int32_t d0 = obj->filtered_count[0] - (int32_t)lroundf(obj->offsets[0]);
-    int32_t d1 = obj->filtered_count[1] - (int32_t)lroundf(obj->offsets[1]);
+    int32_t d0 = obj->filtered_count[0] - obj->offset_counts[0];
+    int32_t d1 = obj->filtered_count[1] - obj->offset_counts[1];
     d0 = esp_foc_clamp_int32(d0, -adc_rng, adc_rng);
     d1 = esp_foc_clamp_int32(d1, -adc_rng, adc_rng);
     q16_t iu = q16_mul(esp_foc_q16_from_adc_diff_clamped(d0, adc_rng),
@@ -254,8 +255,8 @@ static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
     int32_t f2 = obj->filtered_count[2];
     int32_t f3 = obj->filtered_count[3];
 
-    int32_t d0 = f0 - (int32_t)lroundf(obj->offsets[0]);
-    int32_t d1 = f1 - (int32_t)lroundf(obj->offsets[1]);
+    int32_t d0 = f0 - obj->offset_counts[0];
+    int32_t d1 = f1 - obj->offset_counts[1];
     d0 = esp_foc_clamp_int32(d0, -adc_rng, adc_rng);
     d1 = esp_foc_clamp_int32(d1, -adc_rng, adc_rng);
 
@@ -269,8 +270,8 @@ static void fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
     values->iw_axis_0 = iw0;
 
     if (!obj->enable_analog_encoder) {
-        int32_t d2 = f2 - (int32_t)lroundf(obj->offsets[2]);
-        int32_t d3 = f3 - (int32_t)lroundf(obj->offsets[3]);
+        int32_t d2 = f2 - obj->offset_counts[2];
+        int32_t d3 = f3 - obj->offset_counts[3];
         d2 = esp_foc_clamp_int32(d2, -adc_rng, adc_rng);
         d3 = esp_foc_clamp_int32(d3, -adc_rng, adc_rng);
         q16_t iu1 = q16_mul(esp_foc_q16_from_adc_diff_clamped(d2, adc_rng), obj->adc_to_current_scale_q16);
@@ -305,6 +306,9 @@ static void calibrate_isensors (esp_foc_isensor_t *self, int calibration_rounds)
     obj->offsets[1] = 0.0f;
     obj->offsets[2] = 0.0f;
     obj->offsets[3] = 0.0f;
+    for (int oi = 0; oi < 4; oi++) {
+        obj->offset_counts[oi] = 0;
+    }
 
     for(int i = 0; i < calibration_rounds; i++) {
         self->sample_isensors(self);
@@ -322,6 +326,9 @@ static void calibrate_isensors (esp_foc_isensor_t *self, int calibration_rounds)
     obj->offsets[1] /= calibration_rounds;
     obj->offsets[2] /= calibration_rounds;
     obj->offsets[3] /= calibration_rounds;
+    for (int oi = 0; oi < 4; oi++) {
+        obj->offset_counts[oi] = (int32_t)lroundf(obj->offsets[oi]);
+    }
 
     for (int i = 0; i < 4; ++i) {
         esp_foc_biquad_q16_reset(&obj->bq[i]);
@@ -508,6 +515,10 @@ esp_foc_isensor_t *isensor_adc_oneshot_new(esp_foc_isensor_adc_oneshot_config_t 
     isensor_adc.offsets[1] = 0.0f;
     isensor_adc.offsets[2] = 0.0f;
     isensor_adc.offsets[3] = 0.0f;
+    isensor_adc.offset_counts[0] = 0;
+    isensor_adc.offset_counts[1] = 0;
+    isensor_adc.offset_counts[2] = 0;
+    isensor_adc.offset_counts[3] = 0;
     isensor_adc.callback = NULL;
 
     oneshot_adc_init(&isensor_adc);

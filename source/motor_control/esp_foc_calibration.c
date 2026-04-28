@@ -50,6 +50,37 @@ void esp_foc_calibration_get_align(const esp_foc_calibration_data_t *d,
     }
 }
 
+void esp_foc_calibration_pack_pole_pairs(esp_foc_calibration_data_t *d,
+                                        int32_t motor_pole_pairs)
+{
+    if (d == NULL) {
+        return;
+    }
+    if (motor_pole_pairs < 1) {
+        motor_pole_pairs = 0;
+    } else if (motor_pole_pairs > 64) {
+        motor_pole_pairs = 64;
+    }
+    {
+        uint32_t u = (uint32_t)motor_pole_pairs;
+        d->reserved[8] = (uint8_t)(u & 0xFFu);
+        d->reserved[9] = (uint8_t)((u >> 8) & 0xFFu);
+        d->reserved[10] = (uint8_t)((u >> 16) & 0xFFu);
+        d->reserved[11] = (uint8_t)((u >> 24) & 0xFFu);
+    }
+}
+
+int32_t esp_foc_calibration_get_pole_pairs(const esp_foc_calibration_data_t *d)
+{
+    if (d == NULL) {
+        return 0;
+    }
+    uint32_t u = (uint32_t)d->reserved[8] | ((uint32_t)d->reserved[9] << 8) |
+                 ((uint32_t)d->reserved[10] << 16) |
+                 ((uint32_t)d->reserved[11] << 24);
+    return (int32_t)u;
+}
+
 #if defined(CONFIG_ESP_FOC_CALIBRATION_NVS)
 
 #include <stdio.h>

@@ -9,7 +9,6 @@
 #include "espFoC/utils/pid_controller.h"
 #include "espFoC/utils/biquad_q16.h"
 #include "espFoC/utils/angle_predictor_q16.h"
-#include "espFoC/esp_foc_injection.h"
 #include "espFoC/drivers/inverter_interface.h"
 #include "espFoC/drivers/current_sensor_interface.h"
 #include "espFoC/drivers/rotor_sensor_interface.h"
@@ -133,8 +132,6 @@ struct esp_foc_axis_s {
     volatile q16_t latest_i_alpha;
     volatile q16_t latest_i_beta;
 #endif
-
-    esp_foc_injection_t injection;
 
     esp_foc_inverter_t *inverter_driver;
     esp_foc_rotor_sensor_t *rotor_sensor_driver;

@@ -32,6 +32,7 @@
 #pragma once
 
 #include "espFoC/utils/esp_foc_iq31.h"
+#include "espFoC/utils/esp_foc_int_sqrt.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -94,22 +95,8 @@ static inline iq31_t iq31_normalize_angle(iq31_t angle_q31)
 /**
  * If |(v_d, v_q)| > v_dc, scale both by v_dc/|v| so result lies on the circle.
  * All arguments in Q1.31. No-op if magnitude squared is zero or already <= v_dc.
- * Pure integer path using Newton's method isqrt.
+ * Integer sqrt from esp_foc_int_sqrt.h (digit-by-bit, bounded steps).
  */
-static inline uint64_t iq31_u64_isqrt(uint64_t x)
-{
-    if (x == 0u) {
-        return 0u;
-    }
-    uint64_t y = x;
-    uint64_t z = (x + 1u) >> 1;
-    while (z < y) {
-        y = z;
-        z = (x / z + z) >> 1;
-    }
-    return y;
-}
-
 static inline void esp_foc_limit_voltage_iq31(iq31_t *v_d, iq31_t *v_q, iq31_t v_dc)
 {
     int64_t vd64 = (int64_t)*v_d;
@@ -126,7 +113,7 @@ static inline void esp_foc_limit_voltage_iq31(iq31_t *v_d, iq31_t *v_q, iq31_t v
     if (m2 <= dc2) {
         return;
     }
-    uint64_t mag = iq31_u64_isqrt(m2);
+    uint64_t mag = esp_foc_u64_isqrt(m2);
     if (mag == 0u) {
         return;
     }

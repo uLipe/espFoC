@@ -54,9 +54,11 @@ typedef enum {
     ESP_FOC_TUNER_PARAM_MOTOR_R_OHM_Q16  = 0x0016, /* read q16, last NVS R [Ohm] or 0 */
     ESP_FOC_TUNER_PARAM_MOTOR_L_H_Q16    = 0x0017, /* read q16, last NVS L [H] or 0 */
     ESP_FOC_TUNER_PARAM_MOTOR_BW_HZ_Q16  = 0x0018, /* read q16, last NVS bandwidth [Hz] or 0 */
+    ESP_FOC_TUNER_PARAM_MOTOR_POLE_PAIRS  = 0x0019, /* read int32, live axis (1..64) */
     ESP_FOC_TUNER_PARAM_AXIS_STATE      = 0x0040, /* read u8 bitmap */
     ESP_FOC_TUNER_PARAM_AXIS_LAST_ERR   = 0x0041, /* read i8 (esp_foc_err_t) */
     ESP_FOC_TUNER_PARAM_NVS_PRESENT     = 0x0042, /* read u8 (0/1) */
+    ESP_FOC_TUNER_PARAM_SKIP_TORQUE_U8  = 0x0043, /* read u8: 1 = open-loop voltage (skip current PI) */
     ESP_FOC_TUNER_PARAM_FIRMWARE_TYPE   = 0x0050, /* read u32: 0 by default,
                                                    * tuner_studio_target sets
                                                    * 'TSGX' so the GUI can
@@ -70,12 +72,15 @@ typedef enum {
     ESP_FOC_TUNER_WRITE_I_FILTER_FC_Q16 = 0x0023, /* write q16 Hz; redesigns
                                                    * the per-phase Butterworth
                                                    * inside the isensor driver */
+    ESP_FOC_TUNER_WRITE_MOTOR_POLE_PAIRS = 0x0024, /* int32: 1..64; axis + NVS
+                                                    * (persist) */
 
     /* Write: tuner-driven motion targets (only honored while override active) */
     ESP_FOC_TUNER_WRITE_TARGET_ID_Q16   = 0x0060, /* write q16 (current ref) */
     ESP_FOC_TUNER_WRITE_TARGET_IQ_Q16   = 0x0061, /* write q16 (current ref) */
     ESP_FOC_TUNER_WRITE_TARGET_UD_Q16   = 0x0062, /* write q16 (voltage ff) */
     ESP_FOC_TUNER_WRITE_TARGET_UQ_Q16   = 0x0063, /* write q16 (voltage ff) */
+    ESP_FOC_TUNER_WRITE_SKIP_TORQUE_U8  = 0x0064, /* write u8: payload[0] 0/1 → axis->skip_torque_control */
 
     /* Commands (exec) */
     ESP_FOC_TUNER_CMD_RECOMPUTE_GAINS   = 0x0080, /* [R_q16,L_q16,bw_q16] */

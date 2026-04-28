@@ -16,6 +16,15 @@ menu "espFoC Settings"
         config ESP_FOC_CUSTOM_MATH
             bool "Use espFoC Q16 fast math (LUT sin/cos, etc.)"
             default y
+
+        config ESP_FOC_VOLTAGE_LIMIT_LINF
+            bool "DQ voltage limit: use max(|vd|,|vq|) instead of hypot (ISR-safe, no isqrt)"
+            depends on ESP_FOC_CUSTOM_MATH
+            default n
+            help
+                When enabled, limiting compares/scales against max(|vd|,|vq|) instead of
+                sqrt(vd^2+vq^2). Bounded CPU (no u64 isqrt), slightly different geometry than
+                the circular limit — useful if the modulator path runs inside a tight ISR.
     endmenu
 
     menu "Scope (telemetry)"
@@ -84,10 +93,6 @@ menu "espFoC Settings"
             default 50
             help
                 Beta of the alpha-beta tracker. Default 50 → 0.05.
-
-        config ESP_FOC_INJECTION_ENABLE
-            bool "Q-axis current injection API (tuner / identification)"
-            default n
     endmenu
 
     menu "Diagnostics"
