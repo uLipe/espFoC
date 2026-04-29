@@ -6,7 +6,6 @@
 
 #include <string.h>
 #include "espFoC/utils/esp_foc_q16.h"
-#include "espFoC/driver_iq31_local.h"
 #include "espFoC/rotor_sensor_as5600.h"
 #include "driver/gpio.h"
 #include "driver/i2c.h"
@@ -110,8 +109,9 @@ static q16_t read_counts(esp_foc_rotor_sensor_t *self)
     obj->prev_raw_iq = (int32_t)raw;
     esp_foc_critical_leave();
 
+    /* 12b absolute angle: single mask is the (mod 4096) residue. */
     uint32_t cm = (uint32_t)((raw - obj->zero_offset) & AS5600_READING_MASK);
-    return esp_foc_q16_from_counts_mod(cm, AS5600_CPR_UINT);
+    return q16_from_int((int32_t)cm);
 }
 
 static int64_t read_accumulated_counts_i64(esp_foc_rotor_sensor_t *self)
@@ -155,7 +155,7 @@ esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
             .scl_io_num = pin_scl,
             .sda_pullup_en = GPIO_PULLUP_ENABLE,
             .scl_pullup_en = GPIO_PULLUP_ENABLE,
-            .master.clk_speed = 1000000,
+            .master.clk_speed = 400000,
         };
 
         i2c_param_config(I2C_NUM_0, &conf);

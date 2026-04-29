@@ -138,6 +138,7 @@ static uint32_t fnv1a_32(const char *s)
 
 uint32_t esp_foc_calibration_profile_hash(void)
 {
+#if defined(CONFIG_ESP_FOC_USE_AUTOGEN_GAINS) && CONFIG_ESP_FOC_USE_AUTOGEN_GAINS
     /* Hash "<profile_name>:<version>" so bumping CONFIG_ESP_FOC_PROFILE_VERSION
      * invalidates persisted calibrations even when the profile name
      * stays the same — useful after editing the JSON in a way that
@@ -147,6 +148,9 @@ uint32_t esp_foc_calibration_profile_hash(void)
              CONFIG_ESP_FOC_MOTOR_PROFILE,
              CONFIG_ESP_FOC_PROFILE_VERSION);
     return fnv1a_32(buf);
+#else
+    return fnv1a_32("no_autogen");
+#endif
 }
 
 static esp_foc_err_t ensure_nvs(void)

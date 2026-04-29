@@ -22,7 +22,7 @@ static void assert_q16_near_float(float expected_float, q16_t got)
     TEST_ASSERT_FLOAT_WITHIN(TOL, expected_float, q16_to_float(got));
 }
 
-TEST_CASE("esp_foc_pid: matches float zero error after reset", "[espFoC][pid_iq31]")
+TEST_CASE("esp_foc_pid: matches float zero error after reset", "[espFoC][pid_q16]")
 {
     esp_foc_pid_controller_t pf;
     esp_foc_pid_controller_t pi;
@@ -32,7 +32,7 @@ TEST_CASE("esp_foc_pid: matches float zero error after reset", "[espFoC][pid_iq3
     assert_q16_near_float(of, oi);
 }
 
-TEST_CASE("esp_foc_pid: proportional matches float (per-unit)", "[espFoC][pid_iq31]")
+TEST_CASE("esp_foc_pid: proportional matches float (per-unit)", "[espFoC][pid_q16]")
 {
     esp_foc_pid_controller_t pf;
     esp_foc_pid_controller_t pi;
@@ -44,7 +44,7 @@ TEST_CASE("esp_foc_pid: proportional matches float (per-unit)", "[espFoC][pid_iq
     assert_q16_near_float(of, oi);
 }
 
-TEST_CASE("esp_foc_pid: output clamp max matches float", "[espFoC][pid_iq31]")
+TEST_CASE("esp_foc_pid: output clamp max matches float", "[espFoC][pid_q16]")
 {
     esp_foc_pid_controller_t pf;
     esp_foc_pid_controller_t pi;
@@ -56,7 +56,7 @@ TEST_CASE("esp_foc_pid: output clamp max matches float", "[espFoC][pid_iq31]")
     assert_q16_near_float(of, oi);
 }
 
-TEST_CASE("esp_foc_pid: output clamp min matches float", "[espFoC][pid_iq31]")
+TEST_CASE("esp_foc_pid: output clamp min matches float", "[espFoC][pid_q16]")
 {
     esp_foc_pid_controller_t pf;
     esp_foc_pid_controller_t pi;
@@ -68,7 +68,7 @@ TEST_CASE("esp_foc_pid: output clamp min matches float", "[espFoC][pid_iq31]")
     assert_q16_near_float(of, oi);
 }
 
-TEST_CASE("esp_foc_pid: reset clears state to match float", "[espFoC][pid_iq31]")
+TEST_CASE("esp_foc_pid: reset clears state to match float", "[espFoC][pid_q16]")
 {
     esp_foc_pid_controller_t pf;
     esp_foc_pid_controller_t pi;
@@ -84,7 +84,7 @@ TEST_CASE("esp_foc_pid: reset clears state to match float", "[espFoC][pid_iq31]"
     assert_q16_near_float(of, oi);
 }
 
-TEST_CASE("esp_foc_pid: integral buildup", "[espFoC][pid_iq31]")
+TEST_CASE("esp_foc_pid: integral buildup", "[espFoC][pid_q16]")
 {
     esp_foc_pid_controller_t pf;
     esp_foc_pid_controller_t pi;
@@ -99,7 +99,7 @@ TEST_CASE("esp_foc_pid: integral buildup", "[espFoC][pid_iq31]")
     TEST_ASSERT_TRUE(q16_to_float(oi) > 0.3f);
 }
 
-TEST_CASE("esp_foc_pid: PI first step", "[espFoC][pid_iq31]")
+TEST_CASE("esp_foc_pid: PI first step", "[espFoC][pid_q16]")
 {
     esp_foc_pid_controller_t pf;
     esp_foc_pid_controller_t pi;
@@ -110,7 +110,7 @@ TEST_CASE("esp_foc_pid: PI first step", "[espFoC][pid_iq31]")
     TEST_ASSERT_TRUE(llabs((long long)pf.integrator - (long long)pi.integrator) <= 256);
 }
 
-TEST_CASE("esp_foc_pid: integrator clamps at limit", "[espFoC][pid_iq31]")
+TEST_CASE("esp_foc_pid: integrator clamps at limit", "[espFoC][pid_q16]")
 {
     esp_foc_pid_controller_t pf;
     esp_foc_pid_controller_t pi;
@@ -123,7 +123,7 @@ TEST_CASE("esp_foc_pid: integrator clamps at limit", "[espFoC][pid_iq31]")
     TEST_ASSERT_TRUE(llabs((long long)pf.integrator - (long long)pi.integrator) <= 256);
 }
 
-TEST_CASE("esp_foc_pid: output saturated integrator still bounded", "[espFoC][pid_iq31]")
+TEST_CASE("esp_foc_pid: output saturated integrator still bounded", "[espFoC][pid_q16]")
 {
     esp_foc_pid_controller_t pf;
     esp_foc_pid_controller_t pi;
@@ -138,7 +138,7 @@ TEST_CASE("esp_foc_pid: output saturated integrator still bounded", "[espFoC][pi
     assert_q16_near_float(of, oi);
 }
 
-TEST_CASE("esp_foc_pid: negative error", "[espFoC][pid_iq31]")
+TEST_CASE("esp_foc_pid: negative error", "[espFoC][pid_q16]")
 {
     esp_foc_pid_controller_t pf;
     esp_foc_pid_controller_t pi;
@@ -148,7 +148,7 @@ TEST_CASE("esp_foc_pid: negative error", "[espFoC][pid_iq31]")
     assert_q16_near_float(of, oi);
 }
 
-TEST_CASE("esp_foc_pid: derivative step", "[espFoC][pid_iq31]")
+TEST_CASE("esp_foc_pid: derivative step", "[espFoC][pid_q16]")
 {
     esp_foc_pid_controller_t pf;
     esp_foc_pid_controller_t pi;

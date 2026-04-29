@@ -7,7 +7,8 @@ example (from a previous :command:`idf.py build` / menuconfig) can pin options s
 TunerStudio panel changes appear to be ignored.  The GUI build path (see
 :mod:`BuildWorker <espfoc_studio.gui.build_worker>`) removes a stale
 :file:`sdkconfig` and :file:`build/`, then set-target, then this module applies
-*CONFIG_TUNER_TARGET_** and related *CONFIG_ESP_FOC_** lines so the compile
+*CONFIG_TUNER_TARGET_**, *CONFIG_ESP_FOC_PWM_RATE_HZ*, and related *CONFIG_ESP_FOC_**
+lines so the compile
 matches the Hardware form.
 """
 
@@ -48,7 +49,7 @@ def _build_assignments(cfg: HardwareConfig) -> List[Tuple[str, str]]:
         ("CONFIG_TUNER_TARGET_PWM_V_LO", str(int(cfg.pin_v_lo))),
         ("CONFIG_TUNER_TARGET_PWM_W_LO", str(int(cfg.pin_w_lo))),
         ("CONFIG_TUNER_TARGET_PWM_EN_PIN", str(int(cfg.inverter_en_pin))),
-        ("CONFIG_TUNER_TARGET_PWM_FREQ_HZ", str(int(cfg.pwm_freq_hz))),
+        ("CONFIG_ESP_FOC_PWM_RATE_HZ", str(int(cfg.pwm_freq_hz))),
         ("CONFIG_TUNER_TARGET_DC_LINK_V", str(dcv)),
         ("CONFIG_TUNER_TARGET_ENC_SDA", str(sda)),
         ("CONFIG_TUNER_TARGET_ENC_SCL", str(scl)),
@@ -59,7 +60,6 @@ def _build_assignments(cfg: HardwareConfig) -> List[Tuple[str, str]]:
         ("CONFIG_TUNER_TARGET_ISENSE_AMP_GAIN_X100", str(int(g))),
         ("CONFIG_TUNER_TARGET_ISENSE_SHUNT_MOHM", str(int(sh_mohm))),
         ("CONFIG_ESP_FOC_MOTOR_PROFILE", f'"{pr}"'),
-        ("CONFIG_ESP_FOC_AUTOGEN_PWM_RATE_HZ", str(int(cfg.pwm_freq_hz))),
     ]
 
 
@@ -96,6 +96,8 @@ def apply_hardware_to_sdkconfig(path: str, cfg: HardwareConfig) -> None:
     asg = _build_assignments(cfg)
     keys: Set[str] = {a[0] for a in asg}
     keys.add("CONFIG_TUNER_TARGET_PWM_EN_ACT_LOW")
+    keys.add("CONFIG_ESP_FOC_AUTOGEN_PWM_RATE_HZ")
+    keys.add("CONFIG_TUNER_TARGET_PWM_FREQ_HZ")
     if not keys:
         return
     filtered = _remove_keys(list(lines), keys)

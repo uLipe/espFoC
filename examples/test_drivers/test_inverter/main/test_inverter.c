@@ -74,11 +74,11 @@ void app_main(void)
 {
     q16_t theta = 0;
     const q16_t vmax = q16_from_float(24.0f / 1.7320508075688772f);
-    const q16_t inv_vbus = q16_from_float(1.0f / 24.0f);
     const q16_t step = q16_from_float(0.2f);
 
     initialize_foc_drivers();
-    inverter->set_voltages(inverter, q16_from_float(0.65f), q16_from_float(0.5f), q16_from_float(0.5f));
+    /* Phase voltages [V]; zero → centred PWM (driver converts to duty). */
+    inverter->set_voltages(inverter, 0, 0, 0);
     inverter->enable(inverter);
     ESP_LOGI(TAG, "Observe if the motor runs!");
     esp_foc_sleep_ms(500);
@@ -87,15 +87,14 @@ void app_main(void)
         q16_t e_sin = q16_sin(theta);
         q16_t e_cos = q16_cos(theta);
 
-        q16_t valpha, vbeta, da, db, dc;
+        q16_t valpha, vbeta, vu, vv, vw;
         esp_foc_modulate_dq_voltage(e_sin, e_cos,
                                     0, q16_from_float(1.0f),
                                     &valpha, &vbeta,
-                                    &da, &db, &dc,
-                                    vmax,
-                                    inv_vbus);
+                                    &vu, &vv, &vw,
+                                    vmax);
 
-        inverter->set_voltages(inverter, da, db, dc);
+        inverter->set_voltages(inverter, vu, vv, vw);
         esp_foc_sleep_ms(10);
 
         theta = q16_normalize_angle_rad(q16_sub(theta, step));

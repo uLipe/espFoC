@@ -260,7 +260,6 @@ TEST_CASE("full pipeline q16: 10000 steps bounded and deterministic", "[espFoC][
 
     const int N = 10000;
     const q16_t vmax = q16_from_float(0.7f);
-    const q16_t norm = q16_from_float(0.5f);
 
     for (int k = 0; k < N; k++) {
         float t = (float)k / (float)N;
@@ -280,12 +279,12 @@ TEST_CASE("full pipeline q16: 10000 steps bounded and deterministic", "[espFoC][
         q16_t ud = esp_foc_pid_update(&pid_d, 0,
                                        esp_foc_biquad_q16_update(&filt_d, id));
 
-        q16_t ua, ub, du, dv, dw;
-        esp_foc_modulate_dq_voltage(sq, cq, ud, uq, &ua, &ub, &du, &dv, &dw, vmax, norm);
+        q16_t ua, ub, vu, vv, vw;
+        esp_foc_modulate_dq_voltage(sq, cq, ud, uq, &ua, &ub, &vu, &vv, &vw, vmax);
 
-        TEST_ASSERT_TRUE(q16_to_float(du) >= 0.0f && q16_to_float(du) <= 1.0f);
-        TEST_ASSERT_TRUE(q16_to_float(dv) >= 0.0f && q16_to_float(dv) <= 1.0f);
-        TEST_ASSERT_TRUE(q16_to_float(dw) >= 0.0f && q16_to_float(dw) <= 1.0f);
+        TEST_ASSERT_TRUE(fabsf(q16_to_float(vu)) < 2.0f);
+        TEST_ASSERT_TRUE(fabsf(q16_to_float(vv)) < 2.0f);
+        TEST_ASSERT_TRUE(fabsf(q16_to_float(vw)) < 2.0f);
     }
 }
 

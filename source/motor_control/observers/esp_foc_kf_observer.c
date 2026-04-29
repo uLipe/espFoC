@@ -1,40 +1,42 @@
 /*
- * Angle observer (EMF + pseudo-measurement + fixed-gain correction) — IQ31 only in update().
- * Covariance propagation from the legacy float KF is omitted; gains are set at init from tuning.
+ * Angle observer (EMF + pseudo-measurement + fixed-gain correction) — Q16 in update().
  */
 
+#include <limits.h>
 #include <math.h>
+#include <stdint.h>
 #include <esp_attr.h>
 #include <sdkconfig.h>
 #include <sys/cdefs.h>
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "espFoC/utils/biquad_q16.h"
-#include "espFoC/utils/esp_foc_iq31_q16_bridge.h"
+#include "espFoC/utils/esp_foc_int_sqrt.h"
+#include "espFoC/utils/esp_foc_q16.h"
+#include "espFoC/utils/foc_math_q16.h"
 #include "espFoC/observer/esp_foc_observer_interface.h"
+#include "espFoC/observer/esp_foc_observer_math_q16.h"
 #include "espFoC/observer/esp_foc_kf_observer.h"
-#include "espFoC/observer/esp_foc_observer_iq31.h"
 
 #define KF_DEFAULT_V_FULL 24.0f
 #define KF_DEFAULT_I_FULL 20.0f
 
 typedef struct {
-    iq31_t theta_est;
-    iq31_t omega_est;
-    iq31_t theta_err_emf_q31;
+    q16_t theta_est;
+    q16_t omega_est;
+    q16_t theta_err_emf_q16;
     esp_foc_biquad_q16_t current_filters[2];
-    iq31_t e_alpha;
-    iq31_t e_beta;
-    iq31_t i_alpha_prev;
-    iq31_t i_beta_prev;
-    iq31_t r_q31;
-    iq31_t l_q31;
-    iq31_t dt_q31;
-    iq31_t mag_eps_q31;
-    iq31_t k_theta_q31;
-    iq31_t K0_q31;
-    iq31_t K1_q31;
-    iq31_t eps_q31;
+    q16_t e_alpha;
+    q16_t e_beta;
+    q16_t i_alpha_prev;
+    q16_t i_beta_prev;
+    q16_t r_q16;
+    q16_t l_q16;
+    q16_t k_dtheta_rad_q16;
+    q16_t mag_eps_q16;
+    q16_t K0_q16;
+    q16_t K1_q16;
+    q16_t eps_q16;
     int converging_count;
     esp_foc_observer_t interface;
 } angle_estimator_kf_t;
@@ -42,54 +44,63 @@ typedef struct {
 static const char *TAG = "ESP-FOC-KF-OBS";
 static DRAM_ATTR angle_estimator_kf_t kf_observers[CONFIG_NOOF_AXIS];
 
-static inline void kf_predict_iq31(angle_estimator_kf_t *k)
+static inline void kf_predict_q16(angle_estimator_kf_t *k)
 {
-    k->theta_est = iq31_normalize_angle(iq31_add(k->theta_est, iq31_mul(k->omega_est, k->k_theta_q31)));
+    k->theta_est = q16_normalize_angle_rad(
+        q16_add(k->theta_est, q16_mul(k->omega_est, k->k_dtheta_rad_q16)));
 }
 
 static int kf_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs_t *in)
 {
     angle_estimator_kf_t *est = __containerof(self, angle_estimator_kf_t, interface);
 
-    iq31_t ia_f = esp_foc_q16_per_unit_to_iq31(
-        esp_foc_biquad_q16_update(&est->current_filters[0],
-                                  esp_foc_iq31_per_unit_to_q16(in->i_alpha_beta[0])));
-    iq31_t ib_f = esp_foc_q16_per_unit_to_iq31(
-        esp_foc_biquad_q16_update(&est->current_filters[1],
-                                  esp_foc_iq31_per_unit_to_q16(in->i_alpha_beta[1])));
+    q16_t ia_f = esp_foc_biquad_q16_update(&est->current_filters[0], in->i_alpha_beta[0]);
+    q16_t ib_f = esp_foc_biquad_q16_update(&est->current_filters[1], in->i_alpha_beta[1]);
 
-    iq31_t delta_ia = iq31_sub(ia_f, est->i_alpha_prev);
-    iq31_t delta_ib = iq31_sub(ib_f, est->i_beta_prev);
-    iq31_t ldi_a = iq31_mul(est->l_q31, delta_ia);
-    iq31_t ldi_b = iq31_mul(est->l_q31, delta_ib);
+    q16_t delta_ia = q16_sub(ia_f, est->i_alpha_prev);
+    q16_t delta_ib = q16_sub(ib_f, est->i_beta_prev);
+    q16_t ldi_a = q16_mul(est->l_q16, delta_ia);
+    q16_t ldi_b = q16_mul(est->l_q16, delta_ib);
 
-    est->e_alpha = iq31_sub(in->u_alpha_beta[0], iq31_add(iq31_mul(est->r_q31, ia_f), ldi_a));
-    est->e_beta = iq31_sub(in->u_alpha_beta[1], iq31_add(iq31_mul(est->r_q31, ib_f), ldi_b));
+    est->e_alpha = q16_sub(in->u_alpha_beta[0], q16_add(q16_mul(est->r_q16, ia_f), ldi_a));
+    est->e_beta = q16_sub(in->u_alpha_beta[1], q16_add(q16_mul(est->r_q16, ib_f), ldi_b));
 
     est->i_alpha_prev = ia_f;
     est->i_beta_prev = ib_f;
 
-    iq31_t sinT = iq31_sin(est->theta_est);
-    iq31_t cosT = iq31_cos(est->theta_est);
+    q16_t sinT = q16_sin(est->theta_est);
+    q16_t cosT = q16_cos(est->theta_est);
 
-    iq31_t I = iq31_add(iq31_mul(est->e_alpha, cosT), iq31_mul(est->e_beta, sinT));
-    iq31_t Q = iq31_add(iq31_mul(est->e_alpha, iq31_sub(0, sinT)), iq31_mul(est->e_beta, cosT));
+    q16_t I = q16_add(q16_mul(est->e_alpha, cosT), q16_mul(est->e_beta, sinT));
+    q16_t Q = q16_add(q16_mul(est->e_alpha, q16_sub(0, sinT)), q16_mul(est->e_beta, cosT));
 
-    iq31_t mag2 = iq31_add(iq31_mul(est->e_alpha, est->e_alpha), iq31_mul(est->e_beta, est->e_beta));
-    iq31_t rs = iq31_rsqrt_fast(iq31_add(mag2, est->mag_eps_q31));
-    iq31_t In = iq31_mul_q230(I, rs);
-    iq31_t Qn = iq31_mul_q230(Q, rs);
+    int64_t ea64 = (int64_t)est->e_alpha;
+    int64_t eb64 = (int64_t)est->e_beta;
+    uint64_t av = (uint64_t)(ea64 >= 0 ? ea64 : -ea64);
+    uint64_t aq = (uint64_t)(eb64 >= 0 ? eb64 : -eb64);
+    uint64_t m2 = av * av + aq * aq;
+    int64_t me64 = (int64_t)est->mag_eps_q16;
+    uint64_t me = (uint64_t)(me64 >= 0 ? me64 : -me64);
+    uint64_t m2e = m2 + me;
 
-    iq31_t denom = (In >= 0) ? iq31_add(In, est->eps_q31) : iq31_sub(In, est->eps_q31);
-    est->theta_err_emf_q31 = esp_foc_obs_iq31_div(Qn, denom);
+    uint64_t inv_u64 = esp_foc_u64_rsqrt(m2e);
+    if (inv_u64 > (uint64_t)INT32_MAX) {
+        inv_u64 = (uint64_t)INT32_MAX;
+    }
+    q16_t inv = (q16_t)inv_u64;
+    q16_t In = q16_mul(I, inv);
+    q16_t Qn = q16_mul(Q, inv);
 
-    kf_predict_iq31(est);
+    q16_t denom = (In >= 0) ? q16_add(In, est->eps_q16) : q16_sub(In, est->eps_q16);
+    est->theta_err_emf_q16 = esp_foc_obs_q16_div(Qn, denom);
+
+    kf_predict_q16(est);
 
     {
-        iq31_t theta_meas = iq31_normalize_angle(iq31_add(est->theta_est, est->theta_err_emf_q31));
-        iq31_t y = esp_foc_obs_wrap_angle_err_pm_pi(iq31_sub(theta_meas, est->theta_est));
-        est->theta_est = iq31_normalize_angle(iq31_add(est->theta_est, iq31_mul(est->K0_q31, y)));
-        est->omega_est = iq31_add(est->omega_est, iq31_mul(est->K1_q31, y));
+        q16_t theta_meas = q16_normalize_angle_rad(q16_add(est->theta_est, est->theta_err_emf_q16));
+        q16_t y = esp_foc_obs_wrap_angle_err_pm_pi_rad(q16_sub(theta_meas, est->theta_est));
+        est->theta_est = q16_normalize_angle_rad(q16_add(est->theta_est, q16_mul(est->K0_q16, y)));
+        est->omega_est = q16_add(est->omega_est, q16_mul(est->K1_q16, y));
     }
 
     if (est->converging_count) {
@@ -99,24 +110,24 @@ static int kf_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs_
     return est->converging_count;
 }
 
-static iq31_t kf_observer_get_angle(esp_foc_observer_t *self)
+static q16_t kf_observer_get_angle(esp_foc_observer_t *self)
 {
     angle_estimator_kf_t *est = __containerof(self, angle_estimator_kf_t, interface);
     return est->theta_est;
 }
 
-static iq31_t kf_observer_get_speed(esp_foc_observer_t *self)
+static q16_t kf_observer_get_speed(esp_foc_observer_t *self)
 {
     angle_estimator_kf_t *est = __containerof(self, angle_estimator_kf_t, interface);
     return est->omega_est;
 }
 
-static void kf_observer_reset(esp_foc_observer_t *self, iq31_t offset)
+static void kf_observer_reset(esp_foc_observer_t *self, q16_t offset)
 {
     angle_estimator_kf_t *est = __containerof(self, angle_estimator_kf_t, interface);
-    est->theta_est = iq31_normalize_angle(offset);
+    est->theta_est = q16_normalize_angle_rad(offset);
     est->omega_est = 0;
-    est->theta_err_emf_q31 = 0;
+    est->theta_err_emf_q16 = 0;
     est->i_alpha_prev = 0;
     est->i_beta_prev = 0;
     est->e_alpha = 0;
@@ -163,17 +174,16 @@ esp_foc_observer_t *kf_observer_new(int unit, esp_foc_kf_observer_settings_t s)
 
     est->theta_est = 0;
     est->omega_est = 0;
-    est->theta_err_emf_q31 = 0;
+    est->theta_err_emf_q16 = 0;
     est->i_alpha_prev = 0;
     est->i_beta_prev = 0;
     est->e_alpha = 0;
     est->e_beta = 0;
 
-    est->dt_q31 = iq31_from_float(s.dt);
-    est->r_q31 = iq31_from_float((s.phase_resistance * Ib) / Vb);
-    est->l_q31 = iq31_from_float((s.phase_inductance * Ib) / (Vb * s.dt));
+    est->r_q16 = q16_from_float((s.phase_resistance * Ib) / Vb);
+    est->l_q16 = q16_from_float((s.phase_inductance * Ib) / (Vb * s.dt));
 
-    est->k_theta_q31 = iq31_from_float((ESP_FOC_OBS_OMEGA_MAX_RAD_S * s.dt) / (2.0f * (float)M_PI));
+    est->k_dtheta_rad_q16 = q16_from_float(ESP_FOC_OBS_OMEGA_MAX_RAD_S * s.dt);
 
     const float frac = (s.current_lpf_frac_fs > 0.0f) ? s.current_lpf_frac_fs : 0.2f;
     {
@@ -184,13 +194,12 @@ esp_foc_observer_t *kf_observer_new(int unit, esp_foc_kf_observer_settings_t s)
                                                   frac * fs_hz, fs_hz);
     }
 
-    est->eps_q31 = iq31_from_float(0.05f);
-    est->mag_eps_q31 = iq31_from_float(1e-3f);
+    est->eps_q16 = q16_from_float(0.05f);
+    est->mag_eps_q16 = q16_from_float(1e-3f);
 
-    /* Fixed gains from measurement noise (init-only float). */
     const float Rm = s.sigma_theta_meas * s.sigma_theta_meas;
-    est->K0_q31 = iq31_from_float(0.5f / (0.5f + Rm));
-    est->K1_q31 = iq31_from_float((s.sigma_accel * s.dt) / ESP_FOC_OBS_OMEGA_MAX_RAD_S);
+    est->K0_q16 = q16_from_float(0.5f / (0.5f + Rm));
+    est->K1_q16 = q16_from_float((s.sigma_accel * s.dt) / ESP_FOC_OBS_OMEGA_MAX_RAD_S);
 
     est->converging_count = (int)(20.0f / s.dt);
 
@@ -199,7 +208,7 @@ esp_foc_observer_t *kf_observer_new(int unit, esp_foc_kf_observer_settings_t s)
     est->interface.get_speed = kf_observer_get_speed;
     est->interface.reset = kf_observer_reset;
 
-    ESP_LOGI(TAG, "KF-style observer dt=%f Hz=%f (IQ31 fixed-gain)", (double)s.dt, (double)(1.0f / s.dt));
+    ESP_LOGI(TAG, "KF-style observer dt=%f Hz=%f (Q16 fixed-gain)", (double)s.dt, (double)(1.0f / s.dt));
 
     return &est->interface;
 }

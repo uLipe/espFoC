@@ -14,6 +14,7 @@
 extern "C" {
 #endif
 
+/** Inverse Park → three phase voltages (volts Q16). MCPWM drivers convert to duties. */
 static inline void esp_foc_modulate_dq_voltage(q16_t sin,
                                                q16_t cos,
                                                q16_t v_d,
@@ -23,14 +24,13 @@ static inline void esp_foc_modulate_dq_voltage(q16_t sin,
                                                q16_t *v_u,
                                                q16_t *v_v,
                                                q16_t *v_w,
-                                               q16_t vmax,
-                                               q16_t normalization_scale)
+                                               q16_t vmax)
 {
     q16_t vd = v_d;
     q16_t vq = v_q;
     esp_foc_limit_voltage_q16(&vd, &vq, vmax);
     q16_inverse_park(sin, cos, vd, vq, v_alpha, v_beta);
-    esp_foc_svm_set(*v_alpha, *v_beta, normalization_scale, v_u, v_v, v_w);
+    esp_foc_svm_alpha_beta_to_phase_volts(*v_alpha, *v_beta, v_u, v_v, v_w);
 }
 
 static inline void esp_foc_get_dq_currents(q16_t sin,

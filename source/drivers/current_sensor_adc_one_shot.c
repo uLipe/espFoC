@@ -29,7 +29,7 @@
 #include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/utils/biquad_q16.h"
 #include "espFoC/utils/foc_math_q16.h"
-#include "espFoC/driver_iq31_local.h"
+#include "espFoC/driver_q16_local.h"
 #include "espFoC/current_sensor_adc_one_shot.h"
 #include "hal/adc_hal.h"
 #include "hal/adc_oneshot_hal.h"
@@ -434,7 +434,13 @@ static q16_t read_counts_encoder(esp_foc_rotor_sensor_t *self)
     obj->encoder_prev_iq = (int32_t)raw;
 
     uint32_t cm = (uint32_t)((raw - obj->encoder_zero_offset) & (ppr - 1u));
-    return esp_foc_q16_from_counts_mod(cm, ppr);
+    if (ppr == 0u) {
+        return 0;
+    }
+    if ((ppr & (ppr - 1u)) == 0u) {
+        return q16_from_int((int32_t)(cm & (ppr - 1u)));
+    }
+    return q16_from_int((int32_t)(cm % ppr));
 }
 
 static int64_t read_accumulated_counts_i64_enc(esp_foc_rotor_sensor_t *self)

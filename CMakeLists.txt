@@ -78,7 +78,7 @@ if(CONFIG_ESP_FOC_USE_AUTOGEN_GAINS)
                 --motor       ${motor_profile_path}
                 --output      ${autogen_header}
                 --report      ${autogen_report}
-                --pwm-rate-hz ${CONFIG_ESP_FOC_AUTOGEN_PWM_RATE_HZ}
+                --pwm-rate-hz ${CONFIG_ESP_FOC_PWM_RATE_HZ}
                 --decimation  ${CONFIG_ESP_FOC_AUTOGEN_DECIMATION}
         DEPENDS ${motor_profile_path}
                 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_pi_gains.py

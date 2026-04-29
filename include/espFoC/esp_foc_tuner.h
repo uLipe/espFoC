@@ -93,6 +93,7 @@ typedef enum {
     ESP_FOC_TUNER_CMD_ERASE_NVS         = 0x00B2, /* nuke calibration ns */
     ESP_FOC_TUNER_CMD_RESET_BOARD      = 0x00B3, /* host emergency: esp_restart
                                                    * after response; no payload */
+    ESP_FOC_TUNER_CMD_PING             = 0x00B4, /* no payload; OK = link alive */
 } esp_foc_tuner_id_t;
 
 /* Bitmap returned by ESP_FOC_TUNER_PARAM_AXIS_STATE. */

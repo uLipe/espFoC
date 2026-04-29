@@ -61,10 +61,16 @@ class ScopePanel(QWidget):
 
     WINDOW_S = 2.0         # rolling window length
     BUFFER_CAP = 4096      # max samples retained per channel
-    RENDER_INTERVAL_MS = 20  # 50 FPS render cap
-    INBOX_CAP = 2048       # drop oldest when firmware outruns the GUI
-    MAX_PENDING_DECODED = 8192  # cap decoded backlog if the UI falls behind
-    MAX_FRAMES_PER_UI_TICK = 256  # for other panels that decode on the GUI thread
+    RENDER_INTERVAL_MS = 20  # timer cadence; actual plot rate is bounded below
+    INBOX_CAP = 512        # drop aggressively — prefer losing samples to GUI stalls
+    MAX_PENDING_DECODED = 384  # decoded backlog cap before UI drops half (small = low latency)
+    # Hard cap on GUI-thread merge work per tick. Prefer dropping samples over
+    # blocking the Qt event loop (serial + scope together amplify jank).
+    MAX_MERGE_SAMPLES_PER_TICK = 48
+    # Decode worker takes at most this many raw frames per wake so one backlog
+    # burst cannot monopolize CPU before the UI runs.
+    MAX_RAW_FRAMES_DECODE_BATCH = 256
+    MAX_FRAMES_PER_UI_TICK = 16  # SVM / Sensors: frames drained per tick on GUI thread
 
     def __init__(self, reader: Optional[LinkReader] = None,
                  sample_period_s: float = 1e-3 * 4,
@@ -235,9 +241,10 @@ class ScopePanel(QWidget):
         while not self._worker_stop.is_set():
             batch: List[Tuple[float, bytes]] = []
             with self._inbox_lock:
-                if self._inbox:
-                    batch = list(self._inbox)
-                    self._inbox.clear()
+                n = len(self._inbox)
+                if n > 0:
+                    take = min(n, self.MAX_RAW_FRAMES_DECODE_BATCH)
+                    batch = [self._inbox.popleft() for _ in range(take)]
             if not batch:
                 if self._worker_stop.wait(0.003):
                     break
@@ -248,9 +255,10 @@ class ScopePanel(QWidget):
         if not self._async_decode:
             batch: List[Tuple[float, bytes]] = []
             with self._inbox_lock:
-                if self._inbox:
-                    batch = list(self._inbox)
-                    self._inbox.clear()
+                n = len(self._inbox)
+                if n > 0:
+                    take = min(n, self.MAX_RAW_FRAMES_DECODE_BATCH)
+                    batch = [self._inbox.popleft() for _ in range(take)]
             if batch:
                 self._decode_raw_batch(batch)
 
@@ -258,6 +266,10 @@ class ScopePanel(QWidget):
         with self._pending_lock:
             chunk = self._pending_decoded
             self._pending_decoded = []
+
+        cap = self.MAX_MERGE_SAMPLES_PER_TICK
+        if len(chunk) > cap:
+            chunk = chunk[-cap:]
 
         for t_mono, values in chunk:
             self._ensure_channels(len(values))
@@ -295,7 +307,7 @@ class ScopePanel(QWidget):
         for idx in range(self._n_channels, n):
             color = _CHANNEL_COLORS[idx % len(_CHANNEL_COLORS)]
             cb = QCheckBox(f"ch{idx}")
-            cb.setChecked(True)
+            cb.setChecked(False)
             cb.setStyleSheet(
                 f"QCheckBox {{ color: {color}; font-family: monospace; "
                 f"font-weight: bold; }}")

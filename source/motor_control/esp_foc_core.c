@@ -29,15 +29,32 @@
 #include "esp_log.h"
 #include "espFoC/esp_foc.h"
 #include "espFoC/esp_foc_calibration.h"
-#if defined(CONFIG_ESP_FOC_ISR_HOT_PATH)
-#include "espFoC/utils/angle_predictor_q16.h"
-#endif
-
 #if defined(ESP_FOC_AUTOGEN_GAINS_AVAILABLE)
 #include "esp_foc_autotuned_gains.h"
 #endif
 
 static const char *tag = "ESP_FOC_CORE";
+
+void esp_foc_axis_refresh_encoder_q16_scales(esp_foc_axis_t *axis)
+{
+    if (axis == NULL || axis->rotor_sensor_driver == NULL ||
+        axis->rotor_sensor_driver->get_counts_per_revolution == NULL) {
+        return;
+    }
+    uint32_t cpr =
+        axis->rotor_sensor_driver->get_counts_per_revolution(
+            axis->rotor_sensor_driver);
+    if (cpr == 0u) {
+        cpr = 1u;
+    }
+    axis->encoder_inv_cpr_q16 = q16_from_float(1.0f / (float)cpr);
+    int pp = axis->motor_pole_pairs;
+    if (pp < 1) {
+        pp = 1;
+    }
+    axis->encoder_counts_speed_to_omega_e_q16 =
+        q16_from_float((float)(2.0 * M_PI * (double)pp) / (float)cpr);
+}
 
 #if defined(CONFIG_ESP_FOC_CALIBRATION_NVS)
 static const char *nat_dir_short(q16_t n)
@@ -65,6 +82,7 @@ static void log_nvs_cal_at_boot(int motor_unit, const esp_foc_calibration_data_t
     const bool have_dir = (af & ESP_FOC_CAL_ALIGN_FLAG_DIR) != 0u
                           && (nat_d == Q16_ONE || nat_d == Q16_MINUS_ONE);
 
+#if defined(CONFIG_ESP_FOC_USE_AUTOGEN_GAINS) && CONFIG_ESP_FOC_USE_AUTOGEN_GAINS
     ESP_LOGI(
         tag,
         "NVS cal axis %d: profile %s v%d, hash 0x%08x (applies to this build)",
@@ -72,6 +90,13 @@ static void log_nvs_cal_at_boot(int motor_unit, const esp_foc_calibration_data_t
         CONFIG_ESP_FOC_MOTOR_PROFILE,
         (int)CONFIG_ESP_FOC_PROFILE_VERSION,
         (unsigned)esp_foc_calibration_profile_hash());
+#else
+    ESP_LOGI(
+        tag,
+        "NVS cal axis %d: hash 0x%08x (no build-time motor profile; autogen off)",
+        motor_unit,
+        (unsigned)esp_foc_calibration_profile_hash());
+#endif
     {
         int32_t ppn = esp_foc_calibration_get_pole_pairs(cal);
         char pp_buf[32];
@@ -218,7 +243,11 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->target_i_q.raw = 0;
     axis->target_u_d.raw = 0;
     axis->target_u_q.raw = 0;
+#if defined(CONFIG_ESP_FOC_TUNER_ALWAYS_OVERRIDE_VOLTAGE_MODE)
+    axis->skip_torque_control = 1;
+#else
     axis->skip_torque_control = 0;
+#endif
 
     if (isensor != NULL) {
         axis->isensor_driver->calibrate_isensors(axis->isensor_driver, ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
@@ -306,6 +335,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                 }
             }
         } else {
+#if defined(CONFIG_ESP_FOC_USE_AUTOGEN_GAINS) && CONFIG_ESP_FOC_USE_AUTOGEN_GAINS
             ESP_LOGW(
                 tag,
                 "axis %d: no NVS calibration for this build/profile "
@@ -315,9 +345,18 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                 CONFIG_ESP_FOC_MOTOR_PROFILE,
                 (int)CONFIG_ESP_FOC_PROFILE_VERSION,
                 (unsigned)esp_foc_calibration_profile_hash());
+#else
+            ESP_LOGW(
+                tag,
+                "axis %d: no NVS calibration (or flash empty / bad blob). "
+                "PI gains unset until runtime tuner; hash 0x%08x",
+                (int)settings.motor_unit,
+                (unsigned)esp_foc_calibration_profile_hash());
+#endif
         }
     }
 #else
+#if defined(CONFIG_ESP_FOC_USE_AUTOGEN_GAINS) && CONFIG_ESP_FOC_USE_AUTOGEN_GAINS
     ESP_LOGI(
         tag,
         "axis %d: CONFIG_ESP_FOC_CALIBRATION_NVS is off; autogen PI only; "
@@ -325,6 +364,14 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         (int)settings.motor_unit, CONFIG_ESP_FOC_MOTOR_PROFILE,
         (int)CONFIG_ESP_FOC_PROFILE_VERSION,
         (unsigned)esp_foc_calibration_profile_hash());
+#else
+    ESP_LOGI(
+        tag,
+        "axis %d: CONFIG_ESP_FOC_CALIBRATION_NVS is off; autogen gains disabled "
+        "(hash 0x%08x)",
+        (int)settings.motor_unit,
+        (unsigned)esp_foc_calibration_profile_hash());
+#endif
 #endif
 
     if (isensor != NULL && axis->isensor_driver->set_filter_cutoff != NULL) {
@@ -338,14 +385,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 #if defined(CONFIG_ESP_FOC_ISR_HOT_PATH)
     axis->latest_i_alpha = 0;
     axis->latest_i_beta = 0;
-    /* Predictor starts uninitialised; the first outer-loop tick after
-     * alignment will seed it from the live encoder reading. Gains
-     * come from Kconfig (stored x1000 to dodge float). */
-    float pred_alpha = (float)CONFIG_ESP_FOC_PREDICTOR_ALPHA_X1000 / 1000.0f;
-    float pred_beta = (float)CONFIG_ESP_FOC_PREDICTOR_BETA_X1000 / 1000.0f;
-    esp_foc_angle_predictor_init_q16(&axis->angle_predictor,
-                                     pred_alpha, pred_beta,
-                                     esp_foc_now_useconds());
     /* Wire the ADC ISR's Clarke-publish path straight into the axis
      * fields the PWM ISR will read. NULL targets disable publishing,
      * so this is also the opt-in point for the new pipeline. */
@@ -363,6 +402,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         &axis->velocity_filter,
         (float)CONFIG_ESP_FOC_VELOCITY_FILTER_CUTOFF_HZ,
         loop_fs_hz);
+
+    esp_foc_axis_refresh_encoder_q16_scales(axis);
 
     /* natural_direction: defaults above; NVS may have overridden;
      * esp_foc_align_axis() probes and overrides unless NVS has a
@@ -390,7 +431,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 #define ESP_FOC_ALIGN_PARK_VD_VMAX_FRAC      (0.10f)
 /* Open-loop sweep: needs enough torque to overcome friction; keep below
  * the single-shot probe levels that overheat idling. */
-#define ESP_FOC_ALIGN_SWEEP_VQ_VMAX_FRAC     (0.45f)
+#define ESP_FOC_ALIGN_SWEEP_VQ_VMAX_FRAC     (0.15f)
 #define ESP_FOC_DIR_SWEEP_STEPS              40
 #define ESP_FOC_DIR_SWEEP_MS_PER_STEP        22
 
@@ -508,8 +549,7 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     esp_foc_modulate_dq_voltage(e_sin, e_cos,
                                 park_vd, 0,
                                 &a, &b, &u, &v, &w,
-                                axis->max_voltage,
-                                axis->dc_link_to_normalized);
+                                axis->max_voltage);
     axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);
     esp_foc_sleep_ms(500);
 
@@ -541,8 +581,7 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
             e_sin = q16_sin(q16_from_float(th));
             e_cos = q16_cos(q16_from_float(th));
             esp_foc_modulate_dq_voltage(
-                e_sin, e_cos, 0, uq, &a, &b, &u, &v, &w, axis->max_voltage,
-                axis->dc_link_to_normalized);
+                e_sin, e_cos, 0, uq, &a, &b, &u, &v, &w, axis->max_voltage);
             axis->inverter_driver->set_voltages(
                 axis->inverter_driver, u, v, w);
             esp_foc_sleep_ms(ESP_FOC_DIR_SWEEP_MS_PER_STEP);
@@ -559,8 +598,7 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
             e_sin = q16_sin(q16_from_float(th2));
             e_cos = q16_cos(q16_from_float(th2));
             esp_foc_modulate_dq_voltage(
-                e_sin, e_cos, 0, uq, &a, &b, &u, &v, &w, axis->max_voltage,
-                axis->dc_link_to_normalized);
+                e_sin, e_cos, 0, uq, &a, &b, &u, &v, &w, axis->max_voltage);
             axis->inverter_driver->set_voltages(
                 axis->inverter_driver, u, v, w);
             esp_foc_sleep_ms(ESP_FOC_DIR_SWEEP_MS_PER_STEP);
@@ -602,8 +640,7 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     esp_foc_modulate_dq_voltage(e_sin, e_cos,
                                 park_vd, 0,
                                 &a, &b, &u, &v, &w,
-                                axis->max_voltage,
-                                axis->dc_link_to_normalized);
+                                axis->max_voltage);
     axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);
     esp_foc_sleep_ms(500);
     axis->rotor_sensor_driver->set_to_zero(axis->rotor_sensor_driver);

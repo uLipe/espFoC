@@ -1,8 +1,8 @@
 /*
- * Smoke tests: observers run update() with IQ31 inputs only (API + link coverage).
+ * Smoke tests: observers run update() with Q16 inputs only (API + link coverage).
  */
 #include <unity.h>
-#include "espFoC/utils/esp_foc_iq31.h"
+#include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/observer/esp_foc_observer_interface.h"
 #include "espFoC/observer/esp_foc_simu_observer.h"
 #include "espFoC/observer/esp_foc_pll_observer.h"
@@ -11,21 +11,21 @@
 
 static void fill_inputs(esp_foc_observer_inputs_t *in, float dt_s)
 {
-    iq31_t dt_q = iq31_from_float(dt_s);
-    iq31_t inv_q = iq31_from_float(1.0f / dt_s);
+    q16_t dt_q = q16_from_float(dt_s);
+    q16_t inv_q = q16_from_float(1.0f / dt_s);
     in->u_dq[0] = 0;
-    in->u_dq[1] = iq31_from_float(0.1f);
-    in->u_alpha_beta[0] = iq31_from_float(0.05f);
-    in->u_alpha_beta[1] = iq31_from_float(0.05f);
+    in->u_dq[1] = q16_from_float(0.1f);
+    in->u_alpha_beta[0] = q16_from_float(0.05f);
+    in->u_alpha_beta[1] = q16_from_float(0.05f);
     in->i_dq[0] = 0;
-    in->i_dq[1] = iq31_from_float(0.2f);
-    in->i_alpha_beta[0] = iq31_from_float(0.1f);
-    in->i_alpha_beta[1] = iq31_from_float(0.1f);
+    in->i_dq[1] = q16_from_float(0.2f);
+    in->i_alpha_beta[0] = q16_from_float(0.1f);
+    in->i_alpha_beta[1] = q16_from_float(0.1f);
     in->dt = dt_q;
     in->inv_dt = inv_q;
 }
 
-TEST_CASE("simu_observer: IQ31 update smoke", "[espFoC][observer]")
+TEST_CASE("simu_observer: Q16 update smoke", "[espFoC][observer]")
 {
     const float dt = 1.0e-4f;
     esp_foc_simu_observer_settings_t s = {
@@ -44,10 +44,10 @@ TEST_CASE("simu_observer: IQ31 update smoke", "[espFoC][observer]")
     }
     (void)obs->get_angle(obs);
     (void)obs->get_speed(obs);
-    obs->reset(obs, iq31_from_float(0.25f));
+    obs->reset(obs, q16_from_float(0.25f));
 }
 
-TEST_CASE("pll_observer: IQ31 update smoke", "[espFoC][observer]")
+TEST_CASE("pll_observer: Q16 update smoke", "[espFoC][observer]")
 {
     const float dt = 1.0e-4f;
     esp_foc_pll_observer_settings_t s = {
@@ -74,7 +74,7 @@ TEST_CASE("pll_observer: IQ31 update smoke", "[espFoC][observer]")
     obs->reset(obs, 0);
 }
 
-TEST_CASE("kf_observer: IQ31 update smoke", "[espFoC][observer]")
+TEST_CASE("kf_observer: Q16 update smoke", "[espFoC][observer]")
 {
     const float dt = 1.0e-4f;
     esp_foc_kf_observer_settings_t s = {
@@ -97,10 +97,10 @@ TEST_CASE("kf_observer: IQ31 update smoke", "[espFoC][observer]")
     }
     (void)obs->get_angle(obs);
     (void)obs->get_speed(obs);
-    obs->reset(obs, iq31_from_float(0.5f));
+    obs->reset(obs, q16_from_float(0.5f));
 }
 
-TEST_CASE("pmsm_model_observer: IQ31 update smoke", "[espFoC][observer]")
+TEST_CASE("pmsm_model_observer: Q16 update smoke", "[espFoC][observer]")
 {
     const float dt = 1.0e-4f;
     esp_foc_pmsm_model_observer_settings_t s = {

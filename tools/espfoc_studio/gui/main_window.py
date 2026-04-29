@@ -1,12 +1,14 @@
-"""Main window: assembles Tuning + Analysis + Scope into a single view
-and owns the single polling timer that keeps the live panels fresh."""
+"""Main window: assembles Tuning + Analysis + Scope into a single view.
+
+Tuner serial round-trips run on :class:`TunerPollWorker`; the GUI thread only
+applies snapshots and updates badges."""
 
 from __future__ import annotations
 
 import time
 from typing import Optional, Tuple
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QMetaObject, QTimer, Qt, QThread
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -20,8 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..link import LinkReader
-from ..protocol import AxisStateFlag, TunerClient, TunerError
-from ..protocol.tuner import TUNER_FIRMWARE_TYPE_TSGX
+from ..protocol import TunerClient, TunerError
 from .theme import make_badge_qss, make_reset_board_button_qss
 from .analysis_panel import AnalysisPanel
 from .generate_app_panel import GenerateAppPanel
@@ -29,6 +30,10 @@ from .sensors_debug_panel import SensorsDebugPanel
 from .scope_panel import ScopePanel
 from .svm_panel import SvmPanel
 from .tuning_panel import TuningPanel
+from .tuner_poll_worker import TunerPollSnapshot, TunerPollWorker
+
+# Consecutive failed pings before the badge switches from CONNECTED to NO LINK.
+_LINK_DOWN_AFTER_CONSECUTIVE_PING_FAILS = 10
 
 
 class MainWindow(QMainWindow):
@@ -41,8 +46,9 @@ class MainWindow(QMainWindow):
         self._client = client
         self._serial_config = serial_config
         self._link_mode = link_mode
-        self._link_fail_streak = 0
         self._last_reconnect_mono: float = 0.0
+        self._link_ping_seen: bool = False
+        self._ping_fail_streak: int = 0
         self.setWindowTitle(title)
         # 900 px of vertical room is what fits the SVM hexagon (380)
         # plus its three-phase waveform (220) plus axis labels and tab
@@ -79,25 +85,24 @@ class MainWindow(QMainWindow):
 
         self._tuning = TuningPanel(
             self._client, on_params_changed=self._on_params)
-        self._tuning.long_operation.connect(
-            self._on_tuning_long_operation)
         splitter.addWidget(self._tuning)
 
         tabs = QTabWidget()
         tabs.addTab(self._analysis, "Analysis")
         tabs.addTab(self._sensors, "Sensors")
-        tabs.addTab(self._scope, "Scope")
         tabs.addTab(self._svm, "SVM Hexagon")
+        tabs.addTab(self._scope, "Scope")
 
-        # Generate App is shown only when the firmware identifies itself
-        # as TunerStudio target (or in --demo mode where the demo also
-        # advertises TSGX). Hardware configuration lives inside this
-        # panel now — it was a sibling tab before, but conceptually it
-        # is one step of the same code-generation workflow.
-        if self._is_tuner_studio_target(self._client):
+        # Generate App (embedded Hardware + codegen) is only for `--demo`.
+        # Live targets use TunerStudio for tuning; app generation stays out
+        # of the hot path / serial workflow.
+        if self._link_mode == "demo":
             self._generate = GenerateAppPanel(
                 self._client, self._current_motor_params)
             tabs.addTab(self._generate, "Generate App")
+            hw_cfg = self._generate._hw.get_config()
+            self._sensors.set_counts_per_rev(
+                int(hw_cfg.sensor_cfg.get("counts_per_rev", 4096)))
 
         splitter.addWidget(tabs)
         splitter.setStretchFactor(0, 0)
@@ -135,40 +140,54 @@ class MainWindow(QMainWindow):
         else:
             self._set_link_badge("LINK_WAIT")
 
-        # Live gains: the poll does several serial round-trips on the UI
-        # thread. While the axis is not yet aligned, refresh at 1 s to keep
-        # the window responsive; after align, 500 ms matches the old feel.
-        self._timer = QTimer(self)
-        self._timer.setInterval(1000)
-        self._timer.timeout.connect(self._poll)
-        self._timer.start()
-
-        # Pull the actual loop sample rate from the firmware so the
-        # Analysis tab discretises against the right Ts. Plan #2 (FOC
-        # in PWM ISR) bumps this from ~2 kHz to 40 kHz; without it
-        # the predicted step response on the Analysis tab would be
-        # off by the same 20x factor.
-        try:
-            fs_hz = self._client.read_loop_fs_hz()
-            if fs_hz > 1.0:
-                self._analysis.set_loop_rate_hz(fs_hz)
-                self._tuning.set_loop_rate_hz(fs_hz)
-        except TunerError:
-            pass
-
-        try:
-            if link_mode != "demo" and self._client.is_calibration_present():
-                self._tuning.sync_motor_from_nvs_shadows()
-        except TunerError:
-            pass
-        self._try_sync_motor_pole_pairs()
-        # Prime the analysis view (including after optional NVS sync).
-        self._tuning._notify_params_changed()
+        self._poll_thread = QThread(self)
+        self._poll_worker = TunerPollWorker(self._client, link_mode)
+        self._poll_worker.moveToThread(self._poll_thread)
+        self._poll_worker.poll_finished.connect(
+            self._on_poll_finished, Qt.QueuedConnection)
+        self._poll_worker.ping_finished.connect(
+            self._on_ping_finished, Qt.QueuedConnection)
+        self._poll_worker.device_reads_ready.connect(
+            self._on_device_reads_ready, Qt.QueuedConnection)
+        self._tuning.poll_refresh_requested.connect(
+            self._poll_worker.poll_tick, Qt.QueuedConnection)
+        self._tuning.long_operation.connect(
+            self._poll_worker.set_paused, Qt.QueuedConnection)
+        self._poll_thread.started.connect(self._poll_worker.start_timer)
+        self._poll_thread.start()
 
         if link_mode == "hw":
             self._update_link_badge()
         self._set_sensors_interactive()
-        QTimer.singleShot(0, self._poll)
+
+    def _on_device_reads_ready(
+            self,
+            fs_hz: float,
+            shadows: object,
+            pole: object,
+    ) -> None:
+        """Apply tuner readout gathered on :attr:`_poll_worker` (GUI thread only)."""
+        if fs_hz > 1.0:
+            self._analysis.set_loop_rate_hz(fs_hz)
+            self._tuning.set_loop_rate_hz(fs_hz)
+        if shadows is not None:
+            t = shadows
+            self._tuning.apply_nvs_shadow_floats(
+                t[0], t[1], t[2], t[3], t[4], t[5])
+        if pole is not None:
+            self._analysis.set_motor_pole_pairs_silent(int(pole))
+        self._tuning._notify_params_changed()
+
+    def closeEvent(self, event) -> None:
+        self._tuning.long_operation.emit(True)
+        QMetaObject.invokeMethod(
+            self._poll_worker,
+            "shutdown",
+            Qt.BlockingQueuedConnection,
+        )
+        self._poll_thread.quit()
+        self._poll_thread.wait(5000)
+        super().closeEvent(event)
 
     def _on_reset_board_clicked(self) -> None:
         r = QMessageBox.question(
@@ -184,11 +203,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Reset failed", str(e))
 
     def _set_sensors_interactive(self) -> None:
-        if self._link_mode == "demo":
-            self._sensors.set_interactive(False)
-            return
+        # Same readiness rule as Scope / SVM: live when the link reader is
+        # running. Do not gate on tuner poll success — scope frames can flow
+        # while CMD_TUNER polling is still warming up or temporarily failing.
         r = self._client.reader
-        ok = bool(r and r.is_running and self._tuning.last_poll_ok)
+        ok = bool(r and r.is_running)
         self._sensors.set_interactive(ok)
 
     def _set_link_badge(self, key: str) -> None:
@@ -202,68 +221,81 @@ class MainWindow(QMainWindow):
             self._set_link_badge("LINK_DEMO")
             return
         r = self._client.reader
-        if (self._tuning.last_poll_ok
-                and r is not None
-                and r.is_running):
-            self._link_fail_streak = 0
-            self._set_link_badge("LINK_OK")
-            return
-        if r is not None and not r.is_running:
+        if r is None or not r.is_running:
             self._set_link_badge("LINK_DOWN")
             return
-        self._link_fail_streak += 1
-        if self._link_fail_streak <= 1:
+        if not self._link_ping_seen:
             self._set_link_badge("LINK_WAIT")
-        else:
+            return
+        if self._ping_fail_streak >= _LINK_DOWN_AFTER_CONSECUTIVE_PING_FAILS:
             self._set_link_badge("LINK_DOWN")
+        else:
+            self._set_link_badge("LINK_OK")
+
+    def _on_ping_finished(self, ok: bool, err: str) -> None:
+        if self._link_mode != "hw":
+            return
+        self._link_ping_seen = True
+        if ok:
+            self._ping_fail_streak = 0
+        else:
+            self._ping_fail_streak += 1
+        self._update_link_badge()
+        if (not ok
+                and self._serial_config is not None
+                and self._poll_error_implies_dead_transport(err)
+                and self._maybe_reconnect()):
+            QMetaObject.invokeMethod(
+                self._poll_worker,
+                "ping_now",
+                Qt.QueuedConnection,
+            )
 
     def _reconnect_serial(self) -> bool:
+        """Replace serial transport. Never acquire ``_bus_lock`` on the GUI thread —
+        that blocked the window while the worker held the mutex during poll/ping."""
         assert self._serial_config is not None
         from ..link.transport_serial import SerialTransport
         self._tuning.last_poll_ok = False
-        self._link_fail_streak = 0
-        self._tuning.detach_log_reader()
-        old = self._client.reader
+        self._link_ping_seen = False
+        self._ping_fail_streak = 0
+        self._poll_worker.suspend_requested.emit(True)
+        time.sleep(0.15)
+        success = False
         try:
-            old.stop()
-        except Exception:
-            pass
-        port, baud, _axis = self._serial_config
-        try:
-            t = SerialTransport(port=port, baud=baud)
-        except Exception:
-            return False
-        r = LinkReader(t)
-        r.start()
-        self._client.replace_reader(r)
-        self._scope.attach_reader(r)
-        self._svm.attach_reader(r)
-        self._sensors.attach_reader(r)
-        self._tuning.rebind_log_reader()
-        self._link_fail_streak = 0
-        try:
-            fs_hz = self._client.read_loop_fs_hz()
-            if fs_hz > 1.0:
-                self._analysis.set_loop_rate_hz(fs_hz)
-                self._tuning.set_loop_rate_hz(fs_hz)
-        except TunerError:
-            pass
-        try:
-            if self._client.is_calibration_present():
-                self._tuning.sync_motor_from_nvs_shadows()
-        except TunerError:
-            pass
-        self._try_sync_motor_pole_pairs()
-        self._tuning._notify_params_changed()
-        return True
-
-    def _try_sync_motor_pole_pairs(self) -> None:
-        try:
-            p = int(self._client.read_motor_pole_pairs())
-            if 1 <= p <= 64:
-                self._analysis.set_motor_pole_pairs_silent(p)
-        except TunerError:
-            pass
+            self._tuning.detach_log_reader()
+            old = self._client.reader
+            try:
+                old.stop()
+            except Exception:
+                pass
+            port, baud, _axis = self._serial_config
+            try:
+                t = SerialTransport(port=port, baud=baud)
+            except Exception:
+                success = False
+            else:
+                r = LinkReader(t)
+                r.start()
+                time.sleep(0.15)
+                self._client.replace_reader(r)
+                self._scope.attach_reader(r)
+                self._svm.attach_reader(r)
+                self._sensors.attach_reader(r)
+                self._tuning.rebind_log_reader()
+                success = True
+        finally:
+            QMetaObject.invokeMethod(
+                self._poll_worker,
+                "run_post_reconnect_reads",
+                Qt.QueuedConnection,
+            )
+            QMetaObject.invokeMethod(
+                self._poll_worker,
+                "finish_reconnect",
+                Qt.QueuedConnection,
+            )
+        return success
 
     def _maybe_reconnect(self) -> bool:
         if self._serial_config is None:
@@ -276,32 +308,41 @@ class MainWindow(QMainWindow):
             return True
         return False
 
-    def _on_tuning_long_operation(self, busy: bool) -> None:
-        """Stop live tuner polls while a worker thread uses TunerClient;
-        the GUI event loop and scope timer keep running."""
-        if busy:
-            self._timer.stop()
-        else:
-            self._timer.start()
+    @staticmethod
+    def _poll_error_implies_dead_transport(err: str) -> bool:
+        """Host-side I/O loss or dead reader — safe to reopen serial."""
+        el = (err or "").lower()
+        if (
+                "link not running" in el
+                or "reader stopped" in el
+                or "link i/o:" in el):
+            return True
+        return any(
+            s in el for s in (
+                "errno 5",
+                "[errno 5]",
+                "input/output error",
+                "bad file descriptor",
+                "serial send failed",
+                "timeout waiting for response",
+                "device disconnected",
+            ))
 
-    def _poll(self) -> None:
-        if (self._serial_config is not None
-                and not self._client.reader.is_running):
-            self._tuning.last_poll_ok = False
-        self._tuning.poll()
-        st = self._tuning.last_axis_state
-        if (self._link_mode != "demo" and st is not None
-                and (st & AxisStateFlag.ALIGNED)):
-            self._timer.setInterval(500)
+    def _on_poll_finished(
+            self,
+            ok: bool,
+            err: str,
+            snap: Optional[TunerPollSnapshot]) -> None:
+        if ok and snap is not None:
+            self._tuning.apply_poll_snapshot(snap)
         else:
-            self._timer.setInterval(1000)
-        self._update_link_badge()
+            self._tuning.apply_poll_error(err or "poll failed")
         self._set_sensors_interactive()
         if (self._serial_config is not None
                 and not self._tuning.last_poll_ok
+                and self._poll_error_implies_dead_transport(err)
                 and self._maybe_reconnect()):
-            self._tuning.poll()
-            self._update_link_badge()
+            self._tuning.poll_refresh_requested.emit(True)
 
     def _on_params(self, r: float, l: float, bw: float,
                    kp: float, ki: float) -> None:
@@ -314,13 +355,6 @@ class MainWindow(QMainWindow):
         r, l, bw, kp, ki = self._analysis_pending
         self._analysis_pending = None
         self._analysis.update_model(r, l, bw, kp, ki)
-
-    @staticmethod
-    def _is_tuner_studio_target(client: TunerClient) -> bool:
-        try:
-            return client.read_firmware_type() == TUNER_FIRMWARE_TYPE_TSGX
-        except TunerError:
-            return False
 
     def _current_motor_params(self) -> tuple[float, float, float]:
         return (self._tuning._r_spin.value(),

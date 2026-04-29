@@ -3,16 +3,16 @@
 Service-mode firmware for live tuning with **espFoC TunerStudio**.
 Boots, attaches a single axis to the runtime tuner, parks the motor
 at zero current and waits for the host to drive everything else
-(alignment, motion commands, persistence, app generation).
+(alignment, motion commands, persistence).
 
 ## Build & flash
 
 ```bash
 cd examples/tuner_studio_target
 idf.py set-target esp32s3        # or esp32 / esp32p4
-idf.py menuconfig                # adjust the pin map AND the ADC
-                                 # shunt config under
-                                 # "TunerStudio target — pin map"
+idf.py menuconfig                # pins + shunts under "TunerStudio target —
+                                 # pin map"; PWM rate under espFoC Settings →
+                                 # Core (ESP_FOC_PWM_RATE_HZ)
 idf.py build flash monitor
 ```
 
@@ -30,16 +30,14 @@ ESP32, switch to UART under `Component config` →
 
 1. Flash this firmware on your bring-up board.
 2. Launch TunerStudio: `PYTHONPATH=tools python3 -m espfoc_studio.gui --port /dev/ttyACM0`
-3. The GUI detects the `TSGX` firmware-type and enables the
-   **Generate App** tab.
-4. Click **Align axis** in the Tuning panel — the firmware runs
+3. Click **Align axis** in the Tuning panel — the firmware runs
    the alignment routine including the natural-direction probe.
-5. Engage **Override active** and dial `iq_ref` in to spin the
+4. Engage **Override active** and dial `iq_ref` in to spin the
    motor under tuner control. Watch the SVM hexagon and scope.
-6. Tune Kp/Ki via the MPZ recompute button or by hand.
-7. Click **Save to NVS** when satisfied.
-8. Open the **Generate App** tab, fill in the pin map and a name,
-   then click **Generate** — TunerStudio writes a ready-to-build
-   IDF application to disk with the live gains baked in.
-9. `cd <output_dir> && idf.py build flash` — production firmware
-   boots already tuned, no host required.
+5. Tune Kp/Ki via the MPZ recompute button or by hand.
+6. Click **Save to NVS** when satisfied.
+
+The **Generate App** tab (template codegen + NVS export helpers) appears only
+when you run the GUI with **`--demo`** (simulated firmware). For a production
+IDF tree from your pin map and gains, use `espfoc_studio.codegen.generate_sensored_app`
+or copy from `tools/espfoc_studio/templates/sensored_app` — see `doc/TUNING.md`.

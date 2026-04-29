@@ -1,13 +1,13 @@
 {
   "name": "KTECH MF4005v2-25T",
-  "comment": "KTech motor servos, without the control board, this is the 25 Turns version",
+  "comment": "KTech motor servos, without the control board, this is the 25 Turns version. current_bw_hz lowered from 4000 so MPZ autogen meets min_phase_margin_deg at 20 kHz PWM / decimation 1 (1-sample delay model).",
   "motor": {
     "resistance_ohm": 1.9,
     "inductance_h":   0.0005,
     "pole_pairs":     13
   },
   "control": {
-    "current_bw_hz":  4000.0,
+    "current_bw_hz":  3600.0,
     "v_max_volts":    12.0
   },
   "safety": {

@@ -27,8 +27,8 @@
 #include "espFoC/esp_foc.h"
 
 /**
- * @param gpio_enable  Same convention as inverter_6pwm_mpcwm_new(): -1 to skip, >= 0 for
- *                    active-high enable on that pin, or < -1 (e.g. -8) for GPIO 8, active low.
+ * @param gpio_enable     Same as inverter_6pwm_mpcwm_new(): -1 skip; >=0 active-high EN; <-1 GPIO active-low.
+ * @param dc_link_voltage Nominal DC bus [V] for FOC (see inverter_6pwm_mpcwm_new).
  */
 esp_foc_inverter_t *inverter_3pwm_mpcwm_new(int gpio_u, int gpio_v, int gpio_w, int gpio_enable,
                                         float dc_link_voltage, int port);

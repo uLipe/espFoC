@@ -1,6 +1,5 @@
 /*
- * Simulated plant observer — IQ31 only in update() (ISR-safe).
- * Coefficients are computed in simu_observer_new() (float allowed once).
+ * Simulated plant observer — Q16 in update().
  */
 
 #include <math.h>
@@ -9,8 +8,9 @@
 #include <sys/cdefs.h>
 #include "esp_attr.h"
 #include "esp_log.h"
+#include "espFoC/utils/esp_foc_q16.h"
+#include "espFoC/utils/foc_math_q16.h"
 #include "espFoC/observer/esp_foc_observer_interface.h"
-#include "espFoC/utils/foc_math_iq31.h"
 #include "espFoC/observer/esp_foc_simu_observer.h"
 
 #define SIMUL_FLUX_LINKAGE      0.015f
@@ -19,21 +19,19 @@
 
 #define SIMU_V_FULL 24.0f
 #define SIMU_I_FULL 20.0f
-/* Torque scale [Nm] for normalizing Te, Tf into Q1.31 */
 #define SIMU_T_NOM_NM           10.0f
 
 typedef struct {
-    iq31_t r_q31;
-    iq31_t k_diq_q31;
-    iq31_t k_flux_w_q31;
-    iq31_t k_Te_q31;
-    iq31_t k_Tf_q31;
-    iq31_t k_dw_q31;
-    iq31_t k_angle_q31;
-    iq31_t angle;
-    iq31_t omega;
-    iq31_t estim_iq;
-    iq31_t dt_q31;
+    q16_t r_q16;
+    q16_t k_diq_q16;
+    q16_t k_flux_w_q16;
+    q16_t k_Te_q16;
+    q16_t k_Tf_q16;
+    q16_t k_dw_q16;
+    q16_t k_dtheta_rad_q16;
+    q16_t angle;
+    q16_t omega;
+    q16_t estim_iq;
     esp_foc_observer_t interface;
 } esp_foc_simul_observer_t;
 
@@ -44,40 +42,40 @@ static int simu_observer_update(esp_foc_observer_t *self, esp_foc_observer_input
 {
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
 
-    iq31_t uq = in->u_dq[1];
-    iq31_t ri = iq31_mul(obj->r_q31, obj->estim_iq);
-    iq31_t fw = iq31_mul(obj->k_flux_w_q31, obj->omega);
-    iq31_t num = iq31_sub(uq, iq31_add(ri, fw));
-    iq31_t d_iq = iq31_mul(obj->k_diq_q31, num);
-    obj->estim_iq = iq31_add(obj->estim_iq, d_iq);
+    q16_t uq = in->u_dq[1];
+    q16_t ri = q16_mul(obj->r_q16, obj->estim_iq);
+    q16_t fw = q16_mul(obj->k_flux_w_q16, obj->omega);
+    q16_t num = q16_sub(uq, q16_add(ri, fw));
+    q16_t d_iq = q16_mul(obj->k_diq_q16, num);
+    obj->estim_iq = q16_add(obj->estim_iq, d_iq);
 
-    iq31_t Te = iq31_mul(obj->k_Te_q31, obj->estim_iq);
-    iq31_t Tf = iq31_mul(obj->k_Tf_q31, obj->omega);
-    iq31_t dw = iq31_mul(obj->k_dw_q31, iq31_sub(Te, Tf));
-    obj->omega = iq31_add(obj->omega, dw);
+    q16_t Te = q16_mul(obj->k_Te_q16, obj->estim_iq);
+    q16_t Tf = q16_mul(obj->k_Tf_q16, obj->omega);
+    q16_t dw = q16_mul(obj->k_dw_q16, q16_sub(Te, Tf));
+    obj->omega = q16_add(obj->omega, dw);
 
-    obj->angle = iq31_normalize_angle(iq31_add(obj->angle, iq31_mul(obj->omega, obj->k_angle_q31)));
+    obj->angle = q16_normalize_angle_rad(
+        q16_add(obj->angle, q16_mul(obj->omega, obj->k_dtheta_rad_q16)));
 
-    (void)obj->dt_q31;
     return 0;
 }
 
-static iq31_t simu_observer_get_angle(esp_foc_observer_t *self)
+static q16_t simu_observer_get_angle(esp_foc_observer_t *self)
 {
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
     return obj->angle;
 }
 
-static iq31_t simu_observer_get_speed(esp_foc_observer_t *self)
+static q16_t simu_observer_get_speed(esp_foc_observer_t *self)
 {
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
     return obj->omega;
 }
 
-static void simu_observer_reset(esp_foc_observer_t *self, iq31_t offset)
+static void simu_observer_reset(esp_foc_observer_t *self, q16_t offset)
 {
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
-    obj->angle = iq31_normalize_angle(offset);
+    obj->angle = q16_normalize_angle_rad(offset);
     obj->estim_iq = 0;
     obj->omega = 0;
 }
@@ -119,22 +117,21 @@ esp_foc_observer_t *simu_observer_new(int unit, esp_foc_simu_observer_settings_t
     obj->interface.get_speed = simu_observer_get_speed;
     obj->interface.reset = simu_observer_reset;
 
-    obj->r_q31 = iq31_from_float((R * Ib) / Vb);
-    obj->k_diq_q31 = iq31_from_float((dt / L) * (Vb / Ib));
-    obj->k_flux_w_q31 = iq31_from_float((SIMUL_FLUX_LINKAGE * ESP_FOC_OBS_OMEGA_MAX_RAD_S) / Vb);
+    obj->r_q16 = q16_from_float((R * Ib) / Vb);
+    obj->k_diq_q16 = q16_from_float((dt / L) * (Vb / Ib));
+    obj->k_flux_w_q16 = q16_from_float((SIMUL_FLUX_LINKAGE * ESP_FOC_OBS_OMEGA_MAX_RAD_S) / Vb);
 
-    obj->k_Te_q31 = iq31_from_float(Te_coeff_Nm_per_A / SIMU_T_NOM_NM);
-    obj->k_Tf_q31 = iq31_from_float((SIMUL_FRICTION * ESP_FOC_OBS_OMEGA_MAX_RAD_S) / SIMU_T_NOM_NM);
-    obj->k_dw_q31 = iq31_from_float((SIMU_T_NOM_NM * dt) / (SIMUL_INERTIA * ESP_FOC_OBS_OMEGA_MAX_RAD_S));
+    obj->k_Te_q16 = q16_from_float(Te_coeff_Nm_per_A / SIMU_T_NOM_NM);
+    obj->k_Tf_q16 = q16_from_float((SIMUL_FRICTION * ESP_FOC_OBS_OMEGA_MAX_RAD_S) / SIMU_T_NOM_NM);
+    obj->k_dw_q16 = q16_from_float((SIMU_T_NOM_NM * dt) / (SIMUL_INERTIA * ESP_FOC_OBS_OMEGA_MAX_RAD_S));
 
-    obj->k_angle_q31 = iq31_from_float((ESP_FOC_OBS_OMEGA_MAX_RAD_S * dt) / (2.0f * (float)M_PI));
-    obj->dt_q31 = iq31_from_float(dt);
+    obj->k_dtheta_rad_q16 = q16_from_float(ESP_FOC_OBS_OMEGA_MAX_RAD_S * dt);
 
     obj->omega = 0;
     obj->angle = 0;
     obj->estim_iq = 0;
 
-    ESP_LOGI(TAG, "Simu observer Hz=%f pp=%f (IQ31)", (double)(1.0f / dt), (double)pp);
+    ESP_LOGI(TAG, "Simu observer Hz=%f pp=%f (Q16)", (double)(1.0f / dt), (double)pp);
 
     return &obj->interface;
 }

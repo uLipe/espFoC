@@ -67,6 +67,7 @@ def test_mainwindow_demo_boots_polls_and_streams_scope():
         tuning_seen = False
         scope_seen = False
         svm_seen = False
+        sensors_seen = False
         while time.monotonic() < deadline:
             app.processEvents()
             if w._tuning._kp_label.text().strip() not in ("-", ""):
@@ -75,7 +76,9 @@ def test_mainwindow_demo_boots_polls_and_streams_scope():
                 scope_seen = True
             if len(w._svm._alpha_buf) >= 5:
                 svm_seen = True
-            if tuning_seen and scope_seen and svm_seen:
+            if len(w._sensors._time_buf) >= 3:
+                sensors_seen = True
+            if tuning_seen and scope_seen and svm_seen and sensors_seen:
                 break
             time.sleep(0.05)
         assert tuning_seen, "tuning panel never received a gain update"
@@ -84,6 +87,9 @@ def test_mainwindow_demo_boots_polls_and_streams_scope():
         )
         assert svm_seen, (
             "SVM panel never received enough samples to draw a trail"
+        )
+        assert sensors_seen, (
+            "sensors panel never merged enough SCOPE samples (ch6+)"
         )
         w.close()
     finally:
@@ -98,20 +104,22 @@ def test_scope_panel_wallclock_and_autoset():
 
     app = QApplication.instance() or QApplication(sys.argv)
     panel = ScopePanel(async_decode=False)
-    # Inject 200 frames at 1 ms wall-clock spacing.
+    # Inject fewer frames than ScopePanel.MAX_MERGE_SAMPLES_PER_TICK so one
+    # _render_tick merges all (production caps merges per tick for GUI FPS).
+    n_inj = min(40, ScopePanel.MAX_MERGE_SAMPLES_PER_TICK - 1)
     base = time.monotonic()
-    for i in range(200):
+    for i in range(n_inj):
         # Patch the inbox directly so we control the timestamps.
         with panel._inbox_lock:
             panel._inbox.append((
                 base + i * 1e-3, _scope_bin_32(1.0, 2.0, 3.0)))
     panel._render_tick()
     assert panel._n_channels == 3
-    assert len(panel._time_buf) == 200
+    assert len(panel._time_buf) == n_inj
     span = panel._time_buf[-1] - panel._time_buf[0]
-    # Span must be ~199 ms (199 deltas * 1 ms), regardless of any
-    # internal sample_dt assumption — that is the whole point.
-    assert 0.190 < span < 0.210, f"span={span!r} not wall-clock locked"
+    exp = (n_inj - 1) * 1e-3
+    assert exp - 0.015 < span < exp + 0.015, (
+        f"span={span!r} not wall-clock locked (expected ~{exp})")
 
     # Autoset clears state and rebases.
     panel.autoset()
@@ -227,6 +235,8 @@ def test_scope_panel_roll_mode_x_axis_stays_bounded():
         panel._inbox.append((time.monotonic(), _scope_bin_32(2.0, 3.0)))
     panel._render_tick()
     assert panel._n_channels == 2
+    panel._checkboxes[0].setChecked(True)
+    panel._render_tick()
     # Pull the rendered X data from the first curve and check that
     # the latest sample sits at ~0 and nothing is at +3600 seconds.
     x_data, _ = panel._curves[0].getData()

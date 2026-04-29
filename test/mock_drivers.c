@@ -100,7 +100,13 @@ static q16_t mock_rotor_read_counts(esp_foc_rotor_sensor_t *self)
 {
     mock_rotor_sensor_t *m = MOCK_ROTOR_FROM_SELF(self);
     m->read_counts_count++;
-    m->last_angle_q16 = q16_from_float(m->counts / m->counts_per_rev);
+    {
+        float c = fmodf(m->counts, m->counts_per_rev);
+        if (c < 0.0f) {
+            c += m->counts_per_rev;
+        }
+        m->last_angle_q16 = q16_from_float(c);
+    }
     return m->last_angle_q16;
 }
 

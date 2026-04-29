@@ -136,6 +136,23 @@ static inline q16_t q16_max(q16_t a, q16_t b)
 }
 
 /**
+ * Reciprocal 1/x for strictly positive Q16 x; x<=0 → 0.
+ * Integer-only (ISR-safe). Result is Q16 such that q16_mul(x, rec) ≈ Q16_ONE.
+ */
+static inline q16_t q16_reciprocal_positive(q16_t x)
+{
+    if (x <= 0) {
+        return 0;
+    }
+    int64_t num = (int64_t)Q16_ONE * (int64_t)Q16_ONE;
+    int64_t r = num / (int64_t)x;
+    if (r > (int64_t)INT32_MAX) {
+        return (q16_t)INT32_MAX;
+    }
+    return (q16_t)r;
+}
+
+/**
  * Elapsed interval in microseconds → Q16.16 seconds (>= 0).
  * Integer-only: seconds ≈ us * Q16_ONE / 1e6.
  */

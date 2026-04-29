@@ -87,8 +87,8 @@ single window you get:
 - firmware scope stream with per-channel colour, toggle and cursor;
 - SVPWM hexagon with the three phase projections and the resultant
   voltage vector rotating as the motor is driven;
-- a Hardware tab plus a Generate App tab that turn the live tuning
-  state into a ready-to-build IDF project for production.
+- in **`--demo`** mode, a **Generate App** tab that runs the template
+  codegen against the simulated session (live serial sessions omit this tab).
 
 ### Try it without hardware
 
@@ -98,7 +98,7 @@ PYTHONPATH=tools python3 -m espfoc_studio.gui --demo
 ```
 
 `--demo` embeds a simulated firmware so the whole pipeline — tuner
-protocol, scope stream, hexagon — exercises end-to-end with zero
+protocol, scope stream, hexagon, Generate App — exercises end-to-end with zero
 boards attached.
 
 ### Talk to a real target
@@ -107,8 +107,7 @@ Two paths:
 
 1. **`tuner_studio_target` (recommended for bring-up).** A dedicated
    service-mode firmware that boots, parks the motor, and waits for
-   the GUI. Advertises a `TSGX` firmware-type so the Generate App tab
-   lights up automatically.
+   the GUI. Advertises `TSGX` as its firmware-type for host identification.
 
    ```bash
    cd examples/tuner_studio_target
@@ -191,8 +190,8 @@ void app_main(void)
 ## Examples
 
 - `examples/axis_sensored` — reference bring-up (sensored current mode).
-- `examples/tuner_studio_target` — service-mode firmware for live
-  tuning + Generate App.
+- `examples/tuner_studio_target` — service-mode firmware for live tuning
+  with TunerStudio (`--port`).
 - `examples/tuner_demo` — runs in QEMU, exercises autogen gains,
   runtime retune and the tuner protocol.
 - `examples/unit_test_runner` — Unity suite for CI / QEMU.

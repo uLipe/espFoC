@@ -50,8 +50,8 @@ uint32_t esp_foc_tuner_firmware_type(void)
     return ESP_FOC_TUNER_FIRMWARE_TYPE_TSGX;
 }
 
-/* The default regulation callback while no tuner override is active:
- * keep the axis parked at zero current so the motor sits idle. */
+/* Regulation callback: with ESP_FOC_TUNER_ALWAYS_OVERRIDE_VOLTAGE_MODE the
+ * tuner owns targets (override latched after alignment); keep zeros here. */
 static void parked_regulation_cb(esp_foc_axis_t *axis,
                                  esp_foc_d_current_q16_t *id_ref,
                                  esp_foc_q_current_q16_t *iq_ref,
@@ -59,10 +59,10 @@ static void parked_regulation_cb(esp_foc_axis_t *axis,
                                  esp_foc_q_voltage_q16_t *uq_ff)
 {
     (void)axis;
-    id_ref->raw = 0;
-    iq_ref->raw = 0;
-    ud_ff->raw = 0;
-    uq_ff->raw = 0;
+    id_ref->raw = q16_from_float(0.0f);
+    iq_ref->raw = q16_from_float(0.0f);
+    ud_ff->raw = q16_from_float(0.0f);
+    uq_ff->raw = q16_from_float(0.0f);
 }
 
 static void wire_scope_channels(void)
@@ -78,8 +78,8 @@ static void wire_scope_channels(void)
     esp_foc_scope_add_channel(&s_axis.i_q.raw, 4);
     esp_foc_scope_add_channel(&s_axis.u_q.raw, 5);
 #if CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS >= 12
-    /* TunerStudio "Sensores" tab (tools/espfoc_studio/gui/sensors_debug_panel)
-     * — same Q16 float wire as ch0..5, engineering units in the host. */
+    /* TunerStudio Sensors tab: ch6 = encoder counts (Q16 engineering),
+     * ch7 = encoder derivative [counts/s]; host converts with CPR. */
     esp_foc_scope_add_channel(&s_axis.rotor_shaft_ticks, 6);
     esp_foc_scope_add_channel(&s_axis.current_speed, 7);
     esp_foc_scope_add_channel(&s_axis.i_u, 8);

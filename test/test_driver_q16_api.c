@@ -1,5 +1,5 @@
 /*
- * Unit tests for mock drivers (IQ31-only API).
+ * Unit tests for mock drivers (Q16 API).
  */
 #include <unity.h>
 #include <math.h>
@@ -8,7 +8,7 @@
 
 #define FLOAT_TOL 1e-4f
 
-TEST_CASE("mock inverter: set_voltages records IQ31 args", "[espFoC][driver_mock]")
+TEST_CASE("mock inverter: set_voltages records Q16 args", "[espFoC][driver_mock]")
 {
     mock_inverter_t inv;
     mock_inverter_init(&inv, 1.0f, 20000.0f);
@@ -25,7 +25,7 @@ TEST_CASE("mock inverter: set_voltages records IQ31 args", "[espFoC][driver_mock
     TEST_ASSERT_EQUAL(c, inv.last_v_w);
 }
 
-TEST_CASE("mock isensor: fetch_isensors returns IQ31 values", "[espFoC][driver_mock]")
+TEST_CASE("mock isensor: fetch_isensors returns Q16 values", "[espFoC][driver_mock]")
 {
     mock_isensor_t isen;
     mock_isensor_init(&isen);

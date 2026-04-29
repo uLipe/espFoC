@@ -7,6 +7,7 @@
 #include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/utils/foc_math_q16.h"
 #include "espFoC/utils/modulator.h"
+#include "espFoC/utils/space_vector_modulator.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -21,7 +22,7 @@ static void assert_duty_unit(q16_t d)
     TEST_ASSERT_TRUE(f >= -DUTY_ENV && f <= 1.0f + DUTY_ENV);
 }
 
-TEST_CASE("modulator_iq31: svm zero alpha beta gives duties near 0.5", "[espFoC][modulator_iq31]")
+TEST_CASE("modulator_q16: svm zero alpha beta gives duties near 0.5", "[espFoC][modulator_q16]")
 {
     q16_t da, db, dc;
     esp_foc_svm_set(0, 0, q16_from_float(0.5f), &da, &db, &dc);
@@ -30,7 +31,7 @@ TEST_CASE("modulator_iq31: svm zero alpha beta gives duties near 0.5", "[espFoC]
     TEST_ASSERT_FLOAT_WITHIN(0.025f, 0.5f, q16_to_float(dc));
 }
 
-TEST_CASE("modulator_iq31: svm grid duties stay in unit interval", "[espFoC][modulator_iq31]")
+TEST_CASE("modulator_q16: svm grid duties stay in unit interval", "[espFoC][modulator_q16]")
 {
     const q16_t inv = q16_from_float(0.5f);
     for (int i = -4; i <= 4; i++) {
@@ -46,7 +47,7 @@ TEST_CASE("modulator_iq31: svm grid duties stay in unit interval", "[espFoC][mod
     }
 }
 
-TEST_CASE("modulator_iq31: svm edge clamping large voltages", "[espFoC][modulator_iq31]")
+TEST_CASE("modulator_q16: svm edge clamping large voltages", "[espFoC][modulator_q16]")
 {
     q16_t da, db, dc;
     esp_foc_svm_set(Q16_ONE, Q16_ONE, q16_from_float(1.0f), &da, &db, &dc);
@@ -55,7 +56,7 @@ TEST_CASE("modulator_iq31: svm edge clamping large voltages", "[espFoC][modulato
     assert_duty_unit(dc);
 }
 
-TEST_CASE("modulator_iq31: svm small inv_vbus", "[espFoC][modulator_iq31]")
+TEST_CASE("modulator_q16: svm small inv_vbus", "[espFoC][modulator_q16]")
 {
     q16_t da, db, dc;
     esp_foc_svm_set(q16_from_float(0.3f), q16_from_float(-0.2f),
@@ -65,7 +66,7 @@ TEST_CASE("modulator_iq31: svm small inv_vbus", "[espFoC][modulator_iq31]")
     assert_duty_unit(dc);
 }
 
-TEST_CASE("modulator_iq31: svm saturated alpha", "[espFoC][modulator_iq31]")
+TEST_CASE("modulator_q16: svm saturated alpha", "[espFoC][modulator_q16]")
 {
     q16_t da, db, dc;
     esp_foc_svm_set(q16_from_float(0.99f), 0, q16_from_float(0.5f), &da, &db, &dc);
@@ -78,7 +79,7 @@ TEST_CASE("modulator_iq31: svm saturated alpha", "[espFoC][modulator_iq31]")
     assert_duty_unit(dc);
 }
 
-TEST_CASE("modulator_iq31: modulate_dq typical operating point", "[espFoC][modulator_iq31]")
+TEST_CASE("modulator_q16: modulate_dq typical operating point", "[espFoC][modulator_q16]")
 {
     float angle = (float)(M_PI / 6.0);
     q16_t sq = q16_from_float(sinf(angle));
@@ -93,38 +94,40 @@ TEST_CASE("modulator_iq31: modulate_dq typical operating point", "[espFoC][modul
     esp_foc_modulate_dq_voltage(sq, cq,
                                 q16_from_float(0.2f), q16_from_float(0.35f),
                                 &qa, &qb, &qu, &qv, &qw,
-                                vmax,
-                                q16_from_float(0.5f));
+                                vmax);
     TEST_ASSERT_EQUAL_INT(exp_a, qa);
     TEST_ASSERT_EQUAL_INT(exp_b, qb);
-    assert_duty_unit(qu);
-    assert_duty_unit(qv);
-    assert_duty_unit(qw);
+    q16_t eu, ev, ew;
+    esp_foc_svm_alpha_beta_to_phase_volts(exp_a, exp_b, &eu, &ev, &ew);
+    TEST_ASSERT_EQUAL_INT(eu, qu);
+    TEST_ASSERT_EQUAL_INT(ev, qv);
+    TEST_ASSERT_EQUAL_INT(ew, qw);
 }
 
-TEST_CASE("modulator_iq31: modulate_dq voltage limit scales dq", "[espFoC][modulator_iq31]")
+TEST_CASE("modulator_q16: modulate_dq voltage limit scales dq", "[espFoC][modulator_q16]")
 {
     q16_t qa, qb, qu, qv, qw;
     esp_foc_modulate_dq_voltage(q16_from_float(1.0f), 0,
                                 q16_from_float(0.95f), q16_from_float(0.95f),
                                 &qa, &qb, &qu, &qv, &qw,
-                                q16_from_float(0.5f),
                                 q16_from_float(0.5f));
-    assert_duty_unit(qu);
-    assert_duty_unit(qv);
-    assert_duty_unit(qw);
+    TEST_ASSERT_TRUE(fabsf(q16_to_float(qu)) < 1.0f);
+    TEST_ASSERT_TRUE(fabsf(q16_to_float(qv)) < 1.0f);
+    TEST_ASSERT_TRUE(fabsf(q16_to_float(qw)) < 1.0f);
 }
 
-TEST_CASE("modulator_iq31: modulate_dq zero dq", "[espFoC][modulator_iq31]")
+TEST_CASE("modulator_q16: modulate_dq zero dq", "[espFoC][modulator_q16]")
 {
     q16_t qa, qb, qu, qv, qw;
     esp_foc_modulate_dq_voltage(0, Q16_ONE, 0, 0, &qa, &qb, &qu, &qv, &qw,
-                                Q16_ONE, q16_from_float(0.5f));
+                                Q16_ONE);
     TEST_ASSERT_FLOAT_WITHIN(AB_TOL, 0.0f, q16_to_float(qa));
-    TEST_ASSERT_FLOAT_WITHIN(0.025f, 0.5f, q16_to_float(qu));
+    TEST_ASSERT_FLOAT_WITHIN(AB_TOL, 0.0f, q16_to_float(qu));
+    TEST_ASSERT_FLOAT_WITHIN(AB_TOL, 0.0f, q16_to_float(qv));
+    TEST_ASSERT_FLOAT_WITHIN(AB_TOL, 0.0f, q16_to_float(qw));
 }
 
-TEST_CASE("modulator_iq31: get_dq_currents balanced currents", "[espFoC][modulator_iq31]")
+TEST_CASE("modulator_q16: get_dq_currents balanced currents", "[espFoC][modulator_q16]")
 {
     q16_t sq = q16_from_float(sinf((float)(M_PI / 4.0)));
     q16_t cq = q16_from_float(cosf((float)(M_PI / 4.0)));
@@ -142,7 +145,7 @@ TEST_CASE("modulator_iq31: get_dq_currents balanced currents", "[espFoC][modulat
     TEST_ASSERT_EQUAL_INT(eq, qq);
 }
 
-TEST_CASE("modulator_iq31: get_dq_currents edge zero currents", "[espFoC][modulator_iq31]")
+TEST_CASE("modulator_q16: get_dq_currents edge zero currents", "[espFoC][modulator_q16]")
 {
     q16_t qa, qb, qq, qd;
     esp_foc_get_dq_currents(Q16_ONE, 0, 0, 0, 0, &qa, &qb, &qq, &qd);
@@ -150,7 +153,7 @@ TEST_CASE("modulator_iq31: get_dq_currents edge zero currents", "[espFoC][modula
     TEST_ASSERT_FLOAT_WITHIN(0.03f, 0.0f, q16_to_float(qd));
 }
 
-TEST_CASE("modulator_iq31: get_dq_currents near saturation", "[espFoC][modulator_iq31]")
+TEST_CASE("modulator_q16: get_dq_currents near saturation", "[espFoC][modulator_q16]")
 {
     q16_t qa, qb, qq, qd;
     esp_foc_get_dq_currents(q16_from_float(0.707f), q16_from_float(0.707f),

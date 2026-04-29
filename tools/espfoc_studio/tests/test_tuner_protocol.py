@@ -162,6 +162,8 @@ class FakeFirmware(threading.Thread):
                 self._send_response(seq, 0)
             elif pid == int(ParamId.CMD_RESET_BOARD):
                 self._send_response(seq, 0)
+            elif pid == int(ParamId.CMD_PING):
+                self._send_response(seq, 0)
             else:
                 self._send_response(seq, -2)
         else:
@@ -264,6 +266,14 @@ def test_reset_board():
         fw.stop()
 
 
+def test_ping():
+    cli, fw = _setup()
+    try:
+        cli.ping()
+    finally:
+        fw.stop()
+
+
 def test_motor_pole_pairs_round_trip():
     cli, fw = _setup()
     try:
@@ -284,6 +294,7 @@ def main() -> int:
         test_motion_rejected_when_override_off,
         test_recompute_gains,
         test_reset_board,
+        test_ping,
         test_motor_pole_pairs_round_trip,
     ]
     failed = 0

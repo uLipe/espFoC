@@ -52,8 +52,8 @@ from espfoc_studio.protocol import TunerClient
 
 
 # Scene = (label, tab_index, on_enter callback, dwell seconds).
-# tab_index is the visible position; the layout is
-# Analysis(0) / Scope(1) / SVM Hexagon(2) / Generate App(3).
+# Tab order matches MainWindow: Analysis(0) / Sensors(1) / Scope(2) /
+# SVM Hexagon(3) / Generate App(4, --demo only).
 Scene = Tuple[str, int, Callable[[MainWindow, TunerClient], None], float]
 
 
@@ -180,7 +180,12 @@ def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     apply_dark_theme(app)
     client = TunerClient(reader)
-    w = MainWindow(client, title="espFoC TunerStudio")
+    w = MainWindow(
+        client,
+        title="espFoC TunerStudio",
+        link_mode="demo",
+        link_descr="demo gif (DemoFirmware)",
+    )
     w.resize(args.width, args.height)
     w.show()
 
@@ -193,17 +198,15 @@ def main() -> int:
             break
         time.sleep(0.05)
 
-    # Build the scene list. Generate App may be missing if the firmware
-    # does not advertise TSGX, but DemoFirmware does, so it is here.
     has_generate = hasattr(w, "_generate")
     scenes: List[Scene] = [
         ("Analysis",       0, _scene_analysis,        2.5),
-        ("Scope",          1, _scene_scope,           2.5),
-        ("SVM Hexagon",    2, _scene_svm_override,    4.0),
+        ("Scope",          2, _scene_scope,           2.5),
+        ("SVM Hexagon",    3, _scene_svm_override,    4.0),
     ]
     if has_generate:
-        scenes.append(("Generate App", 3, _scene_generate_idle, 1.5))
-        scenes.append(("Generate App", 3, _scene_generate_build, 4.0))
+        scenes.append(("Generate App", 4, _scene_generate_idle, 1.5))
+        scenes.append(("Generate App", 4, _scene_generate_build, 4.0))
 
     frames: List = []
     frame_dt = 1.0 / max(1, args.fps)

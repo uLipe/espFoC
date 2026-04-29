@@ -8,7 +8,7 @@ menu "TunerStudio target — pin map"
     config TUNER_TARGET_PWM_V_HI
         int "PWM V high pin"
         range 0 54
-        default 6
+        default 20
 
     config TUNER_TARGET_PWM_W_HI
         int "PWM W high pin"
@@ -18,22 +18,22 @@ menu "TunerStudio target — pin map"
     config TUNER_TARGET_PWM_U_LO
         int "PWM U low pin"
         range 0 54
-        default 15
+        default 6
 
     config TUNER_TARGET_PWM_V_LO
         int "PWM V low pin"
         range 0 54
-        default 16
+        default 21
 
     config TUNER_TARGET_PWM_W_LO
         int "PWM W low pin"
         range 0 54
-        default 17
+        default 8
 
     config TUNER_TARGET_PWM_EN_PIN
         int "Gate enable GPIO (set to -1 if the driver is not brought out to a GPIO)"
         range -1 54
-        default -1
+        default 47
         help
             When set to 0 or a positive value, the MCPWM driver drives that GPIO for enable.
             If "Active-low enable" is set, the GPIO number is the same but the line is driven
@@ -41,12 +41,8 @@ menu "TunerStudio target — pin map"
 
     config TUNER_TARGET_PWM_EN_ACT_LOW
         bool "Active-low enable (inverted relative to 'driver enabled')"
-        default n
+        default y
         depends on TUNER_TARGET_PWM_EN_PIN >= 0
-
-    config TUNER_TARGET_PWM_FREQ_HZ
-        int "PWM frequency [Hz]"
-        default 20000
 
     config TUNER_TARGET_DC_LINK_V
         int "DC link voltage (Volts)"
@@ -55,17 +51,17 @@ menu "TunerStudio target — pin map"
     config TUNER_TARGET_ENC_SDA
         int "Encoder I2C SDA pin"
         range 0 54
-        default 4
+        default 25
 
     config TUNER_TARGET_ENC_SCL
         int "Encoder I2C SCL pin"
         range 0 54
-        default 8
+        default 24
 
     config TUNER_TARGET_POLE_PAIRS
         int "Motor pole pairs"
         range 1 64
-        default 7
+        default 13
 
     comment "ADC shunt current sensing"
 
@@ -77,12 +73,12 @@ menu "TunerStudio target — pin map"
     config TUNER_TARGET_ISENSE_CH_U
         int "ADC channel for phase U shunt"
         range 0 9
-        default 1
+        default 6
 
     config TUNER_TARGET_ISENSE_CH_V
         int "ADC channel for phase V shunt"
         range 0 9
-        default 5
+        default 7
 
     config TUNER_TARGET_ISENSE_AMP_GAIN_X100
         int "Current amplifier gain (V/V) x100"

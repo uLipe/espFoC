@@ -30,7 +30,7 @@ TEST_CASE("autogen: axis init with zero motor params uses autogen gains",
     /* Use the same PWM rate the autotuner was configured with so the
      * runtime loop_ts_us matches the build-time one. */
     mock_inverter_init(&s_inv, 1.0f,
-                       (float)CONFIG_ESP_FOC_AUTOGEN_PWM_RATE_HZ);
+                       (float)CONFIG_ESP_FOC_PWM_RATE_HZ);
     mock_rotor_sensor_init(&s_rotor, 4096.0f);
     mock_isensor_init(&s_isensor);
     settings.natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW;

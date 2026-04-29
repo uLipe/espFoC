@@ -48,6 +48,14 @@ static inline q16_t hot_path_us_elapsed_to_q16(uint64_t el_us)
 static const char * tag = "ESP_FOC_CONTROL";
 
 #if defined(CONFIG_ESP_FOC_ISR_HOT_PATH)
+/** Shaft fraction [0, 1) / rev (Q16) → θ_mech [rad], then θ_e = normalize(pp × θ_mech). */
+static inline q16_t esp_foc_shaft_frac_to_elec_angle_rad_q16(q16_t pos_shaft_rev_q16,
+                                                             int pole_pairs)
+{
+    q16_t theta_mech = q16_mul(pos_shaft_rev_q16, Q16_TWO_PI);
+    q16_t theta_elec = q16_mul(theta_mech, q16_from_int(pole_pairs));
+    return q16_normalize_angle_rad(theta_elec);
+}
 
 /* ============================================================
  *  Plan #2: full FOC pipeline runs inside the PWM ISR.
@@ -57,8 +65,8 @@ static const char * tag = "ESP_FOC_CONTROL";
  *  next frame runs in parallel with the rest of this ISR. The outer
  *  task does not call sample_isensors.
  *
- *  set_voltages() down to mcpwm_comparator_set_compare_value() is
- *  IRAM-attributed in IDF v5.5; the rest of the helpers used here
+ *  set_voltages() takes phase volts; the MCPWM driver converts to duty then
+ *  comparator writes — IRAM-attributed in IDF v5.5. Other helpers used here
  *  (q16_park, q16_sin/cos LUT, esp_foc_modulate_dq_voltage,
  *  esp_foc_pid_update) are pure Q16 / IRAM-friendly arithmetic.
  *  Everything in this ISR has to either live in IRAM or be cache-
@@ -84,19 +92,10 @@ IRAM_ATTR static void foc_hot_isr(void *data)
         axis->isensor_driver->sample_isensors(axis->isensor_driver);
     }
 
-    /* 3) Predict electrical angle for "now". This call only touches
-     *    the predictor's read-only fields; the outer task wraps
-     *    update() in a critical section the ISR also honours, so the
-     *    snapshot here is consistent. */
-    uint64_t now_us = esp_foc_now_useconds();
-    q16_t theta_e = esp_foc_angle_predictor_predict_q16(
-                        &axis->angle_predictor, now_us);
+    q16_t e_sin = q16_sin(axis->rotor_elec_angle);
+    q16_t e_cos = q16_cos(axis->rotor_elec_angle);
 
-    /* 4) sin / cos. Backed by the IQ31 LUT in iram, no flash hit. */
-    q16_t e_sin = q16_sin(theta_e);
-    q16_t e_cos = q16_cos(theta_e);
-
-    /* 5) Park transform. */
+    /* 3) Park transform. */
     q16_t i_d, i_q;
     q16_park(e_sin, e_cos, i_alpha, i_beta, &i_d, &i_q);
 
@@ -105,7 +104,6 @@ IRAM_ATTR static void foc_hot_isr(void *data)
     axis->i_beta.raw  = i_beta;
     axis->i_d.raw = i_d;
     axis->i_q.raw = i_q;
-    axis->rotor_elec_angle = theta_e;
 
     /* 7) Current PI (or open-loop voltage).
      * Tuner override (CONFIG_ESP_FOC_TUNER_ENABLE): esp_foc_core copies
@@ -131,21 +129,20 @@ IRAM_ATTR static void foc_hot_isr(void *data)
     axis->u_q.raw = u_q;
     axis->u_d.raw = u_d;
 
-    /* 8) Inverse Park + SVPWM in one shot. */
+    /* 8) Inverse Park + SVPWM (θ at output instant). */
     q16_t u_alpha = 0, u_beta = 0, u_u = 0, u_v = 0, u_w = 0;
     esp_foc_modulate_dq_voltage(e_sin, e_cos, u_d, u_q,
                                 &u_alpha, &u_beta,
                                 &u_u, &u_v, &u_w,
-                                axis->max_voltage,
-                                axis->dc_link_to_normalized);
+                                axis->max_voltage);
     axis->u_alpha.raw = u_alpha;
     axis->u_beta.raw  = u_beta;
     axis->u_u.raw = u_u;
     axis->u_v.raw = u_v;
     axis->u_w.raw = u_w;
 
-    /* 9) Push duties to the inverter. mcpwm_comparator_set_compare_value
-     *    is IRAM-safe in IDF v5.5. */
+    /* 9) Phase voltages [V] Q16 → driver applies SVPWM to duty. MCPWM
+     *    comparator writes are IRAM-safe in IDF v5.5. */
     axis->inverter_driver->set_voltages(axis->inverter_driver, u_u, u_v, u_w);
 
     /* 10) Optionally snapshot every wired channel into the scope ring.
@@ -165,7 +162,7 @@ IRAM_ATTR static void foc_hot_isr(void *data)
 #endif
 
     /* 11) Downsample counter. When it expires, wake the outer task
-     *     so it reads the encoder, updates the predictor and dispatches
+     *     so it reads the encoder, refreshes rotor_elec_angle and dispatches
      *     the user regulation callback. */
     if (axis->downsampling_low_speed) {
         axis->downsampling_low_speed--;
@@ -196,9 +193,13 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
 
     ESP_LOGI(tag, "Starting sensored FOC outer loop (ISR hot path)");
 
-    /* Cold-start: take one encoder reading before the ISR starts so
-     * the predictor seeds with a real angle (otherwise the first
-     * 25 us of PWM would extrapolate from theta_est = 0). */
+    uint32_t cpr = axis->rotor_sensor_driver->get_counts_per_revolution(
+        axis->rotor_sensor_driver);
+    if (cpr == 0u) {
+        cpr = 1u;
+    }
+
+    /* Cold-start: one encoder sample → rotor_elec_angle before PWM ISR runs. */
     q16_t ticks0 = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
     axis->rotor_shaft_ticks = ticks0;
     axis->rotor_position = q16_mul(ticks0, axis->natural_direction);
@@ -206,22 +207,11 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
     axis->current_speed = 0;
     {
         int pp = axis->motor_pole_pairs;
-        int64_t et = (int64_t)axis->rotor_position * (int64_t)pp;
-        q16_t elec_frac = (q16_t)(et % (int64_t)Q16_ONE);
-        if (elec_frac < 0) {
-            elec_frac = (q16_t)((int64_t)elec_frac + (int64_t)Q16_ONE);
-        }
-        q16_t theta_meas = q16_mul(elec_frac, Q16_TWO_PI);
-        esp_foc_critical_enter();
-        esp_foc_angle_predictor_update_q16(&axis->angle_predictor,
-                                            theta_meas,
-                                            esp_foc_now_useconds());
-        esp_foc_critical_leave();
+        q16_t shaft_rev = q16_mul(axis->rotor_position, axis->encoder_inv_cpr_q16);
+        axis->rotor_elec_angle = esp_foc_shaft_frac_to_elec_angle_rad_q16(shaft_rev, pp);
     }
 
-    /* Hand the ISR over to the inverter driver only AFTER the
-     * predictor has a real seed — otherwise the first PWM tick would
-     * fire set_voltages() with garbage angles. */
+    /* Hand the ISR over only after rotor_elec_angle is valid. */
     axis->inverter_driver->set_inverter_callback(axis->inverter_driver,
                                                  foc_hot_isr,
                                                  axis);
@@ -239,25 +229,12 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
         q16_t pos = q16_mul(ticks, axis->natural_direction);
         axis->rotor_position = pos;
 
-        /* 2) Mechanical angle * pp -> normalised electrical angle. */
+        /* 2) θe [0, 2*pi) from encoder — ISR reads rotor_elec_angle each PWM. */
         int pp = axis->motor_pole_pairs;
-        int64_t et = (int64_t)pos * (int64_t)pp;
-        q16_t elec_frac = (q16_t)(et % (int64_t)Q16_ONE);
-        if (elec_frac < 0) {
-            elec_frac = (q16_t)((int64_t)elec_frac + (int64_t)Q16_ONE);
-        }
-        q16_t theta_meas = q16_mul(elec_frac, Q16_TWO_PI);
+        q16_t shaft_rev = q16_mul(pos, axis->encoder_inv_cpr_q16);
+        axis->rotor_elec_angle = esp_foc_shaft_frac_to_elec_angle_rad_q16(shaft_rev, pp);
 
-        /* 3) Fold into the alpha-beta tracker under critical section
-         *    so the PWM ISR cannot land mid-update and read a torn
-         *    {theta_est, omega_est, t_last} triple. */
-        uint64_t now_us = esp_foc_now_useconds();
-        esp_foc_critical_enter();
-        esp_foc_angle_predictor_update_q16(&axis->angle_predictor,
-                                            theta_meas, now_us);
-        esp_foc_critical_leave();
-
-        /* 4) Velocity smoothing: the outer loop is the rate at which
+        /* 3) Velocity smoothing: the outer loop is the rate at which
          *    rotor_position actually changes, so the biquad sees a
          *    consistent dt. */
         q16_t dtheta = q16_sub(pos, axis->rotor_position_prev);
@@ -267,7 +244,7 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
                                   &axis->velocity_filter, raw_speed);
         axis->rotor_position_prev = pos;
 
-        /* 5) Wake the regulator task so the user callback can refresh
+        /* 4) Wake the regulator task so the user callback can refresh
          *    target_i_d / target_i_q / target_u_d / target_u_q before
          *    the next batch of PWM cycles. */
         esp_foc_send_notification(axis->regulator_ev);
@@ -362,13 +339,16 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
 
         {
             int pp = axis->motor_pole_pairs;
-            int64_t et = (int64_t)axis->rotor_position * (int64_t)pp;
+            q16_t shaft_rev = q16_mul(axis->rotor_position,
+                                      axis->encoder_inv_cpr_q16);
+            int64_t et = (int64_t)shaft_rev * (int64_t)pp;
             q16_t elec_frac = (q16_t)(et % (int64_t)Q16_ONE);
             if (elec_frac < 0) {
                 elec_frac = (q16_t)((int64_t)elec_frac + (int64_t)Q16_ONE);
             }
             q16_t elec_from_enc = q16_mul(elec_frac, Q16_TWO_PI);
-            q16_t omega_e = q16_mul(axis->current_speed, q16_from_int(pp));
+            q16_t omega_e = q16_mul(axis->current_speed,
+                                    axis->encoder_counts_speed_to_omega_e_q16);
             uint64_t now_us = esp_foc_now_useconds();
             uint64_t us_abs = (now_us >= current_timestamp)
                                   ? (now_us - current_timestamp)
@@ -382,7 +362,7 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
         q16_t e_sin_q16 = q16_sin(elec_angle_norm_q16);
         q16_t e_cos_q16 = q16_cos(elec_angle_norm_q16);
 
-        /* ω [rad/s] in Q16: Δθ [rad] * (1/T_low) [1/s]; inv_dt matches core init (1/(dt_hs*N)). */
+        /* Encoder counts/s (Q16): Δcounts * f_low. */
         {
             q16_t dtheta = q16_sub(axis->rotor_position, axis->rotor_position_prev);
             q16_t raw_speed_q16 = q16_mul(dtheta, axis->torque_controller[0].inv_dt);
@@ -442,8 +422,7 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
                         &u_u_q16,
                         &u_v_q16,
                         &u_w_q16,
-                        axis->max_voltage,
-                        axis->dc_link_to_normalized);
+                        axis->max_voltage);
 
         axis->u_alpha.raw = u_alpha_q16;
         axis->u_beta.raw = u_beta_q16;

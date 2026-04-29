@@ -26,22 +26,17 @@ void test_vdq_pipeline_single(float vd_in,
     q16_t e_sin = q16_sin(q16_from_float(theta));
     q16_t e_cos = q16_cos(q16_from_float(theta));
     q16_t valpha, vbeta;
-    q16_t da, db, dc;
+    q16_t vu, vv, vw;
 
     esp_foc_modulate_dq_voltage(e_sin, e_cos,
                                 vd, vq,
                                 &valpha, &vbeta,
-                                &da, &db, &dc,
-                                q16_from_float(vmax),
-                                q16_from_float(1.0f / vbus));
+                                &vu, &vv, &vw,
+                                q16_from_float(vmax));
 
-    float da_f = q16_to_float(da);
-    float db_f = q16_to_float(db);
-    float dc_f = q16_to_float(dc);
-
-    float va_rec = (da_f - 0.5f) * vbus;
-    float vb_rec = (db_f - 0.5f) * vbus;
-    float vc_rec = (dc_f - 0.5f) * vbus;
+    float va_rec = q16_to_float(vu);
+    float vb_rec = q16_to_float(vv);
+    float vc_rec = q16_to_float(vw);
 
     const float INV_SQRT3 = 0.57735026919f;
 

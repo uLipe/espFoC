@@ -15,6 +15,7 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 from enum import IntEnum, IntFlag
+import threading
 from queue import Empty
 from typing import Optional, Union
 
@@ -32,6 +33,8 @@ def _tuner_error_from_link_io(err: BaseException) -> TunerError:
 
 def _is_transport_io_failure(err: BaseException) -> bool:
     if isinstance(err, (OSError, ConnectionError, BrokenPipeError)):
+        return True
+    if isinstance(err, TypeError):
         return True
     ex_mod = getattr(type(err), "__module__", "") or ""
     return ex_mod.startswith("serial")
@@ -81,6 +84,7 @@ class ParamId(IntEnum):
     CMD_LOAD_NVS        = 0x00B1
     CMD_ERASE_NVS       = 0x00B2
     CMD_RESET_BOARD     = 0x00B3
+    CMD_PING            = 0x00B4
 
 # 'TSGX' little-endian as a sentinel returned by tuner_studio_target.
 TUNER_FIRMWARE_TYPE_TSGX = 0x58475354
@@ -151,6 +155,14 @@ class TunerClient:
     app (scope panel, log viewer, ...). Each round-trip parks itself on
     a per-seq Queue, so concurrent scope traffic on the same bus can't
     starve a pending tuner response.
+
+    Round-trips are mutex-serialized so concurrent callers (poll worker,
+    alignment thread, …) never interleave ``send_bytes`` on the same
+    serial/USB endpoint — pyserial is not thread-safe.
+
+    Call sites that care about responsive UI should invoke reads/writes from
+    a dedicated thread — **not** the Qt GUI thread — so the mutex never
+    stalls painting (model/controller vs view).
     """
 
     DEFAULT_TIMEOUT = 0.5  # seconds per round-trip
@@ -159,6 +171,7 @@ class TunerClient:
                  axis: int = 0) -> None:
         self._axis = axis
         self._seq = 0
+        self._bus_lock = threading.Lock()
         if isinstance(transport_or_reader, LinkReader):
             self._reader = transport_or_reader
             self._owns_reader = False
@@ -192,35 +205,36 @@ class TunerClient:
     def _round_trip(self, op: Op, id_: ParamId,
                     cmd_payload: bytes = b"",
                     timeout: Optional[float] = None) -> TunerResponse:
-        seq = self._next_seq()
-        app = bytes([
-            int(op),
-            int(id_) & 0xFF, (int(id_) >> 8) & 0xFF,
-            self._axis & 0xFF,
-        ]) + cmd_payload
-        q = self._reader.register_tuner_waiter(seq)
-        try:
-            frame = encode(Channel.TUNER, seq, app)
+        with self._bus_lock:
+            seq = self._next_seq()
+            app = bytes([
+                int(op),
+                int(id_) & 0xFF, (int(id_) >> 8) & 0xFF,
+                self._axis & 0xFF,
+            ]) + cmd_payload
+            q = self._reader.register_tuner_waiter(seq)
             try:
-                self._reader.transport.send_bytes(frame)
-            except Exception as e:
-                if _is_transport_io_failure(e):
-                    raise _tuner_error_from_link_io(e) from e
-                raise
-            try:
-                body = q.get(timeout=timeout if timeout is not None
-                             else self.DEFAULT_TIMEOUT)
-            except Empty:
-                raise TunerError(f"timeout waiting for response (seq={seq})")
-            if body is None:
-                raise TunerError("reader stopped")
-            if len(body) < 2:
-                raise TunerError(
-                    f"response too short ({len(body)} bytes)")
-            status = struct.unpack("<b", body[:1])[0]
-            return TunerResponse(status=status, payload=body[2:])
-        finally:
-            self._reader.unregister_tuner_waiter(seq)
+                frame = encode(Channel.TUNER, seq, app)
+                try:
+                    self._reader.transport.send_bytes(frame)
+                except Exception as e:
+                    if _is_transport_io_failure(e):
+                        raise _tuner_error_from_link_io(e) from e
+                    raise
+                try:
+                    body = q.get(timeout=timeout if timeout is not None
+                                 else self.DEFAULT_TIMEOUT)
+                except Empty:
+                    raise TunerError(f"timeout waiting for response (seq={seq})")
+                if body is None:
+                    raise TunerError("reader stopped")
+                if len(body) < 2:
+                    raise TunerError(
+                        f"response too short ({len(body)} bytes)")
+                status = struct.unpack("<b", body[:1])[0]
+                return TunerResponse(status=status, payload=body[2:])
+            finally:
+                self._reader.unregister_tuner_waiter(seq)
 
     # --- High-level helpers -------------------------------------------------
 
@@ -408,6 +422,10 @@ class TunerClient:
 
     def erase_calibration(self) -> None:
         self._exec(ParamId.CMD_ERASE_NVS)
+
+    def ping(self, timeout: float = 0.35) -> None:
+        """Minimal EXEC for host link liveness — independent of tuner polls."""
+        self._exec(ParamId.CMD_PING, timeout=timeout)
 
     def reset_board(self, timeout: float = 1.2) -> None:
         """Ask firmware to `esp_restart()`. The link usually drops before

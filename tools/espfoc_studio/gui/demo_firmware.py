@@ -457,6 +457,8 @@ class DemoFirmware(threading.Thread):
         elif pid == int(ParamId.CMD_RESET_BOARD):
             self._log("board: host requested reset (demo — no real reboot)")
             self._send_response(seq, OK)
+        elif pid == int(ParamId.CMD_PING):
+            self._send_response(seq, OK)
         else:
             self._send_response(seq, ERR_INVALID_ARG)
 

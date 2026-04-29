@@ -13,18 +13,29 @@ menu "espFoC Settings"
             int "Regulator / runner task stack size (bytes)"
             default 3072
 
+        config ESP_FOC_PWM_RATE_HZ
+            int "PWM switching frequency [Hz] (MCPWM carrier)"
+            range 1000 100000
+            default 20000
+            help
+                Carrier frequency for espFoC MCPWM inverter drivers and for
+                control-loop timing (dt = 1/PWM). Build-time PI autotuning uses
+                the same value when ESP_FOC_USE_AUTOGEN_GAINS is enabled.
+
+        config ESP_FOC_DC_LINK_NOMINAL_MV
+            int "Nominal DC bus voltage [mV] (SVPWM / Ud Uq volt scaling)"
+            range 1000 60000
+            default 12000
+            help
+                Used by MCPWM inverter get_dc_link_voltage() when the constructor
+                dc_link_voltage argument is <= 0. Ud/Uq and SVPWM math assume the
+                same volt basis as this nominal rail; wrong values make small
+                tuner voltage commands map to the wrong modulation depth (e.g.
+                Q16_ONE=1 V treated as full bus made 0.1 V look like 10% PWM).
+
         config ESP_FOC_CUSTOM_MATH
             bool "Use espFoC Q16 fast math (LUT sin/cos, etc.)"
             default y
-
-        config ESP_FOC_VOLTAGE_LIMIT_LINF
-            bool "DQ voltage limit: use max(|vd|,|vq|) instead of hypot (ISR-safe, no isqrt)"
-            depends on ESP_FOC_CUSTOM_MATH
-            default n
-            help
-                When enabled, limiting compares/scales against max(|vd|,|vq|) instead of
-                sqrt(vd^2+vq^2). Bounded CPU (no u64 isqrt), slightly different geometry than
-                the circular limit — useful if the modulator path runs inside a tight ISR.
     endmenu
 
     menu "Scope (telemetry)"
@@ -78,21 +89,6 @@ menu "espFoC Settings"
                 pwm_rate / ESP_FOC_LOW_SPEED_DOWNSAMPLING in legacy path terms.
                 n: legacy 2.x task-sampled inner loop (lower bandwidth ceiling).
 
-        config ESP_FOC_PREDICTOR_ALPHA_X1000
-            int "ISR path: angle predictor alpha (×1000)"
-            depends on ESP_FOC_ISR_HOT_PATH
-            range 1 1000
-            default 300
-            help
-                Alpha of the alpha-beta angle tracker. Default 300 → 0.30.
-
-        config ESP_FOC_PREDICTOR_BETA_X1000
-            int "ISR path: angle predictor beta (×1000)"
-            depends on ESP_FOC_ISR_HOT_PATH
-            range 1 1000
-            default 50
-            help
-                Beta of the alpha-beta tracker. Default 50 → 0.05.
     endmenu
 
     menu "Diagnostics"
@@ -111,6 +107,15 @@ menu "espFoC Settings"
             default n
             help
                 Compiles the tuner; attach axes and handle requests from UART/USB.
+
+        config ESP_FOC_TUNER_ALWAYS_OVERRIDE_VOLTAGE_MODE
+            bool "Voltage mode + tuner override latched (bring-up)"
+            depends on ESP_FOC_TUNER_ENABLE
+            default n
+            help
+                Start with skip_torque_control enabled (open-loop Ud/Uq, no current PI).
+                After a successful CMD_ALIGN_AXIS, tuner override turns on automatically;
+                CMD_OVERRIDE_OFF is ignored so host motion writes stay enabled.
 
         choice ESP_FOC_TUNER_BRIDGE
             prompt "Tuner / scope link"
@@ -174,11 +179,6 @@ menu "espFoC Settings"
             string "JSON profile name under scripts/motors/"
             depends on ESP_FOC_USE_AUTOGEN_GAINS
             default "mf400525t"
-
-        config ESP_FOC_AUTOGEN_PWM_RATE_HZ
-            int "Autotuner assumed PWM frequency [Hz]"
-            depends on ESP_FOC_USE_AUTOGEN_GAINS
-            default 20000
 
         config ESP_FOC_AUTOGEN_DECIMATION
             int "Autotuner assumed current-loop decimation (vs PWM rate)"

@@ -8,7 +8,6 @@
 #include "espFoC/esp_foc_units_q16.h"
 #include "espFoC/utils/pid_controller.h"
 #include "espFoC/utils/biquad_q16.h"
-#include "espFoC/utils/angle_predictor_q16.h"
 #include "espFoC/drivers/inverter_interface.h"
 #include "espFoC/drivers/current_sensor_interface.h"
 #include "espFoC/drivers/rotor_sensor_interface.h"
@@ -82,11 +81,19 @@ struct esp_foc_axis_s {
     q16_t dt;
     q16_t inv_dt;
 
+    /* Encoder: counts/s (Q16) from Δcounts × outer-loop sample rate. */
     q16_t current_speed;
+    /* Last `read_counts`: engineering counts in Q16 (e.g. 0..4095 for AS5600). */
     q16_t rotor_shaft_ticks;
+    /* Encoder position × natural_direction, same count units as read_counts. */
     q16_t rotor_position;
     q16_t rotor_position_prev;
-    q16_t rotor_elec_angle;
+    /* At init: q16_from_float(1/cpr); shaft_rev = q16_mul(counts_q16, this). */
+    q16_t encoder_inv_cpr_q16;
+    /* At init: 2*pi*pp/cpr — legacy path; ω_e from encoder counts/s. */
+    q16_t encoder_counts_speed_to_omega_e_q16;
+    /* Outer loop writes (encoder-direct θe); ISR hot path reads — volatile for tear-free visibility. */
+    volatile q16_t rotor_elec_angle;
 
     int downsampling_low_speed;
     int skip_torque_control;
@@ -120,11 +127,6 @@ struct esp_foc_axis_s {
     q16_t current_filter_fs_hz_q16;
 
 #if defined(CONFIG_ESP_FOC_ISR_HOT_PATH)
-    /* Plan #2: full FOC pipeline runs inside the PWM ISR. The slow
-     * encoder is read from the outer task, fed into the alpha-beta
-     * predictor; the ISR queries predict() to get a fresh extrapolated
-     * electrical angle every PWM cycle. */
-    esp_foc_angle_predictor_q16_t angle_predictor;
     /* ADC ISR atomic-writes Clarke output here; PWM ISR reads. Both
      * are 32-bit aligned q16, single-instruction stores on Xtensa /
      * RISC-V — no torn-read concern. The volatile keeps the compiler

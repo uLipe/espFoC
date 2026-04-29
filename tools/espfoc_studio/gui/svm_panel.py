@@ -75,7 +75,7 @@ class SvmPanel(QWidget):
     WAVEFORM_WINDOW_S = 0.5   # visible span in the three-phase plot
     AUTOSCALE_ALPHA = 0.04    # EWMA weight for hexagon radius
     RENDER_INTERVAL_MS = 50   # 20 FPS — smooth but lighter than the scope
-    INBOX_CAP = 512           # bound the producer/consumer queue
+    INBOX_CAP = 256           # bound scope spam — drop older frames first
     PU_FLOOR = 1e-4          # min divisor for per-unit; keeps [-1,1] stable
     MAX_FRAMES_PER_UI_TICK = ScopePanel.MAX_FRAMES_PER_UI_TICK
 

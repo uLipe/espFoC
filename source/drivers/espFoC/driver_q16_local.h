@@ -40,14 +40,6 @@ static inline uint32_t esp_foc_q16_duty_ticks(q16_t v_q16, uint32_t period_half_
     return (uint32_t)(((uint64_t)(uint32_t)v * (uint64_t)period_half_ticks) >> 16);
 }
 
-static inline q16_t esp_foc_q16_from_counts_mod(uint32_t counts_mod, uint32_t cpr)
-{
-    if (cpr == 0u) {
-        return 0;
-    }
-    return (q16_t)(((uint64_t)(counts_mod % cpr) * (uint64_t)Q16_ONE) / (uint64_t)cpr);
-}
-
 #ifdef __cplusplus
 }
 #endif

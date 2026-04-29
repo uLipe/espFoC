@@ -44,7 +44,9 @@
  * @param gpio_enable  Gate enable GPIO: -1 to skip (no EN output).  If >= 0, that pin, active
  *                    high: drive HIGH=enabled, LOW=disabled.  If < -1 (e.g. -8), use GPIO (-arg)
  *                    with inverted drive (active low).
- * @param dc_link_voltage DC bus voltage used for duty scaling
+ * @param dc_link_voltage Nominal DC bus [V] for FOC (get_dc_link_voltage). Must match
+ *                       the real supply so tuner Ud/Uq in volts map correctly; use <= 0
+ *                       to fall back to CONFIG_ESP_FOC_DC_LINK_NOMINAL_MV.
  * @param port         Axis/port index (0..CONFIG_NOOF_AXIS-1). Also selects MCPWM group id.
  *
  * @return Pointer to esp_foc_inverter_t interface, or NULL on error.

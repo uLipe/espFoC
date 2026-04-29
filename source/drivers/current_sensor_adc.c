@@ -29,7 +29,7 @@
 #include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/utils/biquad_q16.h"
 #include "espFoC/utils/foc_math_q16.h"
-#include "espFoC/driver_iq31_local.h"
+#include "espFoC/driver_q16_local.h"
 #include "espFoC/current_sensor_adc.h"
 #include "hal/adc_hal.h"
 #include "esp_log.h"

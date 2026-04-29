@@ -37,8 +37,9 @@ The window opens with:
 - an **Analysis** tab that redraws the predicted step response, Bode
   magnitude, pole/zero map and root locus every time the motor or gain
   parameters change;
-- a **Scope** tab that streams the simulated plant response so you can
-  watch a step command converge in real time when the override is on.
+- **Scope**, **Sensors**, **SVM Hexagon**, and **Generate App** tabs.
+  The **Generate App** tab (template codegen) exists **only** in `--demo`;
+  `python -m espfoc_studio.gui --port …` omits it.
 
 ## Talk to real hardware
 

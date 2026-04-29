@@ -37,8 +37,11 @@ class SerialTransport(Transport):
     def send_bytes(self, data: bytes) -> None:
         if not data:
             return
-        self._serial.write(data)
-        self._serial.flush()
+        try:
+            self._serial.write(data)
+            self._serial.flush()
+        except (OSError, TypeError, AttributeError, ValueError) as e:
+            raise OSError(f"serial send failed: {e}") from e
 
     def read_bytes(self, max_bytes: int, timeout: Optional[float] = None) -> bytes:
         if timeout is not None:

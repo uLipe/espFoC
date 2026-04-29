@@ -12,7 +12,7 @@
 #include "freertos/task.h"
 #include "espFoC/esp_foc_tuner.h"
 #include "espFoC/esp_foc_axis_tuning.h"
-#include "espFoC/esp_foc_axis.h"
+#include "espFoC/esp_foc.h"
 #include "espFoC/esp_foc_link.h"
 #include "espFoC/esp_foc_calibration.h"
 #include "espFoC/utils/esp_foc_q16.h"
@@ -221,6 +221,7 @@ static esp_foc_err_t handle_write(esp_foc_axis_t *axis,
             return ESP_FOC_ERR_INVALID_ARG;
         }
         axis->motor_pole_pairs = (int)pp;
+        esp_foc_axis_refresh_encoder_q16_scales(axis);
         {
             char msg[56];
             (void)snprintf(msg, sizeof(msg),
@@ -347,10 +348,15 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
     }
 
     if (id == ESP_FOC_TUNER_CMD_OVERRIDE_OFF) {
+#if defined(CONFIG_ESP_FOC_TUNER_ALWAYS_OVERRIDE_VOLTAGE_MODE)
+        (void)axis;
+        return ESP_FOC_OK;
+#else
         esp_foc_critical_enter();
         axis->tuner_override.active = false;
         esp_foc_critical_leave();
         return ESP_FOC_OK;
+#endif
     }
 
     if (id == ESP_FOC_TUNER_CMD_ALIGN_AXIS) {
@@ -363,6 +369,15 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
             tuner_log(axis->natural_direction == Q16_ONE
                       ? "alignment: complete (direction = CW)"
                       : "alignment: complete (direction = CCW)");
+#if defined(CONFIG_ESP_FOC_TUNER_ALWAYS_OVERRIDE_VOLTAGE_MODE)
+            esp_foc_critical_enter();
+            axis->tuner_override.target_id = 0;
+            axis->tuner_override.target_iq = 0;
+            axis->tuner_override.target_ud = 0;
+            axis->tuner_override.target_uq = 0;
+            axis->tuner_override.active = true;
+            esp_foc_critical_leave();
+#endif
         } else {
             tuner_log("alignment: failed");
         }
@@ -434,6 +449,7 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
                 int32_t ppn = esp_foc_calibration_get_pole_pairs(&data);
                 if (ppn >= 1 && ppn <= 64) {
                     axis->motor_pole_pairs = (int)ppn;
+                    esp_foc_axis_refresh_encoder_q16_scales(axis);
                 }
             }
             {
@@ -482,6 +498,13 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
                   ? "calibration: NVS namespace erased"
                   : "calibration: erase failed");
         return err;
+    }
+
+    if (id == ESP_FOC_TUNER_CMD_PING) {
+        (void)axis;
+        (void)payload;
+        (void)payload_len;
+        return ESP_FOC_OK;
     }
 
     if (id == ESP_FOC_TUNER_CMD_RESET_BOARD) {

@@ -4,6 +4,7 @@
  * Copyright (c) 2021 Felipe Neves
  */
 
+#include "esp_attr.h"
 #include "espFoC/utils/angle_predictor_q16.h"
 #include "espFoC/utils/foc_math_q16.h"
 
@@ -144,7 +145,7 @@ void esp_foc_angle_predictor_update_q16(esp_foc_angle_predictor_q16_t *p,
     p->t_last_us = t_meas_us;
 }
 
-q16_t esp_foc_angle_predictor_predict_q16(
+IRAM_ATTR q16_t esp_foc_angle_predictor_predict_q16(
     const esp_foc_angle_predictor_q16_t *p,
     uint64_t t_now_us)
 {

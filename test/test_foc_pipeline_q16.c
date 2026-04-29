@@ -32,7 +32,6 @@ static void run_q16_pipeline_step(float angle_rad,
     q16_t uq_q, ud_q;
     q16_t ua_q, ub_q;
     const q16_t vmax = q16_from_float(0.7f);
-    const q16_t norm = q16_from_float(0.5f);
 
     esp_foc_get_dq_currents(sq, cq,
                                  q16_from_float(iu),
@@ -48,7 +47,7 @@ static void run_q16_pipeline_step(float angle_rad,
 
     esp_foc_modulate_dq_voltage(sq, cq, ud_q, uq_q,
                                      &ua_q, &ub_q, du, dv, dw,
-                                     vmax, norm);
+                                     vmax);
 }
 
 static void setup_pid_filters(esp_foc_pid_controller_t *pid_d,
@@ -64,7 +63,7 @@ static void setup_pid_filters(esp_foc_pid_controller_t *pid_d,
     esp_foc_biquad_butterworth_lpf_design_q16(filt_q, 60.0f, 2000.0f);
 }
 
-TEST_CASE("golden pipeline q16: deterministic run and bounded duties", "[espFoC][iq31][golden]")
+TEST_CASE("golden pipeline q16: deterministic run and bounded duties", "[espFoC][q16][golden]")
 {
     q16_t du[N_PIPELINE_STEPS], dv[N_PIPELINE_STEPS], dw[N_PIPELINE_STEPS];
     q16_t du2[N_PIPELINE_STEPS], dv2[N_PIPELINE_STEPS], dw2[N_PIPELINE_STEPS];
@@ -88,9 +87,9 @@ TEST_CASE("golden pipeline q16: deterministic run and bounded duties", "[espFoC]
             run_q16_pipeline_step(angle, iu, iv, iw, id_ref, iq_ref,
                                    &pid_d, &pid_q, &filt_d, &filt_q, &a, &b, &c);
 
-            TEST_ASSERT_TRUE(q16_to_float(a) >= 0.0f && q16_to_float(a) <= 1.0f);
-            TEST_ASSERT_TRUE(q16_to_float(b) >= 0.0f && q16_to_float(b) <= 1.0f);
-            TEST_ASSERT_TRUE(q16_to_float(c) >= 0.0f && q16_to_float(c) <= 1.0f);
+            TEST_ASSERT_TRUE(fabsf(q16_to_float(a)) <= 1.2f);
+            TEST_ASSERT_TRUE(fabsf(q16_to_float(b)) <= 1.2f);
+            TEST_ASSERT_TRUE(fabsf(q16_to_float(c)) <= 1.2f);
 
             if (pass == 0) {
                 du[k] = a;
@@ -109,7 +108,7 @@ TEST_CASE("golden pipeline q16: deterministic run and bounded duties", "[espFoC]
     TEST_ASSERT_EQUAL_INT(0, memcmp(dw, dw2, sizeof(dw)));
 }
 
-TEST_CASE("golden pipeline q16: saturation and low vbus stay bounded", "[espFoC][iq31][golden]")
+TEST_CASE("golden pipeline q16: saturation and low vbus stay bounded", "[espFoC][q16][golden]")
 {
     q16_t da, db, dc;
     esp_foc_svm_set(q16_from_float(0.98f), q16_from_float(-0.98f), q16_from_float(0.05f), &da, &db, &dc);

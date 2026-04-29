@@ -219,44 +219,22 @@ Three pieces work together:
 
 * **PWM ISR** (`foc_hot_isr` in
   `source/motor_control/control_strategy/esp_foc_control_current_mode_sensored.c`):
-  reads the published currents, asks the angle predictor for a fresh
-  electrical angle, runs Park + PI + inverse Park + SVPWM, calls
-  `set_voltages`, optionally pushes a scope frame via
+  reads the published currents, uses **`rotor_elec_angle`** for Park,
+  inverse Park, and SVPWM, runs the current PI (unless voltage mode),
+  calls `set_voltages`, optionally pushes a scope frame via
   `esp_foc_scope_data_push_from_isr()`, then decrements the
   downsample counter and notifies the outer task on rollover.
 
-* **Outer task** (renamed in spirit, same symbol
+* **Outer task** (same symbol
   `do_current_mode_sensored_low_speed_loop`): waits on the ISR's
   notification, reads the slow encoder (AS5600 over I2C, AS5048
-  over SPI, or PCNT-direct), folds the new electrical angle into
-  the predictor under critical section, runs the velocity smoothing
+  over SPI, or PCNT-direct), updates **`rotor_elec_angle`**, runs the velocity smoothing
   biquad, then notifies the regulator task so the user
   `regulation_callback` can refresh the targets.
 
-The slow encoder problem is solved with an **alpha-beta angle
-tracker** (`include/espFoC/utils/angle_predictor_q16.h`):
-
-```
-predict(t_now):
-    dt = t_now - t_last
-    return wrap_2pi(theta_est + omega_est * dt)
-
-update(theta_meas, t_meas):
-    dt = t_meas - t_last
-    theta_pred = wrap_2pi(theta_est + omega_est * dt)
-    err = wrap_pi(theta_meas - theta_pred)            in (-pi, +pi]
-    theta_est = wrap_2pi(theta_pred + alpha * err)
-    omega_est += (beta / dt) * err
-```
-
-Default gains `alpha = 0.30`, `beta = 0.05` (close to critically
-damped at 2 kHz update rate; rule of thumb is
-`beta = alpha^2 / (2 - alpha)`). Override via
-`CONFIG_ESP_FOC_PREDICTOR_ALPHA_X1000` /
-`CONFIG_ESP_FOC_PREDICTOR_BETA_X1000` (stored x1000 because Kconfig
-int does not take floats). The tracker degrades gracefully when the
-encoder hangs — the unit tests assert the predicted angle drift
-stays under 0.5 rad after 50 ms with no updates at 60 Hz electrical.
+An **alpha-beta angle tracker** (`include/espFoC/utils/angle_predictor_q16.h`)
+exists for experiments and is covered by unit tests; it is **not** integrated
+into this ISR pipeline.
 
 When the ADC sample is older than one PWM period (drop / 50 kHz cap
 on plain ESP32 with PWM > 25 kHz), the ISR reuses the latest
@@ -353,15 +331,15 @@ The on-flash format is documented in
 nothing except host TunerStudio: it boots, parks the motor at zero
 current, attaches the axis to the runtime tuner and waits. It also
 overrides the weak `esp_foc_tuner_firmware_type()` hook to return
-`'TSGX'` so the GUI can detect the target on connect and surface
-the **Generate App** tab.
+`'TSGX'` for host identification.
 
-Pin map lives entirely in `Kconfig.projbuild`:
+PWM carrier / loop timing: `ESP_FOC_PWM_RATE_HZ` under **espFoC Settings → Core**
+(shared with MCPWM drivers and build-time PI autotuning). Pin map is in
+`main/Kconfig.projbuild`:
 
 ```
 TUNER_TARGET_PWM_U_HI / V_HI / W_HI    high-side pins
 TUNER_TARGET_PWM_U_LO / V_LO / W_LO    low-side pins
-TUNER_TARGET_PWM_FREQ_HZ               PWM rate
 TUNER_TARGET_DC_LINK_V                 link voltage
 TUNER_TARGET_ENC_SDA / SCL             AS5600 I2C
 TUNER_TARGET_POLE_PAIRS                motor identity
@@ -371,26 +349,91 @@ USB-CDC is the default transport on S2 / S3 / P4; switch to UART
 under `Component config → espFoC Settings → Tuner transport bridge`
 when targeting plain ESP32.
 
-## Generate App from TunerStudio
+## Generate App (GUI) and offline codegen
 
-The **Hardware** and **Generate App** tabs together turn a
-TunerStudio session into a production-ready IDF project. Workflow:
+In the PySide GUI, **Hardware** + **Generate App** are available only when you
+start TunerStudio with **`python -m espfoc_studio.gui --demo`** (embedded
+`DemoFirmware`). A normal **`--port`** session shows tuning, analysis, scope,
+and SVM tabs without codegen.
 
-1. Connect to the bring-up board running `tuner_studio_target`.
-2. Use the Tuning + Analysis tabs to dial Kp/Ki/integrator_limit in.
-3. Click **Save to NVS** so the bring-up board itself remembers
-   the calibration (handy if you keep iterating).
-4. Open the **Hardware** tab and fill in the production pin map.
-5. Open the **Generate App** tab, type a project name, optionally
-   override the output directory, click **Generate**.
-
-The generator under `tools/espfoc_studio/codegen/sensored_app.py`
-walks the `templates/sensored_app/*.tmpl` tree, substitutes the
-live gains + Hardware values, and writes a self-contained IDF
+`generate_sensored_app()` in `tools/espfoc_studio/codegen/sensored_app.py`
+walks the `templates/sensored_app/*.tmpl` tree, substitutes motor /
+gain / hardware fields from `HardwareConfig`, and writes a self-contained IDF
 project plus, when `nvs_partition_gen.py` is on `$IDF_PATH`, a
 bit-exact `nvs_calibration.bin` you can flash into the production
 NVS partition. The generated app keeps the runtime tuner enabled
 so the operator can re-tune later without rebuilding firmware.
+
+## Debugging: small `Uq` but SVPWM hits the rails / motor buzzes
+
+Symptoms: you command a modest **feed-forward** voltage on the Q axis
+(`WRITE_TARGET_UQ`, e.g. 0.1 “volts” in the tuner wire format) with
+`Ud = 0`, expect smooth torque and rotation, but the three phase duties
+look stuck near **0 % or 100 %** and the shaft **vibrates**.
+
+If **`skip_torque_control` is always on** (open-loop `Ud`/`Uq` only), the
+current PI does **not** run — ignore §1 below and focus on **DC-link
+normalization (§2), electrical angle / encoder (§3), and hardware**.
+
+### 1. When current PI *is* enabled: feed-forward vs PI output
+
+Skip this subsection if you already run **open-loop voltage only**
+(`skip_torque_control == 1`).
+
+Unless `CONFIG_ESP_FOC_TUNER_ALWAYS_OVERRIDE_VOLTAGE_MODE` is enabled,
+`axis->skip_torque_control` defaults to **0** at init — the **current
+controllers are active**. In that mode `target_u_q` is **not** the only
+term that drives the inverter: the Q-axis PI computes voltage from
+`(target_i_q − i_q)` and **adds** `target_u_q` as feed-forward:
+
+```c
+u_q = pid(target_i_q, i_q) + target_u_q;  // sensored ISR path
+```
+
+So even with `Uq = 0.1`, **noise, wrong Clarke/Park polarity, or a large
+`target_i_q`** can push the PI output to **`±max_voltage`**, which clips
+in `esp_foc_limit_voltage_q16` and shows up as SVPWM **saturation**.
+
+**Bring-up checklist:** in TunerStudio / host, enable **“Open-loop voltage
+(no current PI)”** (`WRITE_SKIP_TORQUE`) and set **`target_i_q = 0`**
+when you only want to probe voltage injection. Re-read `skip_torque`
+from the device to confirm.
+
+### 2. DC-link volts vs SVPWM duty (`set_voltages`)
+
+The MCPWM drivers report **`get_dc_link_voltage()`** from the nominal rail passed to
+`inverter_*_new(..., dc_link_voltage, ...)` (or from **`ESP_FOC_DC_LINK_NOMINAL_MV`**
+in menuconfig when that argument is ≤ 0). **`esp_foc_initialize_axis`** uses it so
+**Ud/Uq from the tuner (volts)** share the same engineering basis as **`1/Vbus`**
+inside `esp_foc_svm_set`. Historically the drivers wrongly returned **`Q16_ONE`**
+(1 V) while ignoring the constructor — so e.g. **0.1 V** looked like **10 %** of a
+1 V bus instead of **0.1/24** of a 24 V bus.
+
+**`esp_foc_modulate_dq_voltage`** outputs **three phase voltages** (same units as
+Ud/Uq, typically volts Q16). **`set_voltages`** receives those **phase voltages**;
+the MCPWM driver applies **`esp_foc_svm_phase_volts_to_duties`** internally using
+**`get_dc_link_voltage()`**, then writes comparator ticks for **[0, 1]** duty.
+
+### 3. Angle / encoder
+
+The PWM ISR uses **`rotor_elec_angle`** from the outer loop each tick (encoder
+rate is slower than PWM — expect some torque ripple at high bandwidth unless the
+sensor is fast enough).
+
+Wrong **pole pairs**, **CPR**, **alignment offset**, or a noisy angle stream
+still causes **torque ripple** and wrong torque direction (for example
+negative **Vq** not opposing positive **Vq** as expected): verify θe vs mechanical rotation on a
+scope, **natural_direction**, UVW wiring, and alignment. Open-loop **Vq** only
+tracks torque sign if θe matches the real field angle.
+
+### 4. What to put on the scope
+
+Wire channels for **`u_u`, `u_v`, `u_w`** (normalized duties), **`u_q`**
+command if exposed, and rotor-related quantities from your `esp_foc_scope`
+tap points. If **`u_q` looks tiny** but phase duties are rail-to-rail:
+with **current PI off**, look at **angle / encoder**, scaling, or the
+inverter path — not the PI. With **current PI on**, also suspect
+**integrator wind-up** and noisy `i_q`.
 
 ## Cross-validation Python ↔ C
 
