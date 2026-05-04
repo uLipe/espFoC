@@ -112,6 +112,39 @@ static inline void esp_foc_apply_bias_q16(q16_t *v_alpha, q16_t *v_beta)
     *v_beta = q16_add(q16_mul(*v_beta, Q16_HALF), Q16_HALF);
 }
 
+/** Shaft fraction [0, 1) / rev (Q16) → θ_mech [rad], then θ_e = normalize(pp × θ_mech). */
+static inline q16_t esp_foc_shaft_frac_to_elec_angle_rad_q16(q16_t pos_shaft_rev_q16,
+                                                             int pole_pairs)
+{
+    q16_t theta_mech = q16_mul(pos_shaft_rev_q16, Q16_TWO_PI);
+    q16_t theta_elec = q16_mul(theta_mech, q16_from_int(pole_pairs));
+    return q16_normalize_angle_rad(theta_elec);
+}
+
+/* Whole microseconds on the scope wire as Q16 float (host: raw/65536). Integer-only
+ * so PWM ISR paths never touch the FPU (Xtensa saves FP context elsewhere). */
+static inline q16_t hot_path_us_elapsed_to_q16(uint64_t el_us)
+{
+    const uint64_t cap = 32767ULL; /* INT32_MAX / Q16_ONE */
+    if (el_us > cap) {
+        el_us = cap;
+    }
+    return (q16_t)((int64_t)el_us * (int64_t)Q16_ONE);
+}
+
+static inline q16_t calc_time_isr_q16(uint64_t hot_path_t0, uint64_t now)
+{
+    uint64_t hot_path_t1 = now;
+    uint64_t el = (hot_path_t1 >= hot_path_t0)
+                        ? (hot_path_t1 - hot_path_t0)
+                        : 0U;
+    if (el > 10000000U) {
+        el = 10000000U;
+    }
+
+    return hot_path_us_elapsed_to_q16(el);
+}
+
 #ifdef CONFIG_ESP_FOC_COMP_THI
 static inline void esp_foc_third_harmonic_injection_q16(q16_t *v_alpha, q16_t *v_beta)
 {

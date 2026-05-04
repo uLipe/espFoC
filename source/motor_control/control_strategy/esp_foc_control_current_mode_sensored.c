@@ -32,31 +32,11 @@
 
 #if defined(CONFIG_ESP_FOC_SCOPE)
 q16_t esp_foc_debug_scope_hot_path_dt_us_q16;
-
-/* Whole microseconds on the scope wire as Q16 float (host: raw/65536). Integer-only
- * so PWM ISR paths never touch the FPU (Xtensa saves FP context elsewhere). */
-static inline q16_t hot_path_us_elapsed_to_q16(uint64_t el_us)
-{
-    const uint64_t cap = 32767ULL; /* INT32_MAX / Q16_ONE */
-    if (el_us > cap) {
-        el_us = cap;
-    }
-    return (q16_t)((int64_t)el_us * (int64_t)Q16_ONE);
-}
 #endif
 
 static const char * tag = "ESP_FOC_CONTROL";
 
 #if defined(CONFIG_ESP_FOC_ISR_HOT_PATH)
-/** Shaft fraction [0, 1) / rev (Q16) → θ_mech [rad], then θ_e = normalize(pp × θ_mech). */
-static inline q16_t esp_foc_shaft_frac_to_elec_angle_rad_q16(q16_t pos_shaft_rev_q16,
-                                                             int pole_pairs)
-{
-    q16_t theta_mech = q16_mul(pos_shaft_rev_q16, Q16_TWO_PI);
-    q16_t theta_elec = q16_mul(theta_mech, q16_from_int(pole_pairs));
-    return q16_normalize_angle_rad(theta_elec);
-}
-
 /* ============================================================
  *  Plan #2: full FOC pipeline runs inside the PWM ISR.
  *
@@ -148,16 +128,7 @@ IRAM_ATTR static void foc_hot_isr(void *data)
     /* 10) Optionally snapshot every wired channel into the scope ring.
      *    The from_isr variant uses xTaskNotifyGiveFromISR on rollover. */
 #if defined(CONFIG_ESP_FOC_SCOPE)
-    {
-        uint64_t hot_path_t1 = esp_foc_now_useconds();
-        uint64_t el = (hot_path_t1 >= hot_path_t0)
-                          ? (hot_path_t1 - hot_path_t0)
-                          : 0U;
-        if (el > 10000000U) {
-            el = 10000000U;
-        }
-        esp_foc_debug_scope_hot_path_dt_us_q16 = hot_path_us_elapsed_to_q16(el);
-    }
+    esp_foc_debug_scope_hot_path_dt_us_q16 = calc_time_isr_q16(hot_path_t0,  esp_foc_now_useconds());
     esp_foc_scope_data_push_from_isr();
 #endif
 
@@ -239,7 +210,7 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
          *    consistent dt. */
         q16_t dtheta = q16_sub(pos, axis->rotor_position_prev);
         q16_t raw_speed = q16_mul(dtheta,
-                                   axis->torque_controller[0].inv_dt);
+                                   axis->inv_dt * q16_from_int(ESP_FOC_LOW_SPEED_DOWNSAMPLING));
         axis->current_speed = esp_foc_biquad_q16_update(
                                   &axis->velocity_filter, raw_speed);
         axis->rotor_position_prev = pos;
