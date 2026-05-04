@@ -13,8 +13,8 @@
 static void setup_both(esp_foc_pid_controller_t *pf, esp_foc_pid_controller_t *pi,
                        float kp, float ki, float kd, float dt, float out_min, float out_max, float int_lim)
 {
-    esp_foc_pid_init_from_float(pf, kp, ki, kd, dt, out_min, out_max, int_lim);
-    esp_foc_pid_init_from_float(pi, kp, ki, kd, dt, out_min, out_max, int_lim);
+    esp_foc_pid_init_from_float(pf, kp, ki, kd, 1.0f, dt, out_min, out_max, int_lim);
+    esp_foc_pid_init_from_float(pi, kp, ki, kd, 1.0f, dt, out_min, out_max, int_lim);
 }
 
 static void assert_q16_near_float(float expected_float, q16_t got)

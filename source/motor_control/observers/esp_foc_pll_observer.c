@@ -119,7 +119,7 @@ static int pll_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs
     }
 
     est->omega_est = q16_add(q16_mul(est->kp_q16, est->theta_error), est->integral);
-    est->theta_est = q16_normalize_angle_rad(
+    est->theta_est = q16_normalize_angle(
         q16_add(est->theta_est, q16_mul(est->omega_est, est->k_dtheta_rad_q16)));
 
     if ((q16_abs(q16_sub(est->theta_error, est->prev_err)) <= est->lock_var_q16) &&
@@ -154,7 +154,7 @@ static void pll_observer_reset(esp_foc_observer_t *self, q16_t offset)
 {
     angle_estimator_pll_t *est = __containerof(self, angle_estimator_pll_t, interface);
     est->integral = 0;
-    est->theta_est = q16_normalize_angle_rad(q16_add(est->theta_est, offset));
+    est->theta_est = q16_normalize_angle(q16_add(est->theta_est, offset));
     est->integrator_freeze_time = est->integrator_freeze_ticks;
 }
 

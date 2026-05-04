@@ -3,7 +3,7 @@ menu "espFoC Settings"
     menu "Core"
         config NOOF_AXIS
             int "Number of motor outputs"
-            range 1 4
+            range 1 2
             default 1
             help
                 Number of FOC channel sets. Each set uses a full inverter,
@@ -15,7 +15,7 @@ menu "espFoC Settings"
 
         config ESP_FOC_PWM_RATE_HZ
             int "PWM switching frequency [Hz] (MCPWM carrier)"
-            range 1000 100000
+            range 10000 40000
             default 20000
             help
                 Carrier frequency for espFoC MCPWM inverter drivers and for
@@ -71,34 +71,32 @@ menu "espFoC Settings"
     menu "Control loop"
         config ESP_FOC_CURRENT_FILTER_CUTOFF_HZ
             int "Isensor biquad low-pass cutoff [Hz]"
-            default 300
+            range 500 10000
+            default 8000
             help
                 Cutoff of the 2nd-order Butterworth on raw ADC before gain scaling.
                 Overridable at runtime when NVS calibration is used.
 
         config ESP_FOC_VELOCITY_FILTER_CUTOFF_HZ
             int "Encoder velocity biquad cutoff [Hz]"
-            default 50
-
-        config ESP_FOC_ISR_HOT_PATH
-            bool "Run inner current loop in PWM timer ISR (full rate)"
-            default y
-            help
-                y: Park / current PI / inverse Park / set_voltages at PWM rate
-                (default 20 kHz). The user regulation task still runs at
-                pwm_rate / ESP_FOC_LOW_SPEED_DOWNSAMPLING in legacy path terms.
-                n: legacy 2.x task-sampled inner loop (lower bandwidth ceiling).
+            range 100 1000
+            default 200
 
     endmenu
 
     menu "Diagnostics"
         config ESP_FOC_DEBUG_CORE_TIMING
-            bool "GPIO pulse around the outer (slow) control loop (timing)"
-            default n
+            bool "GPIO pulse around the high speed control loop (timing)"
+            default y
             help
-                Calls esp_foc_debug_pin_set/clear in the high-level loop. You must
-                call esp_foc_debug_pin_init(gpio) once in application start; the
-                GPIO is not set from this menu.
+                Calls esp_foc_debug_pin_set/clear in the high-speed loop.
+
+        config ESP_FOC_DEBUG_PIN
+            int "GPIO number used for output hot path pulse"
+            depends on ESP_FOC_DEBUG_CORE_TIMING
+            range 0 63
+            default 4
+
     endmenu
 
     menu "Tuner, bridges, NVS"
@@ -183,8 +181,7 @@ menu "espFoC Settings"
         config ESP_FOC_AUTOGEN_DECIMATION
             int "Autotuner assumed current-loop decimation (vs PWM rate)"
             depends on ESP_FOC_USE_AUTOGEN_GAINS
-            default 1 if ESP_FOC_ISR_HOT_PATH
-            default 20
+            default 1
             help
                 Current-loop fs = PWM / decimation. ISR_HOT_PATH = 1:1; legacy
                 task loop matches ESP_FOC_LOW_SPEED_DOWNSAMPLING (20) by default.

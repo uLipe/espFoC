@@ -126,14 +126,12 @@ struct esp_foc_axis_s {
     q16_t current_filter_fc_hz_q16;
     q16_t current_filter_fs_hz_q16;
 
-#if defined(CONFIG_ESP_FOC_ISR_HOT_PATH)
     /* ADC ISR atomic-writes Clarke output here; PWM ISR reads. Both
      * are 32-bit aligned q16, single-instruction stores on Xtensa /
      * RISC-V — no torn-read concern. The volatile keeps the compiler
      * from caching the read across loop iterations. */
     volatile q16_t latest_i_alpha;
     volatile q16_t latest_i_beta;
-#endif
 
     esp_foc_inverter_t *inverter_driver;
     esp_foc_rotor_sensor_t *rotor_sensor_driver;

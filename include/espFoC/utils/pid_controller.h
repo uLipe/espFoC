@@ -17,6 +17,7 @@ typedef struct {
     q16_t kp;
     q16_t ki;
     q16_t kd;
+    q16_t ke;
 
     int64_t integrator;
     q16_t prev_error;
@@ -38,7 +39,7 @@ static inline q16_t esp_foc_pid_update(esp_foc_pid_controller_t *self,
                                        q16_t reference,
                                        q16_t measure)
 {
-    q16_t err = q16_sub(reference, measure);
+    q16_t err = q16_sub(reference, q16_mul(measure, self->ke));
     int64_t p = ((int64_t)self->kp * (int64_t)err) >> 16;
     int64_t derr = (int64_t)err - (int64_t)self->prev_error;
     int64_t d = ((int64_t)self->kd * derr) >> 16;
@@ -79,13 +80,14 @@ static inline float esp_foc_pid_update_float(esp_foc_pid_controller_t *self,
 }
 
 static inline void esp_foc_pid_init_from_float(esp_foc_pid_controller_t *self,
-                                               float kp, float ki, float kd,
+                                               float kp, float ki, float kd, float ke,
                                                float dt, float out_min, float out_max,
                                                float int_lim)
 {
     self->kp = q16_from_float(kp);
     self->ki = q16_from_float(ki);
     self->kd = q16_from_float(kd);
+    self->ke = q16_from_float(ke);
     self->dt = q16_from_float(dt);
     self->inv_dt = (dt > 1e-20f) ? q16_from_float(1.0f / dt) : 0;
     self->min_output_value = q16_from_float(out_min);

@@ -36,9 +36,8 @@ q16_t esp_foc_debug_scope_hot_path_dt_us_q16;
 
 static const char * tag = "ESP_FOC_CONTROL";
 
-#if defined(CONFIG_ESP_FOC_ISR_HOT_PATH)
 /* ============================================================
- *  Plan #2: full FOC pipeline runs inside the PWM ISR.
+ * full FOC pipeline runs inside the PWM ISR.
  *
  *  Per tick: read the previous completed conversion (n-1) from
  *  latest_i_alpha / latest_i_beta, then re-arm the shunt ADC so the
@@ -54,12 +53,16 @@ static const char * tag = "ESP_FOC_CONTROL";
  *  in esp_foc_iq31.c covers that.
  * ============================================================ */
 
-IRAM_ATTR static void foc_hot_isr(void *data)
+static void foc_hot_isr(void *data)
 {
-    esp_foc_axis_t *axis = (esp_foc_axis_t *)data;
+#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
+        esp_foc_debug_pin_set();
+#endif
+
 #if defined(CONFIG_ESP_FOC_SCOPE)
     uint64_t hot_path_t0 = esp_foc_now_useconds();
 #endif
+    esp_foc_axis_t *axis = (esp_foc_axis_t *)data;
 
     /* 1) Previous sample (n-1), published by the ADC ISR. */
     q16_t i_alpha = axis->latest_i_alpha;
@@ -72,8 +75,8 @@ IRAM_ATTR static void foc_hot_isr(void *data)
         axis->isensor_driver->sample_isensors(axis->isensor_driver);
     }
 
-    q16_t e_sin = q16_sin(axis->rotor_elec_angle);
-    q16_t e_cos = q16_cos(axis->rotor_elec_angle);
+    q16_t e_sin = q16_sin(q16_normalize_angle(axis->rotor_elec_angle));
+    q16_t e_cos = q16_cos(q16_normalize_angle(axis->rotor_elec_angle));
 
     /* 3) Park transform. */
     q16_t i_d, i_q;
@@ -89,50 +92,40 @@ IRAM_ATTR static void foc_hot_isr(void *data)
      * Tuner override (CONFIG_ESP_FOC_TUNER_ENABLE): esp_foc_core copies
      * tuner_override.target_{id,iq,ud,uq} into axis->target_* each outer-loop
      * tick — id/iq feed the PI, ud/uq add as feed-forward (same as regulation). */
-    q16_t u_d, u_q;
-
     if (axis->skip_torque_control) {
         /* Open-loop voltage mode: take the operator's u_d / u_q
          * straight through, no integration. */
-        u_d = axis->target_u_d.raw;
-        u_q = axis->target_u_q.raw;
+        axis->u_q.raw = axis->target_u_d.raw;
+        axis->u_d.raw = axis->target_u_q.raw;
     } else {
-        u_q = esp_foc_pid_update(&axis->torque_controller[0],
+        axis->u_q.raw = esp_foc_pid_update(&axis->torque_controller[0],
                                  axis->target_i_q.raw, i_q);
-        u_d = esp_foc_pid_update(&axis->torque_controller[1],
+        axis->u_d.raw = esp_foc_pid_update(&axis->torque_controller[1],
                                  axis->target_i_d.raw, i_d);
         /* User-provided feed-forward gets stacked on top of the PI
          * output (matches the legacy semantics 1:1). */
-        u_q = q16_add(u_q, axis->target_u_q.raw);
-        u_d = q16_add(u_d, axis->target_u_d.raw);
+        axis->u_q.raw = q16_add(axis->u_q.raw, axis->target_u_q.raw);
+        axis->u_d.raw = q16_add(axis->u_d.raw, axis->target_u_d.raw);
     }
-    axis->u_q.raw = u_q;
-    axis->u_d.raw = u_d;
+
 
     /* 8) Inverse Park + SVPWM (θ at output instant). */
-    q16_t u_alpha = 0, u_beta = 0, u_u = 0, u_v = 0, u_w = 0;
-    esp_foc_modulate_dq_voltage(e_sin, e_cos, u_d, u_q,
-                                &u_alpha, &u_beta,
-                                &u_u, &u_v, &u_w,
+    esp_foc_modulate_dq_voltage(e_sin, e_cos, axis->u_d.raw, axis->u_q.raw,
+                                &axis->u_alpha.raw,
+                                &axis->u_beta.raw,
+                                &axis->u_u.raw,
+                                &axis->u_v.raw,
+                                &axis->u_w.raw,
                                 axis->max_voltage);
-    axis->u_alpha.raw = u_alpha;
-    axis->u_beta.raw  = u_beta;
-    axis->u_u.raw = u_u;
-    axis->u_v.raw = u_v;
-    axis->u_w.raw = u_w;
 
     /* 9) Phase voltages [V] Q16 → driver applies SVPWM to duty. MCPWM
      *    comparator writes are IRAM-safe in IDF v5.5. */
-    axis->inverter_driver->set_voltages(axis->inverter_driver, u_u, u_v, u_w);
+    axis->inverter_driver->set_voltages(axis->inverter_driver,
+                                    axis->u_u.raw,
+                                    axis->u_v.raw,
+                                    axis->u_w.raw);
 
-    /* 10) Optionally snapshot every wired channel into the scope ring.
-     *    The from_isr variant uses xTaskNotifyGiveFromISR on rollover. */
-#if defined(CONFIG_ESP_FOC_SCOPE)
-    esp_foc_debug_scope_hot_path_dt_us_q16 = calc_time_isr_q16(hot_path_t0,  esp_foc_now_useconds());
-    esp_foc_scope_data_push_from_isr();
-#endif
-
-    /* 11) Downsample counter. When it expires, wake the outer task
+    /* 10) Downsample counter. When it expires, wake the outer task
      *     so it reads the encoder, refreshes rotor_elec_angle and dispatches
      *     the user regulation callback. */
     if (axis->downsampling_low_speed) {
@@ -144,6 +137,15 @@ IRAM_ATTR static void foc_hot_isr(void *data)
             }
         }
     }
+    /* 11) Optionally snapshot every wired channel into the scope ring.
+     *    The from_isr variant uses xTaskNotifyGiveFromISR on rollover. */
+#if defined(CONFIG_ESP_FOC_SCOPE)
+    esp_foc_debug_scope_hot_path_dt_us_q16 = calc_time_isr_q16(hot_path_t0,  esp_foc_now_useconds());
+#endif
+
+#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
+        esp_foc_debug_pin_clear();
+#endif
 }
 
 /* The ADC publish path now lives inside the ADC driver itself (Clarke
@@ -167,20 +169,18 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
     uint32_t cpr = axis->rotor_sensor_driver->get_counts_per_revolution(
         axis->rotor_sensor_driver);
     if (cpr == 0u) {
-        cpr = 1u;
+        ESP_LOGE(tag, "FATAL, INVALID CPR, CHECK YOUR ROTOR SENSOR!");
+        abort();
     }
 
     /* Cold-start: one encoder sample → rotor_elec_angle before PWM ISR runs. */
-    q16_t ticks0 = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
-    axis->rotor_shaft_ticks = ticks0;
-    axis->rotor_position = q16_mul(ticks0, axis->natural_direction);
+    axis->rotor_shaft_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+    axis->rotor_position = q16_mul(axis->rotor_shaft_ticks, axis->natural_direction);
     axis->rotor_position_prev = axis->rotor_position;
     axis->current_speed = 0;
-    {
-        int pp = axis->motor_pole_pairs;
-        q16_t shaft_rev = q16_mul(axis->rotor_position, axis->encoder_inv_cpr_q16);
-        axis->rotor_elec_angle = esp_foc_shaft_frac_to_elec_angle_rad_q16(shaft_rev, pp);
-    }
+    axis->rotor_elec_angle = q16_mul(q16_mul(axis->rotor_position,
+                                            axis->encoder_inv_cpr_q16),
+                                            q16_from_int(axis->motor_pole_pairs));
 
     /* Hand the ISR over only after rotor_elec_angle is valid. */
     axis->inverter_driver->set_inverter_callback(axis->inverter_driver,
@@ -190,239 +190,30 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
     while (1) {
         esp_foc_wait_notifier();
 
-#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
-        esp_foc_debug_pin_set();
-#endif
-
         /* 1) Read the slow encoder. May block on I2C / SPI for ~125 us. */
-        q16_t ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
-        axis->rotor_shaft_ticks = ticks;
-        q16_t pos = q16_mul(ticks, axis->natural_direction);
-        axis->rotor_position = pos;
+        axis->rotor_shaft_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+        axis->rotor_position = q16_mul(axis->rotor_shaft_ticks, axis->natural_direction);
 
         /* 2) θe [0, 2*pi) from encoder — ISR reads rotor_elec_angle each PWM. */
-        int pp = axis->motor_pole_pairs;
-        q16_t shaft_rev = q16_mul(pos, axis->encoder_inv_cpr_q16);
-        axis->rotor_elec_angle = esp_foc_shaft_frac_to_elec_angle_rad_q16(shaft_rev, pp);
+        axis->rotor_elec_angle = q16_mul(q16_mul(axis->rotor_position, axis->encoder_inv_cpr_q16),
+                                 q16_from_int(axis->motor_pole_pairs));
 
         /* 3) Velocity smoothing: the outer loop is the rate at which
          *    rotor_position actually changes, so the biquad sees a
          *    consistent dt. */
-        q16_t dtheta = q16_sub(pos, axis->rotor_position_prev);
+        q16_t dtheta = q16_sub(axis->rotor_position, axis->rotor_position_prev);
         q16_t raw_speed = q16_mul(dtheta,
                                    axis->inv_dt * q16_from_int(ESP_FOC_LOW_SPEED_DOWNSAMPLING));
         axis->current_speed = esp_foc_biquad_q16_update(
                                   &axis->velocity_filter, raw_speed);
-        axis->rotor_position_prev = pos;
+        axis->rotor_position_prev = axis->rotor_position;
 
+#if defined(CONFIG_ESP_FOC_SCOPE)
+        esp_foc_scope_data_push();
+#endif
         /* 4) Wake the regulator task so the user callback can refresh
          *    target_i_d / target_i_q / target_u_d / target_u_q before
          *    the next batch of PWM cycles. */
         esp_foc_send_notification(axis->regulator_ev);
-
-#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
-        esp_foc_debug_pin_clear();
-#endif
     }
 }
-
-#else /* CONFIG_ESP_FOC_ISR_HOT_PATH not set — legacy 2.x task path */
-
-static void inverter_isr(void *data)
-{
-    esp_foc_axis_t *axis = (esp_foc_axis_t *)data;
-
-    if(axis->downsampling_low_speed) {
-        axis->downsampling_low_speed--;
-        if(!axis->downsampling_low_speed) {
-            axis->downsampling_low_speed = ESP_FOC_LOW_SPEED_DOWNSAMPLING;
-            esp_foc_send_notification_from_isr(axis->low_speed_ev);
-        }
-    }
-}
-
-void do_current_mode_sensored_high_speed_loop(void *arg)
-{
-    /* timestamp the current readings */
-    uint64_t * current_timestamp = (uint64_t *)arg;
-    *current_timestamp = esp_foc_now_useconds();
-}
-
-void do_current_mode_sensored_low_speed_loop(void *arg)
-{
-    esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
-    isensor_values_t ival_q16;
-    q16_t iu_q16;
-    q16_t iv_q16;
-    q16_t iw_q16;
-    q16_t current_speed_q16;
-    uint64_t current_timestamp;
-    bool no_isensor = (axis->isensor_driver == NULL) ? true : false;
-
-    axis->low_speed_ev = esp_foc_get_event_handle();
-    axis->downsampling_low_speed = ESP_FOC_LOW_SPEED_DOWNSAMPLING;
-    current_timestamp = esp_foc_now_useconds();
-
-    ESP_LOGI(tag,"Starting sensored FOC loop");
-
-    q16_t ticks_q16 = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
-    axis->rotor_shaft_ticks = ticks_q16;
-    axis->rotor_position = q16_mul(ticks_q16, axis->natural_direction);
-    axis->rotor_position_prev = axis->rotor_position;
-    axis->current_speed = 0;
-
-    axis->inverter_driver->set_inverter_callback(axis->inverter_driver,
-        inverter_isr,
-        axis);
-
-    if(!no_isensor) {
-        axis->isensor_driver->set_isensor_callback(axis->isensor_driver,
-            axis->high_speed_loop_cb,
-            &current_timestamp);
-    }
-
-    while(1) {
-        esp_foc_wait_notifier();
-#if defined(CONFIG_ESP_FOC_SCOPE)
-        uint64_t hot_path_t0 = esp_foc_now_useconds();
-#endif
-
-#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
-       esp_foc_debug_pin_set();
-#endif
-        if(!no_isensor) {
-            /* The ADC readings are already buffered while the angle sensor is being read */
-            axis->isensor_driver->fetch_isensors(axis->isensor_driver, &ival_q16);
-            iu_q16 = ival_q16.iu_axis_0;
-            iv_q16 = ival_q16.iv_axis_0;
-            iw_q16 = ival_q16.iw_axis_0;
-            axis->i_u = iu_q16;
-            axis->i_v = iv_q16;
-            axis->i_w = iw_q16;
-
-            /* Start new sample immediately; next loop uses it */
-            axis->isensor_driver->sample_isensors(axis->isensor_driver);
-        }
-
-        ticks_q16 = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
-        axis->rotor_shaft_ticks = ticks_q16;
-        axis->rotor_position = q16_mul(ticks_q16, axis->natural_direction);
-
-        {
-            int pp = axis->motor_pole_pairs;
-            q16_t shaft_rev = q16_mul(axis->rotor_position,
-                                      axis->encoder_inv_cpr_q16);
-            int64_t et = (int64_t)shaft_rev * (int64_t)pp;
-            q16_t elec_frac = (q16_t)(et % (int64_t)Q16_ONE);
-            if (elec_frac < 0) {
-                elec_frac = (q16_t)((int64_t)elec_frac + (int64_t)Q16_ONE);
-            }
-            q16_t elec_from_enc = q16_mul(elec_frac, Q16_TWO_PI);
-            q16_t omega_e = q16_mul(axis->current_speed,
-                                    axis->encoder_counts_speed_to_omega_e_q16);
-            uint64_t now_us = esp_foc_now_useconds();
-            uint64_t us_abs = (now_us >= current_timestamp)
-                                  ? (now_us - current_timestamp)
-                                  : (current_timestamp - now_us);
-            q16_t theta_ts = q16_from_elapsed_us_u64(us_abs);
-            axis->rotor_elec_angle = q16_normalize_angle_rad(
-                q16_sub(elec_from_enc, q16_mul(omega_e, theta_ts)));
-        }
-
-        q16_t elec_angle_norm_q16 = q16_normalize_angle_rad(axis->rotor_elec_angle);
-        q16_t e_sin_q16 = q16_sin(elec_angle_norm_q16);
-        q16_t e_cos_q16 = q16_cos(elec_angle_norm_q16);
-
-        /* Encoder counts/s (Q16): Δcounts * f_low. */
-        {
-            q16_t dtheta = q16_sub(axis->rotor_position, axis->rotor_position_prev);
-            q16_t raw_speed_q16 = q16_mul(dtheta, axis->torque_controller[0].inv_dt);
-            current_speed_q16 = esp_foc_biquad_q16_update(&axis->velocity_filter, raw_speed_q16);
-        }
-        axis->current_speed = current_speed_q16;
-        axis->rotor_position_prev = axis->rotor_position;
-
-        if(!no_isensor) {
-            q16_t i_alpha_q16, i_beta_q16, i_q_q16, i_d_q16;
-            esp_foc_get_dq_currents(e_sin_q16,
-                e_cos_q16,
-                axis->i_u,
-                axis->i_v,
-                axis->i_w,
-                &i_alpha_q16,
-                &i_beta_q16,
-                &i_q_q16,
-                &i_d_q16);
-
-            axis->i_alpha.raw = i_alpha_q16;
-            axis->i_beta.raw = i_beta_q16;
-            axis->i_q.raw = i_q_q16;
-            axis->i_d.raw = i_d_q16;
-
-            if (!axis->skip_torque_control) {
-                /* No EMA on i_q / i_d any more — the per-phase
-                 * Butterworth inside the isensor driver has already
-                 * shaped the spectrum upstream of Clarke / Park. */
-                q16_t u_q_q16 = esp_foc_pid_update(&axis->torque_controller[0],
-                                                         axis->target_i_q.raw,
-                                                         i_q_q16);
-                q16_t u_d_q16 = esp_foc_pid_update(&axis->torque_controller[1],
-                                                         axis->target_i_d.raw,
-                                                         i_d_q16);
-                u_q_q16 = q16_add(u_q_q16, axis->target_u_q.raw);
-                u_d_q16 = q16_add(u_d_q16, axis->target_u_d.raw);
-                axis->u_q.raw = u_q_q16;
-                axis->u_d.raw = u_d_q16;
-            } else {
-                axis->u_q.raw = axis->target_u_q.raw;
-                axis->u_d.raw = axis->target_u_d.raw;
-            }
-        }
-        if (no_isensor) {
-            axis->u_q.raw = axis->target_u_q.raw;
-            axis->u_d.raw = axis->target_u_d.raw;
-        }
-
-        q16_t u_alpha_q16, u_beta_q16, u_u_q16, u_v_q16, u_w_q16;
-        esp_foc_modulate_dq_voltage(e_sin_q16,
-                        e_cos_q16,
-                        axis->u_d.raw,
-                        axis->u_q.raw,
-                        &u_alpha_q16,
-                        &u_beta_q16,
-                        &u_u_q16,
-                        &u_v_q16,
-                        &u_w_q16,
-                        axis->max_voltage);
-
-        axis->u_alpha.raw = u_alpha_q16;
-        axis->u_beta.raw = u_beta_q16;
-        axis->u_u.raw = u_u_q16;
-        axis->u_v.raw = u_v_q16;
-        axis->u_w.raw = u_w_q16;
-        axis->inverter_driver->set_voltages(axis->inverter_driver, u_u_q16, u_v_q16, u_w_q16);
-
-        esp_foc_send_notification(axis->regulator_ev);
-
-#ifdef CONFIG_ESP_FOC_SCOPE
-        {
-            uint64_t hot_path_t1 = esp_foc_now_useconds();
-            uint64_t el = (hot_path_t1 >= hot_path_t0)
-                              ? (hot_path_t1 - hot_path_t0)
-                              : 0U;
-            if (el > 10000000U) {
-                el = 10000000U;
-            }
-            esp_foc_debug_scope_hot_path_dt_us_q16 =
-                hot_path_us_elapsed_to_q16(el);
-        }
-        esp_foc_scope_data_push();
-#endif
-
-#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
-       esp_foc_debug_pin_clear();
-#endif
-    }
-}
-
-#endif /* CONFIG_ESP_FOC_ISR_HOT_PATH */

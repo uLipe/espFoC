@@ -11,17 +11,17 @@
 /* Q16 representation of pi. Q16_TWO_PI is exposed in esp_foc_q16.h
  * (411775); pi sits at half that. Defined locally so the predictor
  * does not pollute the public q16 header with a single-purpose const. */
-#define Q16_PI ((q16_t)(Q16_TWO_PI / 2))
+#define Q16_PI ((q16_t)(Q16_ONE / 2))
 
 /* Wrap a signed angle delta to (-pi, +pi]. Used on the residual so
  * the 0 / 2*pi seam never produces a 2*pi-sized error. */
 static inline q16_t wrap_pi_q16(q16_t a)
 {
     while (a > Q16_PI) {
-        a = (q16_t)((int32_t)a - (int32_t)Q16_TWO_PI);
+        a = (q16_t)((int32_t)a - (int32_t)Q16_ONE);
     }
     while (a <= -Q16_PI) {
-        a = (q16_t)((int32_t)a + (int32_t)Q16_TWO_PI);
+        a = (q16_t)((int32_t)a + (int32_t)Q16_ONE);
     }
     return a;
 }
@@ -93,7 +93,7 @@ void esp_foc_angle_predictor_update_q16(esp_foc_angle_predictor_q16_t *p,
 
     /* Make sure theta_meas is normalised so the residual wrap below
      * is honest about its [0, 2*pi) input. Cheap if it already is. */
-    theta_meas = q16_normalize_angle_rad(theta_meas);
+    theta_meas = q16_normalize_angle(theta_meas);
 
     if (!p->initialised) {
         /* First measurement seeds the state: jump theta_est to the
@@ -120,11 +120,11 @@ void esp_foc_angle_predictor_update_q16(esp_foc_angle_predictor_q16_t *p,
 
     q16_t dt = dt_q16_from_us(dt_us);
     /* theta_pred = wrap(theta_est + omega_est * dt) */
-    q16_t theta_pred = q16_normalize_angle_rad(
+    q16_t theta_pred = q16_normalize_angle(
         q16_add(p->theta_est, q16_mul(p->omega_est, dt)));
     q16_t err = wrap_pi_q16(q16_sub(theta_meas, theta_pred));
 
-    p->theta_est = q16_normalize_angle_rad(
+    p->theta_est = q16_normalize_angle(
         q16_add(theta_pred, q16_mul(p->alpha, err)));
 
     /* omega_est += (beta / dt) * err. Done as (beta * err) / dt to
@@ -156,6 +156,6 @@ IRAM_ATTR q16_t esp_foc_angle_predictor_predict_q16(
                        ? (t_now_us - p->t_last_us)
                        : 0u;
     q16_t dt = dt_q16_from_us(dt_us);
-    return q16_normalize_angle_rad(
+    return q16_normalize_angle(
         q16_add(p->theta_est, q16_mul(p->omega_est, dt)));
 }

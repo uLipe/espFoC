@@ -32,6 +32,7 @@ typedef int32_t q16_t;
 
 /** 2*pi radians (for angle helpers) */
 #define Q16_TWO_PI ((q16_t)411775)
+#define Q16_INV_TWO_PI ((q16_t)10430)
 
 #define Q16_K3_CLARKE ((q16_t)37837)
 #define Q16_SQRT3_OVER_2 ((q16_t)56756)
@@ -175,6 +176,19 @@ static inline q16_t q16_from_iq31_per_unit(int32_t iq31)
         return (q16_t)INT32_MIN;
     }
     return (q16_t)x;
+}
+
+static inline int32_t iq31_from_q16_per_unit(q16_t q16)
+{
+    int64_t x = ((int64_t)q16 << 31) / Q16_ONE;
+
+    if (x > INT32_MAX) {
+        return INT32_MAX;
+    }
+    if (x < INT32_MIN) {
+        return INT32_MIN;
+    }
+    return (int32_t)x;
 }
 
 q16_t q16_sin(q16_t angle_rad_q16);

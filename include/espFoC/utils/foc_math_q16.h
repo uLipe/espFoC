@@ -17,18 +17,15 @@
 extern "C" {
 #endif
 
-/** Normalize electrical angle in radians to [0, Q16_TWO_PI). */
-static inline q16_t q16_normalize_angle_rad(q16_t angle_rad)
+/** Normalize electrical angle in radians to [0, 1). */
+static inline q16_t q16_normalize_angle(q16_t angle_rad)
 {
-    int64_t p = (int64_t)Q16_TWO_PI;
-    if (p <= 0) {
-        return 0;
-    }
-    int64_t a = (int64_t)angle_rad % p;
-    if (a < 0) {
-        a += p;
-    }
-    return (q16_t)a;
+    while (angle_rad < 0)
+         angle_rad = q16_add(angle_rad, Q16_ONE);
+    while (angle_rad >= Q16_ONE)
+        angle_rad = q16_sub(angle_rad, Q16_ONE);
+
+    return (q16_t)angle_rad;
 }
 
 static inline void q16_clarke(q16_t u, q16_t v, q16_t w, q16_t *alpha, q16_t *beta)
@@ -110,15 +107,6 @@ static inline void esp_foc_apply_bias_q16(q16_t *v_alpha, q16_t *v_beta)
 {
     *v_alpha = q16_add(q16_mul(*v_alpha, Q16_HALF), Q16_HALF);
     *v_beta = q16_add(q16_mul(*v_beta, Q16_HALF), Q16_HALF);
-}
-
-/** Shaft fraction [0, 1) / rev (Q16) → θ_mech [rad], then θ_e = normalize(pp × θ_mech). */
-static inline q16_t esp_foc_shaft_frac_to_elec_angle_rad_q16(q16_t pos_shaft_rev_q16,
-                                                             int pole_pairs)
-{
-    q16_t theta_mech = q16_mul(pos_shaft_rev_q16, Q16_TWO_PI);
-    q16_t theta_elec = q16_mul(theta_mech, q16_from_int(pole_pairs));
-    return q16_normalize_angle_rad(theta_elec);
 }
 
 /* Whole microseconds on the scope wire as Q16 float (host: raw/65536). Integer-only

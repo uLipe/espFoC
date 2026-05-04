@@ -56,8 +56,8 @@ static void setup_pid_filters(esp_foc_pid_controller_t *pid_d,
                               esp_foc_biquad_q16_t *filt_q)
 {
     const float dt = 1.0f / 2000.0f;
-    esp_foc_pid_init_from_float(pid_d, 0.4f, 60.0f, 0.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
-    esp_foc_pid_init_from_float(pid_q, 0.4f, 60.0f, 0.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
+    esp_foc_pid_init_from_float(pid_d, 0.4f, 60.0f, 0.0f, 1.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
+    esp_foc_pid_init_from_float(pid_q, 0.4f, 60.0f, 0.0f, 1.0f,dt, -0.7f, 0.7f, 0.7f / 60.0f);
 
     esp_foc_biquad_butterworth_lpf_design_q16(filt_d, 60.0f, 2000.0f);
     esp_foc_biquad_butterworth_lpf_design_q16(filt_q, 60.0f, 2000.0f);

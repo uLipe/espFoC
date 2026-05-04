@@ -46,7 +46,7 @@ static DRAM_ATTR angle_estimator_kf_t kf_observers[CONFIG_NOOF_AXIS];
 
 static inline void kf_predict_q16(angle_estimator_kf_t *k)
 {
-    k->theta_est = q16_normalize_angle_rad(
+    k->theta_est = q16_normalize_angle(
         q16_add(k->theta_est, q16_mul(k->omega_est, k->k_dtheta_rad_q16)));
 }
 
@@ -97,9 +97,9 @@ static int kf_observer_update(esp_foc_observer_t *self, esp_foc_observer_inputs_
     kf_predict_q16(est);
 
     {
-        q16_t theta_meas = q16_normalize_angle_rad(q16_add(est->theta_est, est->theta_err_emf_q16));
+        q16_t theta_meas = q16_normalize_angle(q16_add(est->theta_est, est->theta_err_emf_q16));
         q16_t y = esp_foc_obs_wrap_angle_err_pm_pi_rad(q16_sub(theta_meas, est->theta_est));
-        est->theta_est = q16_normalize_angle_rad(q16_add(est->theta_est, q16_mul(est->K0_q16, y)));
+        est->theta_est = q16_normalize_angle(q16_add(est->theta_est, q16_mul(est->K0_q16, y)));
         est->omega_est = q16_add(est->omega_est, q16_mul(est->K1_q16, y));
     }
 
@@ -125,7 +125,7 @@ static q16_t kf_observer_get_speed(esp_foc_observer_t *self)
 static void kf_observer_reset(esp_foc_observer_t *self, q16_t offset)
 {
     angle_estimator_kf_t *est = __containerof(self, angle_estimator_kf_t, interface);
-    est->theta_est = q16_normalize_angle_rad(offset);
+    est->theta_est = q16_normalize_angle(offset);
     est->omega_est = 0;
     est->theta_err_emf_q16 = 0;
     est->i_alpha_prev = 0;

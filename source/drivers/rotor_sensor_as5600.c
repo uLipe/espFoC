@@ -32,29 +32,31 @@ typedef struct {
 static bool i2c_bus_configured = false;
 static esp_foc_as5600_t rotor_sensors[CONFIG_NOOF_AXIS];
 
-static uint16_t read_angle_sensor(int i2c_port)
+static uint16_t read_angle_sensor(int i2c_port, q16_t last_read)
 {
     uint8_t write_buffer = AS5600_ANGLE_REGISTER_H;
     uint8_t read_buffer[2] = {0, 0};
     uint16_t raw;
     esp_err_t err;
 
-    do {
-        err = i2c_master_write_read_device(i2c_port,
-                                           AS5600_SLAVE_ADDR,
-                                           &write_buffer,
-                                           1,
-                                           read_buffer,
-                                           2,
-                                           portMAX_DELAY);
-    } while (err != ESP_OK);
+    err = i2c_master_write_read_device(i2c_port,
+                                        AS5600_SLAVE_ADDR,
+                                        &write_buffer,
+                                        1,
+                                        read_buffer,
+                                        2,
+                                        portMAX_DELAY);
 
-    raw = read_buffer[0];
-    raw <<= 8;
-    raw |= read_buffer[1];
+    if(err == ESP_OK) {
+        raw = read_buffer[0];
+        raw <<= 8;
+        raw |= read_buffer[1];
 
-    if (raw > AS5600_PULSES_PER_REVOLUTION - 1) {
-        raw = AS5600_PULSES_PER_REVOLUTION - 1;
+        if (raw > AS5600_PULSES_PER_REVOLUTION - 1) {
+            raw = AS5600_PULSES_PER_REVOLUTION - 1;
+        }
+    } else {
+        raw = (uint16_t)(last_read >> 16);
     }
 
     return raw;
@@ -63,7 +65,7 @@ static uint16_t read_angle_sensor(int i2c_port)
 static void set_to_zero(esp_foc_rotor_sensor_t *self)
 {
     esp_foc_as5600_t *obj = __containerof(self, esp_foc_as5600_t, interface);
-    uint16_t raw = read_angle_sensor(obj->i2c_port) & AS5600_READING_MASK;
+    uint16_t raw = read_angle_sensor(obj->i2c_port, 0) & AS5600_READING_MASK;
     obj->zero_offset = raw;
     ESP_LOGI(tag, "Setting %d [ticks] as offset.", obj->zero_offset);
 }
@@ -92,7 +94,7 @@ static q16_t read_counts(esp_foc_rotor_sensor_t *self)
 {
     esp_foc_as5600_t *obj = __containerof(self, esp_foc_as5600_t, interface);
 
-    uint16_t raw = read_angle_sensor(obj->i2c_port) & AS5600_READING_MASK;
+    uint16_t raw = read_angle_sensor(obj->i2c_port, (q16_t)obj->prev_raw_iq) & AS5600_READING_MASK;
     int32_t delta = (int32_t)raw - obj->prev_raw_iq;
 
     if (delta >= AS5600_WRAP_INT || delta <= -AS5600_WRAP_INT) {
@@ -155,7 +157,7 @@ esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
             .scl_io_num = pin_scl,
             .sda_pullup_en = GPIO_PULLUP_ENABLE,
             .scl_pullup_en = GPIO_PULLUP_ENABLE,
-            .master.clk_speed = 400000,
+            .master.clk_speed = 1000000,
         };
 
         i2c_param_config(I2C_NUM_0, &conf);
@@ -165,7 +167,7 @@ esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
         i2c_bus_configured = true;
     }
 
-    ESP_LOGI(tag, "Bus-check: %d", read_angle_sensor(rotor_sensors[port].i2c_port));
+    ESP_LOGI(tag, "Bus-check: %d", read_angle_sensor(rotor_sensors[port].i2c_port, 0));
 
     return &rotor_sensors[port].interface;
 }

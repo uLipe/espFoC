@@ -6,7 +6,7 @@
 #include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/utils/foc_math_q16.h"
 
-#define ESP_FOC_OBS_Q16_PI_RAD ((q16_t)((Q16_TWO_PI + 1) / 2))
+#define ESP_FOC_OBS_Q16_PI_RAD ((q16_t)(Q16_ONE / 2))
 
 static inline q16_t esp_foc_obs_q16_div(q16_t num, q16_t den)
 {
@@ -26,6 +26,6 @@ static inline q16_t esp_foc_obs_q16_div(q16_t num, q16_t den)
 static inline q16_t esp_foc_obs_wrap_angle_err_pm_pi_rad(q16_t err_rad)
 {
     q16_t x = q16_add(err_rad, ESP_FOC_OBS_Q16_PI_RAD);
-    x = q16_normalize_angle_rad(x);
+    x = q16_normalize_angle(x);
     return q16_sub(x, ESP_FOC_OBS_Q16_PI_RAD);
 }

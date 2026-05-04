@@ -74,7 +74,7 @@ static void wire_scope_channels(void)
     esp_foc_scope_add_channel(&s_axis.u_u.raw, 0);
     esp_foc_scope_add_channel(&s_axis.u_v.raw, 1);
     esp_foc_scope_add_channel(&s_axis.u_w.raw, 2);
-    esp_foc_scope_add_channel(&s_axis.target_i_q.raw, 3);
+    esp_foc_scope_add_channel(&s_axis.rotor_elec_angle, 3);
     esp_foc_scope_add_channel(&s_axis.i_q.raw, 4);
     esp_foc_scope_add_channel(&s_axis.u_q.raw, 5);
 #if CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS >= 12

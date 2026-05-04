@@ -54,7 +54,7 @@ static int simu_observer_update(esp_foc_observer_t *self, esp_foc_observer_input
     q16_t dw = q16_mul(obj->k_dw_q16, q16_sub(Te, Tf));
     obj->omega = q16_add(obj->omega, dw);
 
-    obj->angle = q16_normalize_angle_rad(
+    obj->angle = q16_normalize_angle(
         q16_add(obj->angle, q16_mul(obj->omega, obj->k_dtheta_rad_q16)));
 
     return 0;
@@ -75,7 +75,7 @@ static q16_t simu_observer_get_speed(esp_foc_observer_t *self)
 static void simu_observer_reset(esp_foc_observer_t *self, q16_t offset)
 {
     esp_foc_simul_observer_t *obj = __containerof(self, esp_foc_simul_observer_t, interface);
-    obj->angle = q16_normalize_angle_rad(offset);
+    obj->angle = q16_normalize_angle(offset);
     obj->estim_iq = 0;
     obj->omega = 0;
 }

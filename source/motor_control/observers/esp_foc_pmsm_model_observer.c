@@ -87,7 +87,7 @@ static int pmsm_model_observer_update(esp_foc_observer_t *self, esp_foc_observer
         q16_mul(m->k_B_omega_q16, m->omega_e));
 
     m->omega_e = q16_add(m->omega_e, dw);
-    m->theta_e = q16_normalize_angle_rad(
+    m->theta_e = q16_normalize_angle(
         q16_add(m->theta_e, q16_mul(m->omega_e, m->k_dtheta_rad_q16)));
 
     pmsm_clamp(m);
@@ -109,7 +109,7 @@ static q16_t pmsm_model_observer_get_speed(esp_foc_observer_t *self)
 static void pmsm_model_observer_reset(esp_foc_observer_t *self, q16_t offset)
 {
     esp_foc_pmsm_model_observer_t *m = __containerof(self, esp_foc_pmsm_model_observer_t, interface);
-    m->theta_e = q16_normalize_angle_rad(offset);
+    m->theta_e = q16_normalize_angle(offset);
     m->omega_e = 0;
     m->id = 0;
     m->iq = 0;
