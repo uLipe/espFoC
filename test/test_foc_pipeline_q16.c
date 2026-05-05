@@ -17,7 +17,8 @@
 
 #define N_PIPELINE_STEPS 48
 
-static void run_q16_pipeline_step(float angle_rad,
+/* angle_turns: electrical angle in [0,1) per revolution (q16_sin/cos per-unit). */
+static void run_q16_pipeline_step(float angle_turns,
                                    float iu, float iv, float iw,
                                    float id_ref, float iq_ref,
                                    esp_foc_pid_controller_t *pid_d,
@@ -26,8 +27,8 @@ static void run_q16_pipeline_step(float angle_rad,
                                    esp_foc_biquad_q16_t *filt_q,
                                    q16_t *du, q16_t *dv, q16_t *dw)
 {
-    q16_t sq = q16_sin(q16_from_float(angle_rad));
-    q16_t cq = q16_cos(q16_from_float(angle_rad));
+    q16_t sq = q16_sin(q16_from_float(angle_turns));
+    q16_t cq = q16_cos(q16_from_float(angle_turns));
     q16_t ia_q, ib_q, id_q, iq_q;
     q16_t uq_q, ud_q;
     q16_t ua_q, ub_q;
@@ -84,7 +85,7 @@ TEST_CASE("golden pipeline q16: deterministic run and bounded duties", "[espFoC]
             float iq_ref = 0.35f * sinf(0.5f * angle);
             q16_t a, b, c;
 
-            run_q16_pipeline_step(angle, iu, iv, iw, id_ref, iq_ref,
+            run_q16_pipeline_step(t, iu, iv, iw, id_ref, iq_ref,
                                    &pid_d, &pid_q, &filt_d, &filt_q, &a, &b, &c);
 
             TEST_ASSERT_TRUE(fabsf(q16_to_float(a)) <= 1.2f);

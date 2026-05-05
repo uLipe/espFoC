@@ -74,7 +74,7 @@ void app_main(void)
 {
     q16_t theta = 0;
     const q16_t vmax = q16_from_float(24.0f / 1.7320508075688772f);
-    const q16_t step = q16_from_float(0.2f);
+    const q16_t step = q16_mul(q16_from_float(0.2f), Q16_INV_TWO_PI);
 
     initialize_foc_drivers();
     /* Phase voltages [V]; zero → centred PWM (driver converts to duty). */
@@ -97,6 +97,6 @@ void app_main(void)
         inverter->set_voltages(inverter, vu, vv, vw);
         esp_foc_sleep_ms(10);
 
-        theta = q16_normalize_angle_rad(q16_sub(theta, step));
+        theta = q16_normalize_angle(q16_sub(theta, step));
     }
 }
