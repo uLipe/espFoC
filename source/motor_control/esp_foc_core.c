@@ -29,10 +29,6 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "espFoC/esp_foc.h"
-#if defined(ESP_FOC_AUTOGEN_GAINS_AVAILABLE)
-#include "esp_foc_autotuned_gains.h"
-#endif
-
 
 /* Minimum encoder deflection considered conclusive when probing for the
  * natural direction. Expressed in raw encoder counts; AS5600 has 4096
@@ -76,8 +72,8 @@ static void reset_torque_targets_and_pis(esp_foc_axis_t *axis)
 {
     axis->target_i_d.raw = 0;
     axis->target_i_q.raw = 0;
-    axis->target_u_d.raw = 0;
-    axis->target_u_q.raw = 0;
+    axis->u_d.raw = 0;
+    axis->u_q.raw = 0;
     for (int i = 0; i < 2; ++i) {
         esp_foc_pid_reset(&axis->torque_controller[i]);
     }
@@ -123,52 +119,31 @@ static void do_foc_outer_loop(void *arg)
         }
 #if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
         if (axis->tuner_override.active) {
-            /* Drain the user callback into shadow refs so its side effects
-             * (logging, sensor reads, state machines) keep firing — but the
-             * actual axis targets are owned by the tuner. Bumpless transfer
-             * back to user control happens automatically when the override
-             * flag clears. */
             esp_foc_d_current_q16_t shadow_id;
             esp_foc_q_current_q16_t shadow_iq;
-            esp_foc_d_voltage_q16_t shadow_ud;
-            esp_foc_q_voltage_q16_t shadow_uq;
-            axis->regulator_cb(axis, &shadow_id, &shadow_iq,
-                                     &shadow_ud, &shadow_uq);
+            axis->regulator_cb(axis, &shadow_id, &shadow_iq);
             axis->target_i_d.raw = axis->tuner_override.target_id;
             axis->target_i_q.raw = axis->tuner_override.target_iq;
-            axis->target_u_d.raw = axis->tuner_override.target_ud;
-            axis->target_u_q.raw = axis->tuner_override.target_uq;
             continue;
         }
 #endif
-        axis->regulator_cb(axis, &axis->target_i_d, &axis->target_i_q,
-                                 &axis->target_u_d, &axis->target_u_q);
+        axis->regulator_cb(axis, &axis->target_i_d, &axis->target_i_q);
     }
     axis->regulator_ev = NULL;
     vTaskDelete(NULL);
 }
 
-/* Apply autotuned gains to one of the torque controllers. The build-time
- * autogen header is the only source of truth in 3.0 — the legacy
- * continuous-time formula on motor R/L is gone. */
-static void apply_autogen_gains(esp_foc_pid_controller_t *pid, q16_t out_max)
+static void apply_default_bypass_current_pid(esp_foc_pid_controller_t *pid,
+                                            q16_t out_max)
 {
-#if defined(ESP_FOC_AUTOGEN_GAINS_AVAILABLE)
-    pid->kp = ESP_FOC_AUTOGEN_CURRENT_KP_Q16;
-    pid->ki = ESP_FOC_AUTOGEN_CURRENT_KI_Q16;
-    pid->integrator_limit = ESP_FOC_AUTOGEN_CURRENT_INT_LIM_Q16;
-#else
-    /* Without autogen, leave gains zeroed so the user MUST set them via
-     * the runtime tuner before commanding any current. Better a silent
-     * motor than a runaway with garbage gains. */
     pid->kp = 0;
     pid->ki = 0;
-    pid->integrator_limit = 0;
-#endif
     pid->kd = 0;
+    pid->kff = Q16_ONE;
+    pid->integrator_limit = out_max;
     pid->max_output_value = out_max;
     pid->min_output_value = q16_from_float(-q16_to_float(out_max));
-    pid->ke = q16_from_float(1.0f);
+    pid->ke = Q16_ONE;
     esp_foc_pid_reset(pid);
 }
 
@@ -191,8 +166,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->tuner_override.active = false;
     axis->tuner_override.target_id = 0;
     axis->tuner_override.target_iq = 0;
-    axis->tuner_override.target_ud = 0;
-    axis->tuner_override.target_uq = 0;
 #endif
 
     axis->state = ESP_FOC_AXIS_STATE_IDLE;
@@ -222,27 +195,13 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->u_q.raw = 0;
     axis->target_i_d.raw = 0;
     axis->target_i_q.raw = 0;
-    axis->target_u_d.raw = 0;
-    axis->target_u_q.raw = 0;
-#if defined(CONFIG_ESP_FOC_TUNER_ALWAYS_OVERRIDE_VOLTAGE_MODE)
-    axis->skip_torque_control = 1;
-#else
-    axis->skip_torque_control = 0;
-#endif
 
     if (isensor != NULL) {
         axis->isensor_driver->calibrate_isensors(axis->isensor_driver, ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
     }
 
-    /* Both torque controllers (Q-axis and D-axis) share the same dt and
-     * the same starting gains; the runtime tuner can rewrite either one
-     * later with esp_foc_axis_set_current_pi_gains_q16().
-     *
-     * Under ISR_HOT_PATH the PI fires every PWM period; otherwise the
-     * legacy task path runs at pwm_rate / downsampling. The PID dt
-     * (and the autotuner fs in CMake) must agree — Kconfig defaults
-     * AUTOGEN_DECIMATION to 1 when ISR_HOT_PATH is on so the
-     * generated Kp / Ki land at the same fs the loop will run at. */
+    /* Current-loop PIDs: default bypass (Kp=Ki=Kd=0, Kff=1). NVS overlay
+     * may replace gains after this block. */
     float loop_dt_s = dt_f;
     float loop_fs_hz = (loop_dt_s > 1e-9f) ? (1.0f / loop_dt_s) : 0.0f;
     q16_t loop_dt = q16_from_float(loop_dt_s);
@@ -251,7 +210,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     for (int i = 0; i < 2; ++i) {
         axis->torque_controller[i].dt = loop_dt;
         axis->torque_controller[i].inv_dt = loop_inv_dt;
-        apply_autogen_gains(&axis->torque_controller[i], ESP_FOC_VPU_ONE_Q16);
+        apply_default_bypass_current_pid(&axis->torque_controller[i],
+                                        ESP_FOC_VPU_ONE_Q16);
     }
 
     /* Resolve the current-sensor low-pass cutoff. Precedence at boot:
@@ -260,10 +220,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
      * The runtime tuner can override later via the protocol. */
     float current_filter_fc_hz = (float)CONFIG_ESP_FOC_CURRENT_FILTER_CUTOFF_HZ;
 
-    /* If a tuned calibration exists for this axis AND it was made for
-     * the same motor profile, override the autogen seed gains. NVS
-     * load is a cold path; failure (no entry, profile mismatch, NVS
-     * empty) just skips the overlay silently. */
+    /* If a tuned calibration exists for this axis, override default bypass.
+     * NVS load is a cold path; failure skips the overlay silently. */
     axis->natural_direction =
         (settings.natural_direction == ESP_FOC_MOTOR_NATURAL_DIRECTION_CW) ? Q16_ONE
                                                                          : Q16_MINUS_ONE;
@@ -298,8 +256,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         loop_fs_hz);
 
     esp_foc_axis_refresh_encoder_q16_scales(axis);
-    axis->torque_controller[0].ke = q16_from_float(1.0f);
-    axis->torque_controller[1].ke = q16_from_float(1.0f);
+    axis->torque_controller[0].ke = Q16_ONE;
+    axis->torque_controller[1].ke = Q16_ONE;
 
     /* natural_direction: defaults above; NVS may have overridden;
      * esp_foc_align_axis() probes and overrides unless NVS has a
@@ -497,4 +455,70 @@ esp_foc_err_t esp_foc_set_regulation_callback(esp_foc_axis_t *axis,
     axis->regulator_cb = callback;
     esp_foc_critical_leave();
     return ESP_FOC_OK;
+}
+
+static void apply_loop_gains_locked(esp_foc_axis_t *axis,
+                                     q16_t kp,
+                                     q16_t ki,
+                                     q16_t kd,
+                                     q16_t kff,
+                                     q16_t integrator_limit)
+{
+    for (int i = 0; i < 2; ++i) {
+        axis->torque_controller[i].kp = kp;
+        axis->torque_controller[i].ki = ki;
+        axis->torque_controller[i].kd = kd;
+        axis->torque_controller[i].kff = kff;
+        axis->torque_controller[i].integrator_limit = integrator_limit;
+        esp_foc_pid_reset(&axis->torque_controller[i]);
+    }
+}
+
+esp_foc_err_t esp_foc_axis_set_current_loop_gains_q16(
+    esp_foc_axis_t *axis,
+    q16_t kp,
+    q16_t ki,
+    q16_t kd,
+    q16_t kff,
+    q16_t integrator_limit)
+{
+    if (axis == NULL) {
+        return ESP_FOC_ERR_INVALID_ARG;
+    }
+    if (kp < 0 || ki < 0 || integrator_limit < 0) {
+        return ESP_FOC_ERR_INVALID_ARG;
+    }
+
+    esp_foc_critical_enter();
+    apply_loop_gains_locked(axis, kp, ki, kd, kff, integrator_limit);
+    esp_foc_critical_leave();
+    return ESP_FOC_OK;
+}
+
+void esp_foc_axis_get_current_loop_gains_q16(
+    const esp_foc_axis_t *axis,
+    q16_t *kp,
+    q16_t *ki,
+    q16_t *kd,
+    q16_t *kff,
+    q16_t *integrator_limit)
+{
+    if (axis == NULL) {
+        return;
+    }
+    if (kp != NULL) {
+        *kp = axis->torque_controller[0].kp;
+    }
+    if (ki != NULL) {
+        *ki = axis->torque_controller[0].ki;
+    }
+    if (kd != NULL) {
+        *kd = axis->torque_controller[0].kd;
+    }
+    if (kff != NULL) {
+        *kff = axis->torque_controller[0].kff;
+    }
+    if (integrator_limit != NULL) {
+        *integrator_limit = axis->torque_controller[0].integrator_limit;
+    }
 }

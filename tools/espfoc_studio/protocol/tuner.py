@@ -47,46 +47,39 @@ class Op(IntEnum):
 
 
 class ParamId(IntEnum):
-    # Read-only
     KP_Q16          = 0x0010
     KI_Q16          = 0x0011
     INT_LIM_Q16     = 0x0012
     V_MAX_Q16       = 0x0013
     I_FILTER_FC     = 0x0014
     LOOP_FS_HZ      = 0x0015
-    MOTOR_R_OHM     = 0x0016
-    MOTOR_L_H       = 0x0017
-    MOTOR_BW_HZ     = 0x0018
-    MOTOR_POLE_PAIRS = 0x0019
+    KD_Q16          = 0x0016
+    KFF_Q16         = 0x0017
+    MOTOR_POLE_PAIRS = 0x0018
     AXIS_STATE      = 0x0040
     AXIS_LAST_ERR   = 0x0041
     NVS_PRESENT     = 0x0042
-    SKIP_TORQUE     = 0x0043
     FIRMWARE_TYPE   = 0x0050
-    # Gain writes (atomic swap)
     WRITE_KP        = 0x0020
     WRITE_KI        = 0x0021
     WRITE_INT_LIM   = 0x0022
     WRITE_I_FILTER_FC = 0x0023
     WRITE_MOTOR_POLE_PAIRS = 0x0024
-    # Motion targets (only honored while override is on)
+    WRITE_KD        = 0x0025
+    WRITE_KFF       = 0x0026
     WRITE_TARGET_ID = 0x0060
     WRITE_TARGET_IQ = 0x0061
-    WRITE_TARGET_UD = 0x0062
-    WRITE_TARGET_UQ = 0x0063
-    WRITE_SKIP_TORQUE = 0x0064
-    # Commands (exec)
-    CMD_RECOMPUTE_GAINS = 0x0080
     CMD_OVERRIDE_ON     = 0x00A0
     CMD_OVERRIDE_OFF    = 0x00A1
     CMD_ALIGN_AXIS      = 0x00A2
+    CMD_STOP_AXIS       = 0x00A3
     CMD_PERSIST_NVS     = 0x00B0
     CMD_LOAD_NVS        = 0x00B1
     CMD_ERASE_NVS       = 0x00B2
     CMD_RESET_BOARD     = 0x00B3
     CMD_PING            = 0x00B4
 
-# 'TSGX' little-endian as a sentinel returned by tuner_studio_target.
+# 'TSGX' little-endian sentinel returned by tuner_studio_target.
 TUNER_FIRMWARE_TYPE_TSGX = 0x58475354
 
 
@@ -270,6 +263,12 @@ class TunerClient:
     def read_int_lim(self) -> float:
         return self._read_q16(ParamId.INT_LIM_Q16)
 
+    def read_kd(self) -> float:
+        return self._read_q16(ParamId.KD_Q16)
+
+    def read_kff(self) -> float:
+        return self._read_q16(ParamId.KFF_Q16)
+
     def read_v_max(self) -> float:
         return self._read_q16(ParamId.V_MAX_Q16)
 
@@ -281,23 +280,6 @@ class TunerClient:
             raise TunerError(
                 f"axis state response has {len(r.payload)} bytes, want 1")
         return AxisStateFlag(r.payload[0])
-
-    def read_skip_torque(self) -> bool:
-        r = self._round_trip(Op.READ, ParamId.SKIP_TORQUE)
-        if r.status != ESP_FOC_OK:
-            raise TunerError(f"read skip_torque failed: {_err_name(r.status)}")
-        if len(r.payload) != 1:
-            raise TunerError(
-                f"skip_torque: expected 1 byte, got {len(r.payload)}")
-        return r.payload[0] != 0
-
-    def write_skip_torque(self, skip: bool) -> None:
-        r = self._round_trip(
-            Op.WRITE, ParamId.WRITE_SKIP_TORQUE,
-            bytes([1 if skip else 0]))
-        if r.status != ESP_FOC_OK:
-            raise TunerError(
-                f"write skip_torque failed: {_err_name(r.status)}")
 
     def read_last_error(self) -> int:
         r = self._round_trip(Op.READ, ParamId.AXIS_LAST_ERR)
@@ -322,18 +304,6 @@ class TunerClient:
         uses this to discretise the analysis-tab plant correctly."""
         return self._read_q16(ParamId.LOOP_FS_HZ)
 
-    def read_motor_r_ohm(self) -> float:
-        """Last R [Ω] from NVS shadow; 0 if not stored on device."""
-        return self._read_q16(ParamId.MOTOR_R_OHM)
-
-    def read_motor_l_h(self) -> float:
-        """Last L [H] from NVS shadow; 0 if not stored."""
-        return self._read_q16(ParamId.MOTOR_L_H)
-
-    def read_motor_bw_hz(self) -> float:
-        """Last current-loop bandwidth [Hz] from NVS; 0 if not stored."""
-        return self._read_q16(ParamId.MOTOR_BW_HZ)
-
     def read_motor_pole_pairs(self) -> int:
         r = self._round_trip(Op.READ, ParamId.MOTOR_POLE_PAIRS)
         if r.status != ESP_FOC_OK:
@@ -352,6 +322,12 @@ class TunerClient:
     def write_int_lim(self, lim: float) -> None:
         self._write_q16(ParamId.WRITE_INT_LIM, lim)
 
+    def write_kd(self, kd: float) -> None:
+        self._write_q16(ParamId.WRITE_KD, kd)
+
+    def write_kff(self, kff: float) -> None:
+        self._write_q16(ParamId.WRITE_KFF, kff)
+
     def write_motor_pole_pairs(self, pole_pairs: int) -> None:
         if not (1 <= int(pole_pairs) <= 64):
             raise TunerError("motor pole pairs must be 1..64")
@@ -366,18 +342,6 @@ class TunerClient:
 
     def write_target_iq(self, iq_amps: float) -> None:
         self._write_q16(ParamId.WRITE_TARGET_IQ, iq_amps)
-
-    def write_target_ud(self, ud_volts: float) -> None:
-        self._write_q16(ParamId.WRITE_TARGET_UD, ud_volts)
-
-    def write_target_uq(self, uq_volts: float) -> None:
-        self._write_q16(ParamId.WRITE_TARGET_UQ, uq_volts)
-
-    def recompute_gains(self, motor_r: float, motor_l: float, bw_hz: float) -> None:
-        payload = (struct.pack("<i", q16_from_float(motor_r))
-                   + struct.pack("<i", q16_from_float(motor_l))
-                   + struct.pack("<i", q16_from_float(bw_hz)))
-        self._exec(ParamId.CMD_RECOMPUTE_GAINS, payload)
 
     def override_on(self) -> None:
         self._exec(ParamId.CMD_OVERRIDE_ON)
@@ -407,15 +371,12 @@ class TunerClient:
         is generous: open-loop sweeps and re-park take several seconds."""
         self._exec(ParamId.CMD_ALIGN_AXIS, timeout=timeout)
 
-    def persist_calibration(self, motor_r: float = 0.0,
-                            motor_l: float = 0.0,
-                            bandwidth_hz: float = 0.0) -> None:
-        """Saves current axis gains plus the host-supplied motor
-        params (recorded for audit / GUI display) to NVS."""
-        payload = (struct.pack("<i", q16_from_float(motor_r))
-                   + struct.pack("<i", q16_from_float(motor_l))
-                   + struct.pack("<i", q16_from_float(bandwidth_hz)))
-        self._exec(ParamId.CMD_PERSIST_NVS, payload)
+    def stop_axis(self) -> None:
+        self._exec(ParamId.CMD_STOP_AXIS)
+
+    def persist_calibration(self) -> None:
+        """Saves current axis gains to NVS."""
+        self._exec(ParamId.CMD_PERSIST_NVS, b"")
 
     def load_calibration(self) -> None:
         self._exec(ParamId.CMD_LOAD_NVS)

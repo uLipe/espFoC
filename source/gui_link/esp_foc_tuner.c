@@ -10,14 +10,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "espFoC/gui_link/esp_foc_tuner.h"
-#include "espFoC/tuning/esp_foc_axis_tuning.h"
 #include "espFoC/esp_foc.h"
 #include "espFoC/gui_link/esp_foc_link.h"
 #include "espFoC/calibration/esp_foc_calibration.h"
 #include "espFoC/utils/esp_foc_q16.h"
 
-/* Per-axis registry. Pointers are only mutated from esp_foc_tuner_attach_axis,
- * which is expected to be called from a non-time-critical context. */
 static esp_foc_axis_t *s_axes[ESP_FOC_TUNER_MAX_AXES];
 
 esp_foc_err_t esp_foc_tuner_attach_axis(uint8_t axis_id, esp_foc_axis_t *axis)
@@ -25,8 +22,6 @@ esp_foc_err_t esp_foc_tuner_attach_axis(uint8_t axis_id, esp_foc_axis_t *axis)
     if (axis_id >= ESP_FOC_TUNER_MAX_AXES) {
         return ESP_FOC_ERR_INVALID_ARG;
     }
-    /* NULL is allowed (detach); a non-NULL pointer must be a real,
-     * initialized axis so no later request operates on garbage memory. */
     if (axis != NULL && axis->magic != ESP_FOC_AXIS_MAGIC) {
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
@@ -70,7 +65,6 @@ static uint8_t compute_axis_state(const esp_foc_axis_t *axis)
 
 static void write_q16(void *dst, q16_t v)
 {
-    /* Little-endian byte serialization (matches typical wire formats). */
     uint8_t *b = (uint8_t *)dst;
     uint32_t u = (uint32_t)v;
     b[0] = (uint8_t)(u & 0xFF);
@@ -89,17 +83,7 @@ static q16_t read_q16(const void *src)
     return (q16_t)u;
 }
 
-/* Forward declaration: tuner_log is defined further down but
- * handle_write needs it for the LOG-channel breadcrumb on the
- * current-filter cutoff write. */
 static void tuner_log(const char *msg);
-
-static void board_reset_task(void *arg)
-{
-    (void)arg;
-    vTaskDelay(pdMS_TO_TICKS(150));
-    esp_restart();
-}
 
 static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
                                  esp_foc_tuner_id_t id,
@@ -109,11 +93,9 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
-    /* Single-byte responses */
     if (id == ESP_FOC_TUNER_PARAM_AXIS_STATE ||
         id == ESP_FOC_TUNER_PARAM_AXIS_LAST_ERR ||
-        id == ESP_FOC_TUNER_PARAM_NVS_PRESENT ||
-        id == ESP_FOC_TUNER_PARAM_SKIP_TORQUE_U8) {
+        id == ESP_FOC_TUNER_PARAM_NVS_PRESENT) {
         if (*response_len < 1) {
             return ESP_FOC_ERR_INVALID_ARG;
         }
@@ -128,9 +110,6 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
         case ESP_FOC_TUNER_PARAM_NVS_PRESENT:
             b[0] = esp_foc_calibration_present(axis->cal.axis_id) ? 1 : 0;
             break;
-        case ESP_FOC_TUNER_PARAM_SKIP_TORQUE_U8:
-            b[0] = axis->skip_torque_control ? 1u : 0u;
-            break;
         default: break;
         }
         *response_len = 1;
@@ -141,8 +120,6 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
-    /* FIRMWARE_TYPE is a u32 magic — handled separately because it does
-     * not come from the axis. */
     if (id == ESP_FOC_TUNER_PARAM_FIRMWARE_TYPE) {
         uint32_t v = esp_foc_tuner_firmware_type();
         uint8_t *b = (uint8_t *)response;
@@ -155,9 +132,6 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
     }
 
     if (id == ESP_FOC_TUNER_PARAM_MOTOR_POLE_PAIRS) {
-        if (*response_len < 4) {
-            return ESP_FOC_ERR_INVALID_ARG;
-        }
         int32_t pp = (int32_t)axis->motor_pole_pairs;
         uint8_t *b = (uint8_t *)response;
         uint32_t u = (uint32_t)pp;
@@ -169,8 +143,8 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
         return ESP_FOC_OK;
     }
 
-    q16_t kp = 0, ki = 0, lim = 0;
-    esp_foc_axis_get_current_pi_gains_q16(axis, &kp, &ki, &lim);
+    q16_t kp = 0, ki = 0, kd = 0, kff = 0, lim = 0;
+    esp_foc_axis_get_current_loop_gains_q16(axis, &kp, &ki, &kd, &kff, &lim);
 
     q16_t value = 0;
     switch (id) {
@@ -180,9 +154,8 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
     case ESP_FOC_TUNER_PARAM_V_MAX_Q16:       value = axis->mod_index_limit_q16; break;
     case ESP_FOC_TUNER_PARAM_I_FILTER_FC_Q16: value = axis->current_filter_fc_hz_q16; break;
     case ESP_FOC_TUNER_PARAM_LOOP_FS_HZ_Q16:  value = axis->current_filter_fs_hz_q16; break;
-    case ESP_FOC_TUNER_PARAM_MOTOR_R_OHM_Q16: value = axis->cal.motor_r_ohm; break;
-    case ESP_FOC_TUNER_PARAM_MOTOR_L_H_Q16:   value = axis->cal.motor_l_h; break;
-    case ESP_FOC_TUNER_PARAM_MOTOR_BW_HZ_Q16: value = axis->cal.bandwidth_hz; break;
+    case ESP_FOC_TUNER_PARAM_KD_Q16:          value = kd;  break;
+    case ESP_FOC_TUNER_PARAM_KFF_Q16:         value = kff; break;
     default:
         return ESP_FOC_ERR_INVALID_ARG;
     }
@@ -198,16 +171,6 @@ static esp_foc_err_t handle_write(esp_foc_axis_t *axis,
 {
     if (payload == NULL) {
         return ESP_FOC_ERR_INVALID_ARG;
-    }
-    if (id == ESP_FOC_TUNER_WRITE_SKIP_TORQUE_U8) {
-        if (payload_len < 1) {
-            return ESP_FOC_ERR_INVALID_ARG;
-        }
-        const uint8_t *p = (const uint8_t *)payload;
-        esp_foc_critical_enter();
-        axis->skip_torque_control = (p[0] != 0) ? 1 : 0;
-        esp_foc_critical_leave();
-        return ESP_FOC_OK;
     }
     if (payload_len < 4) {
         return ESP_FOC_ERR_INVALID_ARG;
@@ -232,25 +195,24 @@ static esp_foc_err_t handle_write(esp_foc_axis_t *axis,
     }
     q16_t v = read_q16(payload);
 
-    /* Gain writes feed the existing atomic swap helper so the PID never
-     * sees a partial update. */
     if (id == ESP_FOC_TUNER_WRITE_KP_Q16 ||
         id == ESP_FOC_TUNER_WRITE_KI_Q16 ||
-        id == ESP_FOC_TUNER_WRITE_INT_LIM_Q16) {
-        q16_t kp, ki, lim;
-        esp_foc_axis_get_current_pi_gains_q16(axis, &kp, &ki, &lim);
+        id == ESP_FOC_TUNER_WRITE_INT_LIM_Q16 ||
+        id == ESP_FOC_TUNER_WRITE_KD_Q16 ||
+        id == ESP_FOC_TUNER_WRITE_KFF_Q16) {
+        q16_t kp, ki, kd, kff, lim;
+        esp_foc_axis_get_current_loop_gains_q16(axis, &kp, &ki, &kd, &kff, &lim);
         switch (id) {
         case ESP_FOC_TUNER_WRITE_KP_Q16:      kp  = v; break;
         case ESP_FOC_TUNER_WRITE_KI_Q16:      ki  = v; break;
         case ESP_FOC_TUNER_WRITE_INT_LIM_Q16: lim = v; break;
+        case ESP_FOC_TUNER_WRITE_KD_Q16:      kd  = v; break;
+        case ESP_FOC_TUNER_WRITE_KFF_Q16:     kff = v; break;
         default: break;
         }
-        return esp_foc_axis_set_current_pi_gains_q16(axis, kp, ki, lim);
+        return esp_foc_axis_set_current_loop_gains_q16(axis, kp, ki, kd, kff, lim);
     }
 
-    /* Current-sense LPF cutoff. Re-runs the Butterworth designer on
-     * the per-channel biquads inside the isensor driver. fs comes
-     * from the value the axis captured at init (loop rate). */
     if (id == ESP_FOC_TUNER_WRITE_I_FILTER_FC_Q16) {
         if (axis->isensor_driver == NULL ||
             axis->isensor_driver->set_filter_cutoff == NULL) {
@@ -267,23 +229,16 @@ static esp_foc_err_t handle_write(esp_foc_axis_t *axis,
         return ESP_FOC_OK;
     }
 
-    /* Motion-target writes only land while the override is active.
-     * The four shadow targets are tiny so we use the global critical
-     * section for the swap. */
     if (id == ESP_FOC_TUNER_WRITE_TARGET_ID_Q16 ||
-        id == ESP_FOC_TUNER_WRITE_TARGET_IQ_Q16 ||
-        id == ESP_FOC_TUNER_WRITE_TARGET_UD_Q16 ||
-        id == ESP_FOC_TUNER_WRITE_TARGET_UQ_Q16) {
+        id == ESP_FOC_TUNER_WRITE_TARGET_IQ_Q16) {
         if (!axis->tuner_override.active) {
             return ESP_FOC_ERR_AXIS_INVALID_STATE;
         }
         esp_foc_critical_enter();
-        switch (id) {
-        case ESP_FOC_TUNER_WRITE_TARGET_ID_Q16: axis->tuner_override.target_id = v; break;
-        case ESP_FOC_TUNER_WRITE_TARGET_IQ_Q16: axis->tuner_override.target_iq = v; break;
-        case ESP_FOC_TUNER_WRITE_TARGET_UD_Q16: axis->tuner_override.target_ud = v; break;
-        case ESP_FOC_TUNER_WRITE_TARGET_UQ_Q16: axis->tuner_override.target_uq = v; break;
-        default: break;
+        if (id == ESP_FOC_TUNER_WRITE_TARGET_ID_Q16) {
+            axis->tuner_override.target_id = v;
+        } else {
+            axis->tuner_override.target_iq = v;
         }
         esp_foc_critical_leave();
         return ESP_FOC_OK;
@@ -292,9 +247,6 @@ static esp_foc_err_t handle_write(esp_foc_axis_t *axis,
     return ESP_FOC_ERR_INVALID_ARG;
 }
 
-/* Send a one-line text message on the LOG link channel. Used by the
- * blocking commands (alignment, persist) to surface progress without
- * blocking the user behind a giant tuner-channel response. */
 static void tuner_log(const char *msg)
 {
     if (msg == NULL) {
@@ -316,24 +268,21 @@ static void tuner_log(const char *msg)
     }
 }
 
+static void board_reset_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(150));
+    esp_restart();
+}
+
 static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
                                  esp_foc_tuner_id_t id,
                                  const void *payload, size_t payload_len)
 {
-    if (id == ESP_FOC_TUNER_CMD_RECOMPUTE_GAINS) {
-        if (payload == NULL || payload_len < 12) {
-            return ESP_FOC_ERR_INVALID_ARG;
-        }
-        const uint8_t *p = (const uint8_t *)payload;
-        q16_t r  = read_q16(p);
-        q16_t l  = read_q16(p + 4);
-        q16_t bw = read_q16(p + 8);
-        return esp_foc_axis_retune_current_pi_q16(axis, r, l, bw);
-    }
+    (void)payload;
+    (void)payload_len;
 
     if (id == ESP_FOC_TUNER_CMD_OVERRIDE_ON) {
-        /* Refuse to take over an axis that is not aligned: spinning a
-         * motor with an unaligned encoder produces wild currents. */
         if (axis->state != ESP_FOC_AXIS_STATE_ALIGNED &&
             axis->state != ESP_FOC_AXIS_STATE_RUNNING) {
             return ESP_FOC_ERR_NOT_ALIGNED;
@@ -341,8 +290,6 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
         esp_foc_critical_enter();
         axis->tuner_override.target_id = 0;
         axis->tuner_override.target_iq = 0;
-        axis->tuner_override.target_ud = 0;
-        axis->tuner_override.target_uq = 0;
         axis->tuner_override.active = true;
         esp_foc_critical_leave();
         return ESP_FOC_OK;
@@ -367,9 +314,6 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
     }
 
     if (id == ESP_FOC_TUNER_CMD_ALIGN_AXIS) {
-        /* Blocking — parking + Vq-sweep direction + re-park takes ~4-5 s
-         * with default sweep steps. The host should use a long timeout
-         * for this command; LOG frames bracket the call. */
         tuner_log("alignment: started");
         esp_foc_err_t err = esp_foc_align_axis(axis);
         if (err == ESP_FOC_OK) {
@@ -380,8 +324,6 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
             esp_foc_critical_enter();
             axis->tuner_override.target_id = 0;
             axis->tuner_override.target_iq = 0;
-            axis->tuner_override.target_ud = 0;
-            axis->tuner_override.target_uq = 0;
             axis->tuner_override.active = true;
             esp_foc_critical_leave();
 #endif
@@ -392,11 +334,7 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
     }
 
     if (id == ESP_FOC_TUNER_CMD_PERSIST_NVS) {
-        esp_foc_err_t err = esp_foc_calibration_axis_tuner_persist(
-            axis,
-            (payload != NULL && payload_len >= 12)
-            ? (const uint8_t *)payload : NULL,
-            payload_len);
+        esp_foc_err_t err = esp_foc_calibration_axis_tuner_persist(axis);
         if (err == ESP_FOC_OK) {
             char msg[72];
             (void)snprintf(
@@ -437,16 +375,10 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
     }
 
     if (id == ESP_FOC_TUNER_CMD_PING) {
-        (void)axis;
-        (void)payload;
-        (void)payload_len;
         return ESP_FOC_OK;
     }
 
     if (id == ESP_FOC_TUNER_CMD_RESET_BOARD) {
-        (void)axis;
-        (void)payload;
-        (void)payload_len;
         tuner_log("board: host requested reset (rebooting)");
         if (xTaskCreate(board_reset_task, "foc_host_rst", 3072, NULL,
                         tskIDLE_PRIORITY + 1, NULL) != pdPASS) {
@@ -472,7 +404,6 @@ esp_foc_err_t esp_foc_tuner_handle_request(
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
-    /* Default: no response payload. */
     size_t initial_resp_cap = (response_len != NULL) ? *response_len : 0;
     if (response_len != NULL) {
         *response_len = 0;
@@ -494,8 +425,6 @@ esp_foc_err_t esp_foc_tuner_handle_request(
     }
 }
 
-/* --- Reactor: link decoder + dispatcher ------------------------------- */
-
 static esp_foc_link_decoder_t s_dec;
 static bool s_dec_initialized = false;
 
@@ -510,8 +439,6 @@ static void send_response_frame(uint8_t seq,
                                 const uint8_t *resp_payload,
                                 size_t resp_len)
 {
-    /* Application-level response: [status:i8][seq:u8][payload]. The seq
-     * is echoed so the host can correlate responses to requests. */
     uint8_t app[2 + ESP_FOC_LINK_MAX_PAYLOAD];
     if (resp_len > sizeof(app) - 2) {
         resp_len = sizeof(app) - 2;
@@ -535,7 +462,6 @@ static void dispatch_frame(uint8_t seq,
                            const uint8_t *payload,
                            size_t payload_len)
 {
-    /* Application-level request: [op:u8][id:u16 LE][axis:u8][cmd_payload]. */
     if (payload_len < 4) {
         send_response_frame(seq, (int8_t)ESP_FOC_ERR_INVALID_ARG, NULL, 0);
         return;
@@ -571,11 +497,8 @@ void esp_foc_tuner_process_byte(uint8_t byte)
                        esp_foc_link_decoder_payload(&s_dec),
                        esp_foc_link_decoder_payload_len(&s_dec));
     }
-    /* Reset for the next frame. */
     esp_foc_link_decoder_reset(&s_dec);
 }
-
-/* --- Default weak transport callbacks (no-op) -------------------------- */
 
 __attribute__((weak)) void esp_foc_tuner_init_bus_callback(void)
 {

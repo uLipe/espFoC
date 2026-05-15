@@ -98,7 +98,7 @@ class SvmPanel(QWidget):
         super().__init__()
         self._reader = reader
         self._sample_dt = sample_period_s  # backwards-compat only
-        self._uniform_dt_s = scope_uniform_dt_s(20000.0, demo=False)
+        self._uniform_dt_s = scope_uniform_dt_s(20000.0)
         self._scope_synth_t = 0.0
         self._inbox_lock = threading.Lock()
         # Same (t_mono, payload) pattern as ScopePanel so the waveform

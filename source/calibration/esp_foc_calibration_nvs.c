@@ -19,7 +19,7 @@ static const char *TAG = "ESP_FOC_CALIB";
 
 #define ESPFOC_CAL_NS         "espfoc_cal"
 #define ESPFOC_CAL_MAGIC      0xE5F0CC11u
-#define ESPFOC_CAL_VERSION    1u
+#define ESPFOC_CAL_VERSION    2u
 #define ESPFOC_CAL_MAX_AXES   4
 
 typedef struct __attribute__((packed)) {
@@ -58,15 +58,7 @@ static uint32_t fnv1a_32(const char *s)
 
 uint32_t esp_foc_calibration_profile_hash(void)
 {
-#if defined(CONFIG_ESP_FOC_USE_AUTOGEN_GAINS) && CONFIG_ESP_FOC_USE_AUTOGEN_GAINS
-    char buf[80];
-    snprintf(buf, sizeof(buf), "%s:%d",
-             CONFIG_ESP_FOC_MOTOR_PROFILE,
-             CONFIG_ESP_FOC_PROFILE_VERSION);
-    return fnv1a_32(buf);
-#else
-    return fnv1a_32("no_autogen");
-#endif
+    return fnv1a_32("espfoc_cal_blob_v2");
 }
 
 static esp_foc_err_t ensure_nvs(void)
@@ -140,14 +132,12 @@ esp_foc_err_t esp_foc_calibration_save(uint8_t axis_id,
         esp_foc_calibration_get_align(data, &af, &enc0, &nat_d);
         ESP_LOGD(
             TAG,
-            "axis %u: save OK profile_hash=0x%08x Kp=%.4f Ki=%.2f ILim=%.3f I-lpf=%.1fHz "
-            "R=%.4f L=%.4e bw=%.1f align0=%u",
+            "axis %u: save OK profile_hash=0x%08x Kp=%.4f Ki=%.4f Kd=%.4f Kff=%.4f ILim=%.3f I-lpf=%.1fHz "
+            "align0=%u",
             axis_id, (unsigned)blob.profile_hash,
             (double)q16_to_float(data->kp), (double)q16_to_float(data->ki),
+            (double)q16_to_float(data->kd), (double)q16_to_float(data->kff),
             (double)q16_to_float(data->integrator_limit), (double)fcli,
-            (double)q16_to_float(data->motor_r_ohm),
-            (double)q16_to_float(data->motor_l_h),
-            (double)q16_to_float(data->bandwidth_hz),
             (unsigned)af);
         (void)enc0;
         (void)nat_d;

@@ -33,7 +33,7 @@ class Transport:
 class LoopbackTransport(Transport):
     """In-process transport that pipes the host side back to itself.
 
-    Useful for unit tests and the GUI's --demo mode: pair two
+    Useful for unit tests: pair two
     LoopbackTransport instances and any bytes written into one show up
     on the other's read queue.
 

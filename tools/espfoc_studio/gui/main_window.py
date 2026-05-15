@@ -25,7 +25,6 @@ from ..link import LinkReader
 from ..protocol import TunerClient, TunerError
 from .theme import make_badge_qss, make_reset_board_button_qss
 from .analysis_panel import AnalysisPanel
-from .generate_app_panel import GenerateAppPanel
 from .sensors_debug_panel import SensorsDebugPanel
 from .scope_panel import ScopePanel
 from .scope_stream_timing import scope_uniform_dt_s
@@ -40,13 +39,11 @@ _LINK_DOWN_AFTER_CONSECUTIVE_PING_FAILS = 10
 class MainWindow(QMainWindow):
     def __init__(self, client: TunerClient,
                  title: str = "espFoC TunerStudio",
-                 link_mode: str = "hw",
                  link_descr: str = "",
                  serial_config: Optional[Tuple[str, int, int]] = None) -> None:
         super().__init__()
         self._client = client
         self._serial_config = serial_config
-        self._link_mode = link_mode
         self._last_reconnect_mono: float = 0.0
         self._link_ping_seen: bool = False
         self._ping_fail_streak: int = 0
@@ -94,17 +91,6 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._svm, "SVM Hexagon")
         tabs.addTab(self._scope, "Scope")
 
-        # Generate App (embedded Hardware + codegen) is only for `--demo`.
-        # Live targets use TunerStudio for tuning; app generation stays out
-        # of the hot path / serial workflow.
-        if self._link_mode == "demo":
-            self._generate = GenerateAppPanel(
-                self._client, self._current_motor_params)
-            tabs.addTab(self._generate, "Generate App")
-            hw_cfg = self._generate._hw.get_config()
-            self._sensors.set_counts_per_rev(
-                int(hw_cfg.sensor_cfg.get("counts_per_rev", 4096)))
-
         splitter.addWidget(tabs)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -131,18 +117,13 @@ class MainWindow(QMainWindow):
         self._reset_btn.setToolTip(
             "Restart the target (esp_restart). Emergency use only.")
         self._reset_btn.clicked.connect(self._on_reset_board_clicked)
-        if link_mode == "demo":
-            self._reset_btn.setEnabled(False)
         sb.addPermanentWidget(self._link_badge, 0)
         sb.addPermanentWidget(self._reset_btn, 0)
         sb.addPermanentWidget(self._link_descr, 0)
-        if link_mode == "demo":
-            self._set_link_badge("LINK_DEMO")
-        else:
-            self._set_link_badge("LINK_WAIT")
+        self._set_link_badge("LINK_WAIT")
 
         self._poll_thread = QThread(self)
-        self._poll_worker = TunerPollWorker(self._client, link_mode)
+        self._poll_worker = TunerPollWorker(self._client)
         self._poll_worker.moveToThread(self._poll_thread)
         self._poll_worker.poll_finished.connect(
             self._on_poll_finished, Qt.QueuedConnection)
@@ -159,8 +140,7 @@ class MainWindow(QMainWindow):
         self._poll_thread.started.connect(self._poll_worker.start_timer)
         self._poll_thread.start()
 
-        if link_mode == "hw":
-            self._update_link_badge()
+        self._update_link_badge()
         self._set_sensors_interactive()
 
     def _on_device_reads_ready(
@@ -173,8 +153,7 @@ class MainWindow(QMainWindow):
         if fs_hz > 1.0:
             self._analysis.set_loop_rate_hz(fs_hz)
             self._tuning.set_loop_rate_hz(fs_hz)
-            scope_dt = scope_uniform_dt_s(
-                fs_hz, demo=(self._link_mode == "demo"))
+            scope_dt = scope_uniform_dt_s(fs_hz)
             self._scope.set_uniform_sample_period_s(scope_dt)
             self._svm.set_uniform_sample_period_s(scope_dt)
             self._sensors.set_uniform_sample_period_s(scope_dt)
@@ -225,9 +204,6 @@ class MainWindow(QMainWindow):
         self._link_badge.setVisible(True)
 
     def _update_link_badge(self) -> None:
-        if self._link_mode == "demo":
-            self._set_link_badge("LINK_DEMO")
-            return
         r = self._client.reader
         if r is None or not r.is_running:
             self._set_link_badge("LINK_DOWN")
@@ -241,8 +217,6 @@ class MainWindow(QMainWindow):
             self._set_link_badge("LINK_OK")
 
     def _on_ping_finished(self, ok: bool, err: str) -> None:
-        if self._link_mode != "hw":
-            return
         self._link_ping_seen = True
         if ok:
             self._ping_fail_streak = 0
@@ -363,8 +337,3 @@ class MainWindow(QMainWindow):
         r, l, bw, kp, ki = self._analysis_pending
         self._analysis_pending = None
         self._analysis.update_model(r, l, bw, kp, ki)
-
-    def _current_motor_params(self) -> tuple[float, float, float]:
-        return (self._tuning._r_spin.value(),
-                self._tuning._l_mh_spin.value() * 1e-3,
-                self._tuning._bw_spin.value())

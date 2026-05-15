@@ -45,56 +45,42 @@ typedef enum {
 
 typedef enum {
     /* Read-only parameters */
-    ESP_FOC_TUNER_PARAM_KP_Q16          = 0x0010, /* read q16 */
-    ESP_FOC_TUNER_PARAM_KI_Q16          = 0x0011, /* read q16 */
-    ESP_FOC_TUNER_PARAM_INT_LIM_Q16     = 0x0012, /* read q16 */
-    ESP_FOC_TUNER_PARAM_V_MAX_Q16       = 0x0013, /* read q16 */
-    ESP_FOC_TUNER_PARAM_I_FILTER_FC_Q16 = 0x0014, /* read q16 (Hz, current LPF) */
-    ESP_FOC_TUNER_PARAM_LOOP_FS_HZ_Q16  = 0x0015, /* read q16 (Hz, current PI sample rate) */
-    ESP_FOC_TUNER_PARAM_MOTOR_R_OHM_Q16  = 0x0016, /* read q16, last NVS R [Ohm] or 0 */
-    ESP_FOC_TUNER_PARAM_MOTOR_L_H_Q16    = 0x0017, /* read q16, last NVS L [H] or 0 */
-    ESP_FOC_TUNER_PARAM_MOTOR_BW_HZ_Q16  = 0x0018, /* read q16, last NVS bandwidth [Hz] or 0 */
-    ESP_FOC_TUNER_PARAM_MOTOR_POLE_PAIRS  = 0x0019, /* read int32, live axis (1..64) */
-    ESP_FOC_TUNER_PARAM_AXIS_STATE      = 0x0040, /* read u8 bitmap */
-    ESP_FOC_TUNER_PARAM_AXIS_LAST_ERR   = 0x0041, /* read i8 (esp_foc_err_t) */
-    ESP_FOC_TUNER_PARAM_NVS_PRESENT     = 0x0042, /* read u8 (0/1) */
-    ESP_FOC_TUNER_PARAM_SKIP_TORQUE_U8  = 0x0043, /* read u8: 1 = open-loop voltage (skip current PI) */
-    ESP_FOC_TUNER_PARAM_FIRMWARE_TYPE   = 0x0050, /* read u32: 0 by default,
-                                                   * tuner_studio_target sets
-                                                   * 'TSGX' so the GUI can
-                                                   * surface its Generate App
-                                                   * tab on detection. */
+    ESP_FOC_TUNER_PARAM_KP_Q16          = 0x0010,
+    ESP_FOC_TUNER_PARAM_KI_Q16          = 0x0011,
+    ESP_FOC_TUNER_PARAM_INT_LIM_Q16     = 0x0012,
+    ESP_FOC_TUNER_PARAM_V_MAX_Q16       = 0x0013,
+    ESP_FOC_TUNER_PARAM_I_FILTER_FC_Q16 = 0x0014,
+    ESP_FOC_TUNER_PARAM_LOOP_FS_HZ_Q16  = 0x0015,
+    ESP_FOC_TUNER_PARAM_KD_Q16          = 0x0016,
+    ESP_FOC_TUNER_PARAM_KFF_Q16         = 0x0017,
+    ESP_FOC_TUNER_PARAM_MOTOR_POLE_PAIRS = 0x0018,
+    ESP_FOC_TUNER_PARAM_AXIS_STATE      = 0x0040,
+    ESP_FOC_TUNER_PARAM_AXIS_LAST_ERR   = 0x0041,
+    ESP_FOC_TUNER_PARAM_NVS_PRESENT     = 0x0042,
+    ESP_FOC_TUNER_PARAM_FIRMWARE_TYPE   = 0x0050,
 
     /* Write: gain swap (atomic) */
-    ESP_FOC_TUNER_WRITE_KP_Q16          = 0x0020, /* write q16 */
-    ESP_FOC_TUNER_WRITE_KI_Q16          = 0x0021, /* write q16 */
-    ESP_FOC_TUNER_WRITE_INT_LIM_Q16     = 0x0022, /* write q16 */
-    ESP_FOC_TUNER_WRITE_I_FILTER_FC_Q16 = 0x0023, /* write q16 Hz; redesigns
-                                                   * the per-phase Butterworth
-                                                   * inside the isensor driver */
-    ESP_FOC_TUNER_WRITE_MOTOR_POLE_PAIRS = 0x0024, /* int32: 1..64; axis + NVS
-                                                    * (persist) */
+    ESP_FOC_TUNER_WRITE_KP_Q16          = 0x0020,
+    ESP_FOC_TUNER_WRITE_KI_Q16          = 0x0021,
+    ESP_FOC_TUNER_WRITE_INT_LIM_Q16     = 0x0022,
+    ESP_FOC_TUNER_WRITE_I_FILTER_FC_Q16 = 0x0023,
+    ESP_FOC_TUNER_WRITE_MOTOR_POLE_PAIRS = 0x0024,
+    ESP_FOC_TUNER_WRITE_KD_Q16          = 0x0025,
+    ESP_FOC_TUNER_WRITE_KFF_Q16         = 0x0026,
 
-    /* Write: tuner-driven motion targets (only honored while override active) */
-    ESP_FOC_TUNER_WRITE_TARGET_ID_Q16   = 0x0060, /* write q16 (current ref) */
-    ESP_FOC_TUNER_WRITE_TARGET_IQ_Q16   = 0x0061, /* write q16 (current ref) */
-    ESP_FOC_TUNER_WRITE_TARGET_UD_Q16   = 0x0062, /* write q16 (voltage ff) */
-    ESP_FOC_TUNER_WRITE_TARGET_UQ_Q16   = 0x0063, /* write q16 (voltage ff) */
-    ESP_FOC_TUNER_WRITE_SKIP_TORQUE_U8  = 0x0064, /* write u8: payload[0] 0/1 → axis->skip_torque_control */
+    ESP_FOC_TUNER_WRITE_TARGET_ID_Q16   = 0x0060,
+    ESP_FOC_TUNER_WRITE_TARGET_IQ_Q16   = 0x0061,
 
-    /* Commands (exec) */
-    ESP_FOC_TUNER_CMD_RECOMPUTE_GAINS   = 0x0080, /* [R_q16,L_q16,bw_q16] */
-    ESP_FOC_TUNER_CMD_OVERRIDE_ON       = 0x00A0, /* no payload */
-    ESP_FOC_TUNER_CMD_OVERRIDE_OFF      = 0x00A1, /* no payload */
-    ESP_FOC_TUNER_CMD_ALIGN_AXIS        = 0x00A2, /* blocking; emits LOG progress */
-    ESP_FOC_TUNER_CMD_STOP_AXIS         = 0x00A3, /* blocking; park + teardown loops */
+    ESP_FOC_TUNER_CMD_OVERRIDE_ON       = 0x00A0,
+    ESP_FOC_TUNER_CMD_OVERRIDE_OFF      = 0x00A1,
+    ESP_FOC_TUNER_CMD_ALIGN_AXIS        = 0x00A2,
+    ESP_FOC_TUNER_CMD_STOP_AXIS         = 0x00A3,
 
-    ESP_FOC_TUNER_CMD_PERSIST_NVS       = 0x00B0, /* save current gains */
-    ESP_FOC_TUNER_CMD_LOAD_NVS          = 0x00B1, /* apply NVS overlay */
-    ESP_FOC_TUNER_CMD_ERASE_NVS         = 0x00B2, /* nuke calibration ns */
-    ESP_FOC_TUNER_CMD_RESET_BOARD      = 0x00B3, /* host emergency: esp_restart
-                                                   * after response; no payload */
-    ESP_FOC_TUNER_CMD_PING             = 0x00B4, /* no payload; OK = link alive */
+    ESP_FOC_TUNER_CMD_PERSIST_NVS       = 0x00B0,
+    ESP_FOC_TUNER_CMD_LOAD_NVS          = 0x00B1,
+    ESP_FOC_TUNER_CMD_ERASE_NVS         = 0x00B2,
+    ESP_FOC_TUNER_CMD_RESET_BOARD      = 0x00B3,
+    ESP_FOC_TUNER_CMD_PING             = 0x00B4,
 } esp_foc_tuner_id_t;
 
 /* Bitmap returned by ESP_FOC_TUNER_PARAM_AXIS_STATE. */
@@ -173,8 +159,7 @@ void esp_foc_tuner_send_callback(const uint8_t *buf, size_t len);
 
 /**
  * @brief Identifier the host uses to recognise a specific firmware
- *        variant (e.g. tuner_studio_target advertises 'TSGX' so
- *        TunerStudio enables its Generate App tab).
+ *        variant (e.g. tuner_studio_target advertises ``TSGX``).
  *
  * Default returns 0; override with a strong definition in your
  * application to expose a different value.

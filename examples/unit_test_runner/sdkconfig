@@ -2063,15 +2063,6 @@ CONFIG_ESP_FOC_BRIDGE_NONE=y
 # CONFIG_ESP_FOC_BRIDGE_UART is not set
 CONFIG_ESP_FOC_CALIBRATION_NVS=y
 # end of GUI link
-
-#
-# Build-time PI autotuning
-#
-CONFIG_ESP_FOC_USE_AUTOGEN_GAINS=y
-CONFIG_ESP_FOC_PROFILE_VERSION=1
-CONFIG_ESP_FOC_MOTOR_PROFILE="mf400525t"
-CONFIG_ESP_FOC_AUTOGEN_DECIMATION=1
-# end of Build-time PI autotuning
 # end of espFoC Settings
 # end of Component config
 

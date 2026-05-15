@@ -6,11 +6,8 @@ Examples:
     # Inspect the axis state
     tunerctl --port /dev/ttyACM0 axis-state
 
-    # Read current PI gains
+    # Read current-loop gains
     tunerctl --port /dev/ttyACM0 read
-
-    # Recompute gains via MPZ for a motor on the fly
-    tunerctl --port /dev/ttyACM0 retune --r 1.08 --l 0.0018 --bw 150
 
     # Engage tuner override and command iq = 1.5 A
     tunerctl --port /dev/ttyACM0 override on
@@ -61,6 +58,8 @@ def cmd_read(args) -> int:
     print(f"axis {args.axis}: "
           f"Kp={cli.read_kp():.4f} V/A  "
           f"Ki={cli.read_ki():.2f} V/(A*s)  "
+          f"Kd={cli.read_kd():.6f}  "
+          f"Kff={cli.read_kff():.4f}  "
           f"ILim={cli.read_int_lim():.3f} V  "
           f"Vmax={cli.read_v_max():.3f} V")
     return 0
@@ -72,15 +71,19 @@ def cmd_write(args) -> int:
         cli.write_kp(args.kp)
     if args.ki is not None:
         cli.write_ki(args.ki)
+    if args.kd is not None:
+        cli.write_kd(args.kd)
+    if args.kff is not None:
+        cli.write_kff(args.kff)
     if args.ilim is not None:
         cli.write_int_lim(args.ilim)
     return cmd_read(args)
 
 
 def cmd_retune(args) -> int:
-    cli = _make_client(args)
-    cli.recompute_gains(args.r, args.l, args.bw)
-    return cmd_read(args)
+    print("tunerctl: retune was removed; set Kp/Ki/Kd/Kff with write.",
+          file=sys.stderr)
+    return 2
 
 
 def cmd_override(args) -> int:
@@ -97,8 +100,6 @@ def cmd_set_target(args) -> int:
     setter = {
         "id": cli.write_target_id,
         "iq": cli.write_target_iq,
-        "ud": cli.write_target_ud,
-        "uq": cli.write_target_uq,
     }[args.target]
     setter(args.value)
     print(f"axis {args.axis}: target_{args.target}={args.value}")
@@ -116,9 +117,7 @@ def cmd_align(args) -> int:
 
 def cmd_persist(args) -> int:
     cli = _make_client(args)
-    cli.persist_calibration(motor_r=args.r or 0.0,
-                            motor_l=args.l or 0.0,
-                            bandwidth_hz=args.bw or 0.0)
+    cli.persist_calibration()
     print(f"axis {args.axis}: calibration saved to NVS")
     return 0
 
@@ -163,26 +162,25 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("axis-state", help="show axis state flags").set_defaults(func=cmd_axis_state)
-    sub.add_parser("read", help="read current PI gains + Vmax").set_defaults(func=cmd_read)
+    sub.add_parser("read", help="read current-loop gains + Vmax").set_defaults(func=cmd_read)
 
     pw = sub.add_parser("write", help="manually override one or more gains")
     pw.add_argument("--kp", type=float)
     pw.add_argument("--ki", type=float)
+    pw.add_argument("--kd", type=float)
+    pw.add_argument("--kff", type=float)
     pw.add_argument("--ilim", type=float)
     pw.set_defaults(func=cmd_write)
 
-    pr = sub.add_parser("retune", help="recompute MPZ gains from motor params")
-    pr.add_argument("--r", type=float, required=True, help="phase resistance [ohm]")
-    pr.add_argument("--l", type=float, required=True, help="phase inductance [H]")
-    pr.add_argument("--bw", type=float, required=True, help="target bandwidth [Hz]")
+    pr = sub.add_parser("retune", help="(removed) kept for scripted detection")
     pr.set_defaults(func=cmd_retune)
 
     po = sub.add_parser("override", help="engage / release tuner motion control")
     po.add_argument("action", choices=["on", "off"])
     po.set_defaults(func=cmd_override)
 
-    ps = sub.add_parser("set-target", help="set a motion target (override must be ON)")
-    ps.add_argument("target", choices=["id", "iq", "ud", "uq"])
+    ps = sub.add_parser("set-target", help="set id/iq reference (override must be ON)")
+    ps.add_argument("target", choices=["id", "iq"])
     ps.add_argument("value", type=float)
     ps.set_defaults(func=cmd_set_target)
 
@@ -191,10 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="seconds to wait for alignment to complete")
     pa.set_defaults(func=cmd_align)
 
-    pp = sub.add_parser("persist", help="save current gains to NVS")
-    pp.add_argument("--r",  type=float, help="phase resistance recorded with the blob [ohm]")
-    pp.add_argument("--l",  type=float, help="phase inductance recorded with the blob [H]")
-    pp.add_argument("--bw", type=float, help="bandwidth recorded with the blob [Hz]")
+    pp = sub.add_parser("persist", help="save current axis calibration to NVS")
     pp.set_defaults(func=cmd_persist)
 
     sub.add_parser("load", help="apply NVS overlay live").set_defaults(func=cmd_load)

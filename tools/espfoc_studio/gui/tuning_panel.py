@@ -162,12 +162,9 @@ class TuningPanel(QWidget):
         mform.addRow(btn_apply)
         root.addWidget(manual)
 
-        # --- MPZ retune ---
-        mpz = QGroupBox("MPZ recompute")
+        # --- Motor model (analysis tab) ---
+        mpz = QGroupBox("Motor model (analysis)")
         mfrm = QFormLayout(mpz)
-        # L is stored in Henries but displayed in milli-Henries to keep the
-        # typing experience reasonable for normal motors (0.1 mH .. 100 mH).
-        # Conversions happen in _on_mpz and in _notify_params_changed.
         self._r_spin = _spin(0.001, 1000.0, 4, self._last_motor_r,
                              step=0.01, suffix=" Ω")
         self._l_mh_spin = _spin(0.001, 10_000.0, 4,
@@ -175,20 +172,14 @@ class TuningPanel(QWidget):
                                 step=0.01, suffix=" mH")
         self._bw_spin = _spin(1.0, 5000.0, 1, self._last_bw,
                               step=10.0, suffix=" Hz")
-        # Current-sense LPF cutoff. Lives next to the recompute group
-        # because it is always the second knob the operator reaches for
-        # after dialling Kp / Ki.
         self._fc_spin = _spin(10.0, 20000.0, 1, 300.0,
                               step=10.0, suffix=" Hz")
         mfrm.addRow("R", self._r_spin)
         mfrm.addRow("L", self._l_mh_spin)
         mfrm.addRow("Bandwidth", self._bw_spin)
         mfrm.addRow("I-LPF fc", self._fc_spin)
-        btn_mpz = QPushButton("Recompute gains")
-        btn_mpz.clicked.connect(self._on_mpz)
         btn_fc = QPushButton("Apply current LPF cutoff")
         btn_fc.clicked.connect(self._on_apply_fc)
-        mfrm.addRow(btn_mpz)
         mfrm.addRow(btn_fc)
         root.addWidget(mpz)
         # Push any initial model to the Analysis view.
@@ -210,31 +201,13 @@ class TuningPanel(QWidget):
         target_form = QFormLayout()
         self._iq_spin = _spin(-50.0, 50.0, 4, 0.0, step=0.1, suffix=" A")
         self._id_spin = _spin(-50.0, 50.0, 4, 0.0, step=0.1, suffix=" A")
-        self._uq_spin = _spin(-50.0, 50.0, 4, 0.0, step=0.1, suffix=" V")
-        self._ud_spin = _spin(-50.0, 50.0, 4, 0.0, step=0.1, suffix=" V")
         self._iq_spin.setEnabled(False)
         self._id_spin.setEnabled(False)
-        self._uq_spin.setEnabled(False)
-        self._ud_spin.setEnabled(False)
         self._iq_spin.valueChanged.connect(self._on_iq_changed)
         self._id_spin.valueChanged.connect(self._on_id_changed)
-        self._uq_spin.valueChanged.connect(self._on_uq_changed)
-        self._ud_spin.valueChanged.connect(self._on_ud_changed)
         target_form.addRow("iq ref [A]", self._iq_spin)
         target_form.addRow("id ref [A]", self._id_spin)
-        target_form.addRow("uq ff [V]", self._uq_spin)
-        target_form.addRow("ud ff [V]", self._ud_spin)
         ovr_layout.addLayout(target_form)
-        self._skip_torque_box = QCheckBox("Open-loop voltage (no current PI)")
-        self._skip_torque_box.setToolTip(
-            "Preference for when override is on: send u_d/u_q without current-loop PI. "
-            "Applied on the device only while Override active; cleared when override turns off."
-        )
-        self._skip_torque_box.blockSignals(True)
-        self._skip_torque_box.setChecked(True)
-        self._skip_torque_box.blockSignals(False)
-        self._skip_torque_box.toggled.connect(self._on_skip_torque_toggled)
-        ovr_layout.addWidget(self._skip_torque_box)
         root.addWidget(ovr)
 
         # --- Alignment + calibration ---
@@ -324,12 +297,6 @@ class TuningPanel(QWidget):
         self._override_box.blockSignals(False)
         self._iq_spin.setEnabled(snap.override_active)
         self._id_spin.setEnabled(snap.override_active)
-        self._uq_spin.setEnabled(snap.override_active)
-        self._ud_spin.setEnabled(snap.override_active)
-        self._skip_torque_box.blockSignals(True)
-        if snap.override_active:
-            self._skip_torque_box.setChecked(snap.skip_torque)
-        self._skip_torque_box.blockSignals(False)
 
     def apply_poll_error(self, msg: str) -> None:
         """Worker poll failed (transport / tuner error)."""
@@ -357,32 +324,6 @@ class TuningPanel(QWidget):
             return
         self._status.setText("")
 
-    def _on_mpz(self) -> None:
-        motor_l_h = self._l_mh_spin.value() * 1e-3  # mH -> H
-        try:
-            self._client.recompute_gains(
-                motor_r=self._r_spin.value(),
-                motor_l=motor_l_h,
-                bw_hz=self._bw_spin.value())
-        except TunerError as e:
-            self._status.setText(str(e))
-            return
-        self._status.setText("")
-        self._last_motor_r = self._r_spin.value()
-        self._last_motor_l = motor_l_h
-        self._last_bw = self._bw_spin.value()
-        try:
-            self._kp_spin.blockSignals(True)
-            self._ki_spin.blockSignals(True)
-            self._kp_spin.setValue(self._client.read_kp())
-            self._ki_spin.setValue(self._client.read_ki())
-        except TunerError:
-            pass
-        finally:
-            self._kp_spin.blockSignals(False)
-            self._ki_spin.blockSignals(False)
-        self._notify_params_changed()
-
     def _on_override_toggled(self, checked: bool) -> None:
         try:
             if checked:
@@ -398,15 +339,7 @@ class TuningPanel(QWidget):
         self._status.setText("")
         self._iq_spin.setEnabled(checked)
         self._id_spin.setEnabled(checked)
-        self._uq_spin.setEnabled(checked)
-        self._ud_spin.setEnabled(checked)
-        try:
-            if checked:
-                self._client.write_skip_torque(self._skip_torque_box.isChecked())
-            else:
-                self._client.write_skip_torque(False)
-        except TunerError as e:
-            self._status.setText(str(e))
+        self._status.setText("")
 
     def _on_iq_changed(self, value: float) -> None:
         try:
@@ -419,31 +352,6 @@ class TuningPanel(QWidget):
             self._client.write_target_id(value)
         except TunerError as e:
             self._status.setText(str(e))
-
-    def _on_uq_changed(self, value: float) -> None:
-        try:
-            self._client.write_target_uq(value)
-        except TunerError as e:
-            self._status.setText(str(e))
-
-    def _on_ud_changed(self, value: float) -> None:
-        try:
-            self._client.write_target_ud(value)
-        except TunerError as e:
-            self._status.setText(str(e))
-
-    def _on_skip_torque_toggled(self, checked: bool) -> None:
-        if not self._override_box.isChecked():
-            return
-        try:
-            self._client.write_skip_torque(checked)
-        except TunerError as e:
-            self._status.setText(str(e))
-            self._skip_torque_box.blockSignals(True)
-            self._skip_torque_box.setChecked(not checked)
-            self._skip_torque_box.blockSignals(False)
-            return
-        self._status.setText("")
 
     def _on_align(self) -> None:
         if self._align_thread is not None and self._align_thread.isRunning():
@@ -490,10 +398,7 @@ class TuningPanel(QWidget):
 
     def _on_persist(self) -> None:
         try:
-            self._client.persist_calibration(
-                motor_r=self._r_spin.value(),
-                motor_l=self._l_mh_spin.value() * 1e-3,
-                bandwidth_hz=self._bw_spin.value())
+            self._client.persist_calibration()
         except TunerError as e:
             self._status.setText(str(e))
             return
@@ -575,15 +480,12 @@ class TuningPanel(QWidget):
         Prefer having the poll worker read and call :meth:`apply_nvs_shadow_floats`
         from the GUI thread so the main thread never holds the bus lock."""
         try:
-            r = self._client.read_motor_r_ohm()
-            l_h = self._client.read_motor_l_h()
-            bw = self._client.read_motor_bw_hz()
             kp = self._client.read_kp()
             ki = self._client.read_ki()
             fc = self._client.read_current_filter_fc()
         except TunerError:
             return
-        self.apply_nvs_shadow_floats(r, l_h, bw, kp, ki, fc)
+        self.apply_nvs_shadow_floats(0.0, 0.0, 0.0, kp, ki, fc)
 
     @staticmethod
     def _badge_key_for_state(s: AxisStateFlag) -> str:

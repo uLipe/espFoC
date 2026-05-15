@@ -27,15 +27,10 @@ typedef void (*esp_foc_outer_loop_callback_t)(void *arg);
 typedef void (*esp_foc_motor_regulation_callback_t)(
     esp_foc_axis_t *axis,
     esp_foc_d_current_q16_t *id_ref,
-    esp_foc_q_current_q16_t *iq_ref,
-    esp_foc_d_voltage_q16_t *ud_forward,
-    esp_foc_q_voltage_q16_t *uq_forward);
+    esp_foc_q_current_q16_t *iq_ref);
 
 typedef struct {
     uint8_t axis_id;
-    q16_t motor_r_ohm;
-    q16_t motor_l_h;
-    q16_t bandwidth_hz;
 } esp_foc_axis_cal_cache_t;
 
 typedef struct {
@@ -49,8 +44,6 @@ typedef struct {
     bool active;
     q16_t target_id;
     q16_t target_iq;
-    q16_t target_ud;
-    q16_t target_uq;
 } esp_foc_tuner_override_t;
 #endif
 
@@ -68,9 +61,6 @@ struct esp_foc_axis_s {
 
     esp_foc_q_current_q16_t target_i_q;
     esp_foc_d_current_q16_t target_i_d;
-
-    esp_foc_q_voltage_q16_t target_u_q;
-    esp_foc_d_voltage_q16_t target_u_d;
 
     esp_foc_q_current_q16_t i_q;
     esp_foc_d_current_q16_t i_d;
@@ -104,7 +94,6 @@ struct esp_foc_axis_s {
     volatile q16_t rotor_elec_angle;
 
     int downsampling_low_speed;
-    int skip_torque_control;
 
     /** Nominal DC bus [V] Q16, read once at init from the inverter driver. */
     q16_t vdc_q16;

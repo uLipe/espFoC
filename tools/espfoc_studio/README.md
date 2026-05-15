@@ -6,7 +6,7 @@ and `esp_foc_tuner.c`):
 
 - `espfoc_studio.link` — framing codec + transports (loopback, pyserial).
 - `espfoc_studio.protocol` — synchronous `TunerClient` for read / write /
-  exec round-trips (axis state, gains, motion targets, MPZ recompute).
+  exec round-trips (axis state, gains, motion targets, calibration).
 - `espfoc_studio.model` — analytical helpers (MPZ design, step response,
   Bode, pole/zero, root locus). No Qt dependency.
 - `espfoc_studio.cli.tunerctl` — argparse CLI on top of TunerClient.
@@ -21,44 +21,31 @@ pip install -r tools/espfoc_studio/requirements.txt
 `PySide6` and `pyqtgraph` are only needed for the GUI; the CLI and the
 library layers work with just `pyserial` and `numpy`.
 
-## Try the GUI against a simulated firmware
+## TunerStudio GUI
 
-No hardware required — the `--demo` flag spawns an in-process
-`DemoFirmware` that speaks the same protocol a real board would:
+Requires a serial target (UART or USB-CDC):
 
 ```bash
-PYTHONPATH=tools python3 -m espfoc_studio.gui --demo
+PYTHONPATH=tools python3 -m espfoc_studio.gui --port /dev/ttyACM0
 ```
 
 The window opens with:
 
-- a **Tuning** panel on the left (live gains, manual edit, MPZ recompute,
-  override toggle, current refs and voltage feed-forward targets);
+- a **Tuning** panel on the left (live gains, manual edit,
+  override toggle, current references);
 - an **Analysis** tab that redraws the predicted step response, Bode
-  magnitude, pole/zero map and root locus every time the motor or gain
+  magnitude, pole/zero map and root locus when motor or gain
   parameters change;
-- **Scope**, **Sensors**, **SVM Hexagon**, and **Generate App** tabs.
-  The **Generate App** tab (template codegen) exists **only** in `--demo`;
-  `python -m espfoc_studio.gui --port …` omits it.
+- **Scope**, **Sensors**, and **SVM Hexagon** tabs.
 
-## Talk to real hardware
-
-Flash a firmware built with one of the bridges enabled
-(`CONFIG_ESP_FOC_BRIDGE_UART` or `CONFIG_ESP_FOC_BRIDGE_USBCDC`), then:
-
-```bash
-# UART or USB-CDC both come out as a plain serial device.
-PYTHONPATH=tools python3 -m espfoc_studio.gui --port /dev/ttyACM0
-```
+Flash firmware with a bridge enabled (`CONFIG_ESP_FOC_BRIDGE_UART` or
+`CONFIG_ESP_FOC_BRIDGE_USBCDC`), then use the same `--port` command as above.
 
 The CLI `tunerctl` works against the same bridges:
 
 ```bash
 PYTHONPATH=tools python3 -m espfoc_studio.cli.tunerctl \
     --port /dev/ttyACM0 axis-state
-
-PYTHONPATH=tools python3 -m espfoc_studio.cli.tunerctl \
-    --port /dev/ttyACM0 retune --r 1.08 --l 0.0018 --bw 150
 ```
 
 ## Run the host-side tests

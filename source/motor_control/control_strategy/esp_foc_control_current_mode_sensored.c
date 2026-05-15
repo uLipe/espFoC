@@ -94,24 +94,14 @@ static void foc_hot_isr(void *data)
     axis->i_d.raw = i_d;
     axis->i_q.raw = i_q;
 
-    /* 7) Current PI (or open-loop voltage).
-     * Tuner override (CONFIG_ESP_FOC_TUNER_ENABLE): esp_foc_core copies
-     * tuner_override.target_{id,iq,ud,uq} into axis->target_* each outer-loop
-     * tick — id/iq feed the PI, ud/uq add as feed-forward (same as regulation). */
-    if (axis->skip_torque_control) {
-        /* Open-loop voltage mode: take the operator's u_d / u_q
-         * straight through, no integration. */
-        axis->u_q.raw = axis->target_u_d.raw;
-        axis->u_d.raw = axis->target_u_q.raw;
-    } else {
-        axis->u_q.raw = esp_foc_pid_update(&axis->torque_controller[0],
-                                           axis->target_i_q.raw, i_q);
-        axis->u_d.raw = esp_foc_pid_update(&axis->torque_controller[1],
-                                           axis->target_i_d.raw, i_d);
-        axis->u_q.raw = q16_mul(axis->u_q.raw, axis->mod_index_limit_q16);
-        axis->u_d.raw = q16_mul(axis->u_d.raw, axis->mod_index_limit_q16);
-        axis->u_q.raw = q16_add(axis->u_q.raw, axis->target_u_q.raw);
-        axis->u_d.raw = q16_add(axis->u_d.raw, axis->target_u_d.raw);
+    /* 7) Current loop: single path (bypass = Kp=Ki=Kd=0, Kff≠0). */
+    {
+        q16_t uq = esp_foc_pid_update(&axis->torque_controller[0],
+                                      axis->target_i_q.raw, i_q);
+        q16_t ud = esp_foc_pid_update(&axis->torque_controller[1],
+                                      axis->target_i_d.raw, i_d);
+        axis->u_q.raw = q16_mul(uq, axis->mod_index_limit_q16);
+        axis->u_d.raw = q16_mul(ud, axis->mod_index_limit_q16);
     }
 
     /* 8) Inverse Park + SVPWM (Vdq/αβ in pu; duties to driver). */
@@ -221,8 +211,7 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
         esp_foc_scope_data_push();
 #endif
         /* 4) Wake the regulator task so the user callback can refresh
-         *    target_i_d / target_i_q / target_u_d / target_u_q before
-         *    the next batch of PWM cycles. */
+         *    id_ref / iq_ref before the next batch of PWM cycles. */
         if (axis->regulator_ev != NULL) {
             esp_foc_send_notification(axis->regulator_ev);
         }

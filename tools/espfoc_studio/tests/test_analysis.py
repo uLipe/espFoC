@@ -28,9 +28,8 @@ from espfoc_studio.model import (
 )
 
 
-def test_mpz_design_matches_gen_pi_gains():
-    """Design helper must agree with scripts/gen_pi_gains.py on the
-    reference gimbal motor."""
+def test_mpz_design_gimbal_reference():
+    """Reference gains for the iPower gimbal motor (analysis model only)."""
     motor = MotorParams(r_ohm=1.08, l_h=0.0018, ts_s=0.001, v_max=12.0)
     g = mpz_design(motor, bandwidth_hz=150.0)
     # Values match the golden iPower gimbal entry.
@@ -127,7 +126,7 @@ def test_closed_loop_tf_shape():
 
 def main() -> int:
     tests = [
-        test_mpz_design_matches_gen_pi_gains,
+        test_mpz_design_gimbal_reference,
         test_step_response_reaches_reference,
         test_step_response_rise_time_matches_bandwidth,
         test_bode_crosses_0db_near_bandwidth,

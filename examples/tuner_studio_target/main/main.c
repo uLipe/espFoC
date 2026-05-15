@@ -43,8 +43,7 @@ static esp_foc_inverter_t *s_inverter;
 static esp_foc_rotor_sensor_t *s_rotor;
 static esp_foc_isensor_t *s_shunts;
 
-/* Advertise as a TunerStudio target so the GUI can light up its
- * Generate App tab on connect. */
+/* Advertise as a TunerStudio target so the host can identify this firmware. */
 uint32_t esp_foc_tuner_firmware_type(void)
 {
     return ESP_FOC_TUNER_FIRMWARE_TYPE_TSGX;

@@ -14,7 +14,6 @@
 #include <unity.h>
 #include "espFoC/esp_foc.h"
 #include "espFoC/gui_link/esp_foc_tuner.h"
-#include "espFoC/tuning/esp_foc_axis_tuning.h"
 #include "espFoC/gui_link/esp_foc_link.h"
 #include "espFoC/utils/esp_foc_q16.h"
 #include "mock_drivers.h"
@@ -145,7 +144,7 @@ TEST_CASE("reactor: read kp returns axis Kp through link frame",
                             ((uint32_t)payload[2] << 16) |
                             ((uint32_t)payload[3] << 24));
     q16_t expected;
-    esp_foc_axis_get_current_pi_gains_q16(&s_axis, &expected, NULL, NULL);
+    esp_foc_axis_get_current_loop_gains_q16(&s_axis, &expected, NULL, NULL, NULL, NULL);
     TEST_ASSERT_EQUAL_INT32(expected, got);
 }
 
@@ -165,7 +164,7 @@ TEST_CASE("reactor: write kp lands on axis", "[espFoC][reactor]")
     size_t plen = 0;
     TEST_ASSERT_EQUAL(ESP_FOC_OK, decode_response(0x55, NULL, &plen));
     q16_t got;
-    esp_foc_axis_get_current_pi_gains_q16(&s_axis, &got, NULL, NULL);
+    esp_foc_axis_get_current_loop_gains_q16(&s_axis, &got, NULL, NULL, NULL, NULL);
     TEST_ASSERT_EQUAL_INT32(target, got);
 }
 
@@ -224,23 +223,24 @@ TEST_CASE("reactor: corrupt CRC produces no response",
     TEST_ASSERT_EQUAL_UINT(0, s_capture_len);
 }
 
-TEST_CASE("reactor: exec recompute through link returns OK",
+TEST_CASE("reactor: read kff returns axis Kff through link frame",
           "[espFoC][reactor]")
 {
     setup_axis();
-    q16_t r  = q16_from_float(1.08f);
-    q16_t l  = q16_from_float(0.0018f);
-    q16_t bw = q16_from_float(150.0f);
-    uint8_t cmd[12];
-    for (int i = 0; i < 4; ++i) {
-        cmd[i + 0] = (uint8_t)((uint32_t)r  >> (8 * i));
-        cmd[i + 4] = (uint8_t)((uint32_t)l  >> (8 * i));
-        cmd[i + 8] = (uint8_t)((uint32_t)bw >> (8 * i));
-    }
-    send_request(0x33, ESP_FOC_TUNER_OP_EXEC, ESP_FOC_TUNER_CMD_RECOMPUTE_GAINS,
-                 0, cmd, sizeof(cmd));
-    size_t plen = 0;
-    TEST_ASSERT_EQUAL(ESP_FOC_OK, decode_response(0x33, NULL, &plen));
+    send_request(0x33, ESP_FOC_TUNER_OP_READ, ESP_FOC_TUNER_PARAM_KFF_Q16,
+                 0, NULL, 0);
+
+    uint8_t payload[16];
+    size_t plen = sizeof(payload);
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, decode_response(0x33, payload, &plen));
+    TEST_ASSERT_EQUAL_UINT(4, plen);
+    int32_t got = (int32_t)((uint32_t)payload[0] |
+                            ((uint32_t)payload[1] << 8) |
+                            ((uint32_t)payload[2] << 16) |
+                            ((uint32_t)payload[3] << 24));
+    q16_t expected;
+    esp_foc_axis_get_current_loop_gains_q16(&s_axis, NULL, NULL, NULL, &expected, NULL);
+    TEST_ASSERT_EQUAL_INT32(expected, got);
 }
 
 #endif /* CONFIG_ESP_FOC_TUNER_ENABLE */

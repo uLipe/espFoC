@@ -19,8 +19,7 @@ menu "espFoC Settings"
             default 20000
             help
                 Carrier frequency for espFoC MCPWM inverter drivers and for
-                control-loop timing (dt = 1/PWM). Build-time PI autotuning uses
-                the same value when ESP_FOC_USE_AUTOGEN_GAINS is enabled.
+                control-loop timing (dt = 1/PWM).
 
         config ESP_FOC_DC_LINK_NOMINAL_MV
             int "Nominal DC bus voltage [mV] (SVPWM / Ud Uq volt scaling)"
@@ -105,11 +104,10 @@ menu "espFoC Settings"
                 Compiles the tuner; attach axes and handle requests from UART/USB.
 
         config ESP_FOC_TUNER_ALWAYS_OVERRIDE_VOLTAGE_MODE
-            bool "Voltage mode + tuner override latched (bring-up)"
+            bool "Latch tuner override on after align (bring-up)"
             depends on ESP_FOC_TUNER_ENABLE
             default n
             help
-                Start with skip_torque_control enabled (open-loop Ud/Uq, no current PI).
                 After a successful CMD_ALIGN_AXIS, tuner override turns on automatically;
                 CMD_OVERRIDE_OFF is ignored so host motion writes stay enabled.
 
@@ -155,34 +153,6 @@ menu "espFoC Settings"
             bool "Persist current-loop gains to NVS (requires NVS on chip)"
             depends on ESP_FOC_TUNER_ENABLE
             default y
-    endmenu
-
-    menu "Build-time PI autotuning"
-        config ESP_FOC_USE_AUTOGEN_GAINS
-            bool "Seed PI gains from scripts/motors/<profile>.json"
-            default y
-            help
-                When n, Kp/Ki start at zero until the runtime tuner sets them.
-
-        config ESP_FOC_PROFILE_VERSION
-            int "NVS profile invalidation / schema key"
-            depends on ESP_FOC_USE_AUTOGEN_GAINS
-            default 1
-            help
-                Bump to ignore older NVS calibrations for a given motor name.
-
-        config ESP_FOC_MOTOR_PROFILE
-            string "JSON profile name under scripts/motors/"
-            depends on ESP_FOC_USE_AUTOGEN_GAINS
-            default "mf400525t"
-
-        config ESP_FOC_AUTOGEN_DECIMATION
-            int "Autotuner assumed current-loop decimation (vs PWM rate)"
-            depends on ESP_FOC_USE_AUTOGEN_GAINS
-            default 1
-            help
-                Current-loop fs = PWM / decimation. ISR_HOT_PATH = 1:1; legacy
-                task loop matches ESP_FOC_LOW_SPEED_DOWNSAMPLING (20) by default.
     endmenu
 
 endmenu

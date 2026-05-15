@@ -79,27 +79,20 @@ that speaks the runtime tuner protocol over UART or USB-CDC. In a
 single window you get:
 
 - live axis state and gain readout with in-place editing;
-- MPZ recompute from motor R/L/bandwidth on the fly;
 - one-click rotor alignment with auto-detected natural direction;
 - save / load / erase calibration to NVS so the next boot comes up
   already tuned;
 - predicted step response, Bode, pole-zero and root-locus plots;
 - firmware scope stream with per-channel colour, toggle and cursor;
 - SVPWM hexagon with the three phase projections and the resultant
-  voltage vector rotating as the motor is driven;
-- in **`--demo`** mode, a **Generate App** tab that runs the template
-  codegen against the simulated session (live serial sessions omit this tab).
+  voltage vector rotating as the motor is driven.
 
-### Try it without hardware
+### Launch TunerStudio
 
 ```bash
 pip install -r tools/espfoc_studio/requirements.txt
-PYTHONPATH=tools python3 -m espfoc_studio.gui --demo
+PYTHONPATH=tools python3 -m espfoc_studio.gui --port /dev/ttyACM0
 ```
-
-`--demo` embeds a simulated firmware so the whole pipeline — tuner
-protocol, scope stream, hexagon, Generate App — exercises end-to-end with zero
-boards attached.
 
 ### Talk to a real target
 
@@ -228,7 +221,7 @@ espFoC/
 │   │                   # link codec
 │   └── osal/           # OS abstraction
 ├── test/               # Unity unit tests (run via examples/unit_test_runner)
-└── tools/espfoc_studio # PySide6 + pyqtgraph GUI, CLI, codegen, templates
+└── tools/espfoc_studio # PySide6 + pyqtgraph GUI, CLI, host protocol
 ```
 
 ---

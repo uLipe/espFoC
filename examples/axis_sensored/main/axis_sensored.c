@@ -104,20 +104,14 @@ void esp_foc_send_buffer_callback(const uint8_t *buffer, int size)
 #endif
 
 static void regulation_callback(esp_foc_axis_t *axis_cb,
-                                     esp_foc_d_current_q16_t *id_ref,
-                                     esp_foc_q_current_q16_t *iq_ref,
-                                     esp_foc_d_voltage_q16_t *ud_forward,
-                                     esp_foc_q_voltage_q16_t *uq_forward)
+                                 esp_foc_d_current_q16_t *id_ref,
+                                 esp_foc_q_current_q16_t *iq_ref)
 {
     (void)axis_cb;
 
-    const q16_t vq_base = q16_from_float(0.0f);
-    const q16_t vd_base = q16_from_float(0.0f);
     const q16_t iq_base = q16_from_float(2.0f);
     const q16_t id_base = q16_from_float(0.0f);
 
-    uq_forward->raw = vq_base;
-    ud_forward->raw = vd_base;
     iq_ref->raw = iq_base;
     id_ref->raw = id_base;
 }
@@ -204,9 +198,7 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "Initializing espFoC sensored axis (IQ31)");
 
-    /* Gains are injected at boot from the MPZ autogen header for the
-     * motor profile selected via CONFIG_ESP_FOC_MOTOR_PROFILE. Use
-     * esp_foc_axis_retune_current_pi_q16() at runtime to override. */
+    /* Default bypass gains at init; tune via link or NVS as needed. */
     initialize_foc_drivers();
 
     esp_foc_err_t foc_err = esp_foc_initialize_axis(

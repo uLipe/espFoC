@@ -24,7 +24,6 @@ class TunerPollSnapshot:
     vmax: float
     state: int
     override_active: bool
-    skip_torque: bool
     cal_present: bool
     last_poll_ok: bool
 
@@ -51,15 +50,13 @@ class TunerPollWorker(QObject):
 
     suspend_requested = Signal(bool)
 
-    def __init__(self, client: TunerClient, link_mode: str = "hw") -> None:
+    def __init__(self, client: TunerClient) -> None:
         super().__init__()
         self._client = client
-        self._link_mode = link_mode
         self._poll_serial = 0
         self._want_full = True
         self._last_vmax = 0.0
         self._cal_present = False
-        self._cached_skip_torque = False
         self._prev_override_active = False
         self._timer: Optional[QTimer] = None
         self._ping_timer: Optional[QTimer] = None
@@ -101,18 +98,14 @@ class TunerPollWorker(QObject):
             pass
         shadows: Optional[Tuple[float, float, float,
                                   float, float, float]] = None
-        if self._link_mode == "hw":
-            try:
-                if self._client.is_calibration_present():
-                    r = self._client.read_motor_r_ohm()
-                    l_h = self._client.read_motor_l_h()
-                    bw = self._client.read_motor_bw_hz()
-                    kp = self._client.read_kp()
-                    ki = self._client.read_ki()
-                    fc = self._client.read_current_filter_fc()
-                    shadows = (r, l_h, bw, kp, ki, fc)
-            except TunerError:
-                pass
+        try:
+            if self._client.is_calibration_present():
+                kp = self._client.read_kp()
+                ki = self._client.read_ki()
+                fc = self._client.read_current_filter_fc()
+                shadows = (0.0, 0.0, 0.0, kp, ki, fc)
+        except TunerError:
+            pass
         pole: Optional[int] = None
         try:
             pp = int(self._client.read_motor_pole_pairs())
@@ -167,15 +160,6 @@ class TunerPollWorker(QObject):
             fc = self._client.read_current_filter_fc()
             st = self._client.read_axis_state()
             override_active = bool(st & AxisStateFlag.TUNER_OVERRIDE)
-            skip_torque = False
-            if override_active:
-                need_skip_read = (
-                    not self._prev_override_active
-                    or want_full
-                    or (self._poll_serial % 3 == 0))
-                if need_skip_read:
-                    self._cached_skip_torque = self._client.read_skip_torque()
-                skip_torque = self._cached_skip_torque
             self._prev_override_active = override_active
 
             if want_full:
@@ -190,7 +174,6 @@ class TunerPollWorker(QObject):
                 vmax=self._last_vmax,
                 state=int(st),
                 override_active=override_active,
-                skip_torque=skip_torque,
                 cal_present=self._cal_present,
                 last_poll_ok=True,
             )

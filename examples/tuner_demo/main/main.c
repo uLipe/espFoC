@@ -1,12 +1,9 @@
 /*
  * MIT License
  *
- * espFoC tuner demo:
- *   - Walks through the build-time autotuned gains, then the runtime
- *     retune API and the tuner request/response protocol.
- *   - Uses inline stub drivers so it runs unchanged in QEMU (no hardware).
+ * espFoC tuner demo: default bypass gains, tuner protocol round-trip.
+ * Inline stub drivers — runs in QEMU without hardware.
  *
- * Build/run in QEMU:
  *   cd examples/tuner_demo
  *   idf.py set-target esp32
  *   idf.py qemu
@@ -18,12 +15,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "espFoC/esp_foc.h"
-#include "espFoC/tuning/esp_foc_axis_tuning.h"
 #include "espFoC/gui_link/esp_foc_tuner.h"
 
 static const char *TAG = "tuner-demo";
-
-/* --- Inline stub drivers ----------------------------------------------- */
 
 typedef struct {
     esp_foc_inverter_t base;
@@ -77,16 +71,16 @@ static esp_foc_rotor_sensor_t s_rotor = {
     .set_simulation_count         = stub_set_sim,
 };
 
-/* --- Demo helpers ------------------------------------------------------ */
-
 static void log_gains(const char *label, esp_foc_axis_t *axis)
 {
-    q16_t kp, ki, lim;
-    esp_foc_axis_get_current_pi_gains_q16(axis, &kp, &ki, &lim);
-    ESP_LOGI(TAG, "%-22s Kp=%9.4f V/A   Ki=%9.2f V/(A*s)   ILim=%6.2f V",
+    q16_t kp, ki, kd, kff, lim;
+    esp_foc_axis_get_current_loop_gains_q16(axis, &kp, &ki, &kd, &kff, &lim);
+    ESP_LOGI(TAG, "%-22s Kp=%.4f Ki=%.4f Kd=%.4f Kff=%.4f ILim=%.3f",
              label,
              (double)q16_to_float(kp),
              (double)q16_to_float(ki),
+             (double)q16_to_float(kd),
+             (double)q16_to_float(kff),
              (double)q16_to_float(lim));
 }
 
@@ -116,65 +110,30 @@ static void demo_protocol(void)
     uint8_t resp[4];
     size_t resp_len = sizeof(resp);
     ESP_ERROR_CHECK(esp_foc_tuner_handle_request(0,
-        ESP_FOC_TUNER_OP_READ, ESP_FOC_TUNER_PARAM_KP_Q16,
+        ESP_FOC_TUNER_OP_READ, ESP_FOC_TUNER_PARAM_KFF_Q16,
         NULL, 0, resp, &resp_len));
-    ESP_LOGI(TAG, "READ Kp -> %.4f V/A",
+    ESP_LOGI(TAG, "READ Kff -> %.4f",
              (double)q16_to_float(deserialize_q16_le(resp)));
 
     uint8_t payload[4];
-    serialize_q16_le(payload, q16_from_float(2.345f));
+    serialize_q16_le(payload, q16_from_float(0.95f));
     size_t no_resp = 0;
     ESP_ERROR_CHECK(esp_foc_tuner_handle_request(0,
-        ESP_FOC_TUNER_OP_WRITE, ESP_FOC_TUNER_WRITE_KP_Q16,
+        ESP_FOC_TUNER_OP_WRITE, ESP_FOC_TUNER_WRITE_KFF_Q16,
         payload, sizeof(payload), NULL, &no_resp));
-    ESP_LOGI(TAG, "WRITE Kp = 2.345 (manual override)");
 
     resp_len = sizeof(resp);
     ESP_ERROR_CHECK(esp_foc_tuner_handle_request(0,
-        ESP_FOC_TUNER_OP_READ, ESP_FOC_TUNER_PARAM_KP_Q16,
+        ESP_FOC_TUNER_OP_READ, ESP_FOC_TUNER_PARAM_KFF_Q16,
         NULL, 0, resp, &resp_len));
-    ESP_LOGI(TAG, "READ Kp -> %.4f V/A (after write)",
+    ESP_LOGI(TAG, "READ Kff -> %.4f (after write)",
              (double)q16_to_float(deserialize_q16_le(resp)));
 
-    /* EXEC RECOMPUTE_GAINS with iPower gimbal motor params */
-    uint8_t exec_payload[12];
-    serialize_q16_le(exec_payload + 0, q16_from_float(1.08f));
-    serialize_q16_le(exec_payload + 4, q16_from_float(0.0018f));
-    serialize_q16_le(exec_payload + 8, q16_from_float(150.0f));
     no_resp = 0;
     ESP_ERROR_CHECK(esp_foc_tuner_handle_request(0,
-        ESP_FOC_TUNER_OP_EXEC, ESP_FOC_TUNER_CMD_RECOMPUTE_GAINS,
-        exec_payload, sizeof(exec_payload), NULL, &no_resp));
-    ESP_LOGI(TAG, "EXEC RECOMPUTE_GAINS R=1.08 L=1.8mH bw=150Hz");
-
-    resp_len = sizeof(resp);
-    ESP_ERROR_CHECK(esp_foc_tuner_handle_request(0,
-        ESP_FOC_TUNER_OP_READ, ESP_FOC_TUNER_PARAM_KP_Q16,
-        NULL, 0, resp, &resp_len));
-    ESP_LOGI(TAG, "READ Kp -> %.4f V/A (after MPZ recompute)",
-             (double)q16_to_float(deserialize_q16_le(resp)));
-
-    resp_len = sizeof(resp);
-    ESP_ERROR_CHECK(esp_foc_tuner_handle_request(0,
-        ESP_FOC_TUNER_OP_READ, ESP_FOC_TUNER_PARAM_KI_Q16,
-        NULL, 0, resp, &resp_len));
-    ESP_LOGI(TAG, "READ Ki -> %.2f V/(A*s)",
-             (double)q16_to_float(deserialize_q16_le(resp)));
-}
-
-static void try_retune(esp_foc_axis_t *axis, const char *label,
-                       float r, float l, float bw)
-{
-    ESP_LOGI(TAG, "retune %s: R=%.3f L=%.4fmH bw=%.0fHz", label, (double)r,
-             (double)(l * 1000.0f), (double)bw);
-    esp_foc_err_t err = esp_foc_axis_retune_current_pi_q16(axis,
-        q16_from_float(r), q16_from_float(l), q16_from_float(bw));
-    if (err != ESP_FOC_OK) {
-        ESP_LOGW(TAG, "retune REJECTED (err=%d) -- bw probably above Nyquist "
-                       "for the current loop period", err);
-        return;
-    }
-    log_gains(label, axis);
+        ESP_FOC_TUNER_OP_EXEC, ESP_FOC_TUNER_CMD_PING,
+        NULL, 0, NULL, &no_resp));
+    ESP_LOGI(TAG, "EXEC PING OK");
 }
 
 static void demo_task(void *arg)
@@ -182,20 +141,8 @@ static void demo_task(void *arg)
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
 
     ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "=== Initial gains (build-time autogen, default.json) ===");
-    log_gains("autogen default", axis);
-
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "=== Runtime retune via MPZ helper ===");
-    /* Loop period is PWM/decimation = 20kHz/20 = 1ms, so Nyquist = 500 Hz.
-     * Each retune below picks a bandwidth that fits the discrete model. */
-    try_retune(axis, "iPower (R=1.08,L=1.8mH)",  1.08f, 0.0018f, 150.0f);
-    try_retune(axis, "low-R servo  (R=0.25,L=0.8mH)",  0.25f, 0.0008f, 200.0f);
-    try_retune(axis, "high-L motor (R=0.80,L=5.0mH)",  0.80f, 0.0050f,  50.0f);
-
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "Asking for a bandwidth above Nyquist (bw=600Hz, Ts=1ms):");
-    try_retune(axis, "above-nyquist demo", 0.5f, 0.001f, 600.0f);
+    ESP_LOGI(TAG, "=== Initial gains (bypass default) ===");
+    log_gains("boot", axis);
 
     demo_protocol();
 
@@ -215,7 +162,7 @@ void app_main(void)
 
     memset(&axis, 0, sizeof(axis));
 
-    ESP_LOGI(TAG, "espFoC tuner demo starting (PWM=%lu Hz, decimation=20)",
+    ESP_LOGI(TAG, "espFoC tuner demo starting (PWM=%lu Hz)",
              (unsigned long)s_inv.pwm_hz);
 
     esp_foc_err_t err = esp_foc_initialize_axis(
@@ -226,6 +173,5 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(esp_foc_tuner_attach_axis(0, &axis));
 
-    /* Drive the demo from a task because esp_foc_initialize_axis sleeps. */
     xTaskCreate(demo_task, "demo", 4096, &axis, 4, NULL);
 }

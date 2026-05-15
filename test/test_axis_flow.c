@@ -96,15 +96,11 @@ TEST_CASE("axis align: already aligned returns error", "[espFoC][axis_flow]")
 static int axis_test_regulator_called;
 static void axis_test_regulator_cb(esp_foc_axis_t *ax,
                                    esp_foc_d_current_q16_t *id_ref,
-                                   esp_foc_q_current_q16_t *iq_ref,
-                                   esp_foc_d_voltage_q16_t *ud_ff,
-                                   esp_foc_q_voltage_q16_t *uq_ff)
+                                   esp_foc_q_current_q16_t *iq_ref)
 {
     (void)ax;
     (void)id_ref;
     (void)iq_ref;
-    (void)ud_ff;
-    (void)uq_ff;
     axis_test_regulator_called = 1;
 }
 
@@ -122,23 +118,19 @@ TEST_CASE("axis set_regulation_callback: stored and invalid args", "[espFoC][axi
 
     TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_set_regulation_callback(&axis, axis_test_regulator_cb));
     TEST_ASSERT_NOT_NULL(axis.regulator_cb);
-    axis.regulator_cb(&axis, &axis.target_i_d, &axis.target_i_q, &axis.target_u_d, &axis.target_u_q);
+    axis.regulator_cb(&axis, &axis.target_i_d, &axis.target_i_q);
     TEST_ASSERT_EQUAL(1, axis_test_regulator_called);
 }
 
 static int axis_run_regulator_called_count;
 static void axis_run_regulator_cb(esp_foc_axis_t *ax,
                                 esp_foc_d_current_q16_t *id_ref,
-                                esp_foc_q_current_q16_t *iq_ref,
-                                esp_foc_d_voltage_q16_t *ud_ff,
-                                esp_foc_q_voltage_q16_t *uq_ff)
+                                esp_foc_q_current_q16_t *iq_ref)
 {
     (void)ax;
     axis_run_regulator_called_count++;
     id_ref->raw = 0;
     iq_ref->raw = q16_from_float(0.5f);
-    ud_ff->raw = 0;
-    uq_ff->raw = 0;
 }
 
 TEST_CASE("axis run: regulator runs and set_duties receives FOC output", "[espFoC][axis_flow]")

@@ -4,9 +4,7 @@ set(srcs    "source/motor_control/esp_foc_core.c"
             "source/calibration/esp_foc_calibration_format.c"
             "source/calibration/esp_foc_calibration_nvs.c"
             "source/calibration/esp_foc_calibration_axis.c"
-            "source/motor_control/esp_foc_design_mpz.c"
             "source/gui_link/esp_foc_link.c"
-            "source/tuning/esp_foc_axis_tuning.c"
             "source/gui_link/esp_foc_scope.c"
             "source/motor_control/esp_foc_iq31.c"
             "source/motor_control/esp_foc_q16.c"
@@ -50,41 +48,5 @@ idf_component_register(SRCS "${srcs}"
                        INCLUDE_DIRS "${includes}"
                        PRIV_REQUIRES "${requires}"
                        LDFRAGMENTS linker.lf)
-
-# --- Build-time PI autotuning -------------------------------------------
-# Generates esp_foc_autotuned_gains.h into the build dir (never the source
-# tree) so it stays out of git automatically. The component code consumes
-# the header behind CONFIG_ESP_FOC_USE_AUTOGEN_GAINS.
-if(CONFIG_ESP_FOC_USE_AUTOGEN_GAINS)
-    idf_build_get_property(python PYTHON)
-    set(autogen_dir "${CMAKE_CURRENT_BINARY_DIR}/gen")
-    set(autogen_header "${autogen_dir}/esp_foc_autotuned_gains.h")
-    set(autogen_report "${autogen_dir}/esp_foc_autotuned_report.txt")
-    string(REPLACE "\"" "" motor_profile "${CONFIG_ESP_FOC_MOTOR_PROFILE}")
-    set(motor_profile_path
-        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/motors/${motor_profile}.json")
-    if(NOT EXISTS "${motor_profile_path}")
-        message(FATAL_ERROR
-            "espFoC autotuner: motor profile not found: ${motor_profile_path}\n"
-            "Add a JSON under scripts/motors/ or change CONFIG_ESP_FOC_MOTOR_PROFILE.")
-    endif()
-    add_custom_command(
-        OUTPUT ${autogen_header}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${autogen_dir}
-        COMMAND ${python} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_pi_gains.py
-                --motor       ${motor_profile_path}
-                --output      ${autogen_header}
-                --report      ${autogen_report}
-                --pwm-rate-hz ${CONFIG_ESP_FOC_PWM_RATE_HZ}
-                --decimation  ${CONFIG_ESP_FOC_AUTOGEN_DECIMATION}
-        DEPENDS ${motor_profile_path}
-                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_pi_gains.py
-        COMMENT "espFoC: autotuning PI gains for profile '${motor_profile}'"
-        VERBATIM)
-    add_custom_target(esp_foc_autogen_gains DEPENDS ${autogen_header})
-    add_dependencies(${COMPONENT_LIB} esp_foc_autogen_gains)
-    target_include_directories(${COMPONENT_LIB} PRIVATE ${autogen_dir})
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE ESP_FOC_AUTOGEN_GAINS_AVAILABLE=1)
-endif()
 
 endif()

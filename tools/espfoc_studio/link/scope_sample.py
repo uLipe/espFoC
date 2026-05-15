@@ -24,7 +24,7 @@ PAYLOAD_OFS = 6
 
 
 def pack_scope_i32_to_payload(samples_i32: List[int]) -> bytes:
-    """Build a SCOPE *channel* frame body for tests / demo. Each value is
+    """Build a SCOPE *channel* frame body for tests. Each value is
     a signed 32-bit Q16.16 mantissa, same as ``q16_t`` in firmware."""
     n = len(samples_i32)
     out = bytearray(SCOPE_WIRE_HEADER)

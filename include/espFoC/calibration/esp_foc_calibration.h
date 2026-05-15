@@ -19,12 +19,11 @@ extern "C" {
 typedef struct {
     q16_t kp;
     q16_t ki;
+    q16_t kd;
+    q16_t kff;
     q16_t integrator_limit;
-    q16_t motor_r_ohm;
-    q16_t motor_l_h;
-    q16_t bandwidth_hz;
     q16_t current_filter_fc_hz;
-    uint8_t reserved[12];
+    uint8_t reserved[16];
 } esp_foc_calibration_data_t;
 
 #define ESP_FOC_CALIBRATION_MAX_AXES 4u
@@ -68,10 +67,7 @@ void esp_foc_calibration_axis_align_apply_stored_hints(
     bool *skip_dir_probe);
 void esp_foc_calibration_axis_align_persist_snapshot(esp_foc_axis_t *axis);
 
-esp_foc_err_t esp_foc_calibration_axis_tuner_persist(
-    esp_foc_axis_t *axis,
-    const uint8_t *motor_r_l_bw_q16,
-    size_t payload_len);
+esp_foc_err_t esp_foc_calibration_axis_tuner_persist(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_calibration_axis_tuner_load_apply(esp_foc_axis_t *axis);
 
 void esp_foc_calibration_axis_tuner_clear_cache(esp_foc_axis_t *axis);

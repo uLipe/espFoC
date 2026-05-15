@@ -185,7 +185,7 @@ TEST_CASE("q16 limit_voltage: exceeds limit is scaled", "[espFoC][q16][stability
 TEST_CASE("PID q16: sustained zero-error stays zero", "[espFoC][q16][stability]")
 {
     esp_foc_pid_controller_t pid = {0};
-    esp_foc_pid_init_from_float(&pid, 1.0f, 10.0f, 0.0f, 1.0f, 0.001f, -10.0f, 10.0f, 5.0f);
+    esp_foc_pid_init_from_float(&pid, 1.0f, 10.0f, 0.0f, 0.0f, 1.0f, 0.001f, -10.0f, 10.0f, 5.0f);
     for (int i = 0; i < 10000; i++) {
         q16_t ref = q16_from_float(1.0f);
         q16_t out = esp_foc_pid_update(&pid, ref, ref);
@@ -197,7 +197,7 @@ TEST_CASE("PID q16: integrator windup clamped", "[espFoC][q16][stability]")
 {
     esp_foc_pid_controller_t pid = {0};
     const float int_lim = 2.0f;
-    esp_foc_pid_init_from_float(&pid, 0.0f, 100.0f, 0.0f, 0.0f, 0.01f, -100.0f, 100.0f, int_lim);
+    esp_foc_pid_init_from_float(&pid, 0.0f, 100.0f, 0.0f, 0.0f, 0.0f, 0.01f, -100.0f, 100.0f, int_lim);
     for (int i = 0; i < 5000; i++) {
         esp_foc_pid_update(&pid, Q16_ONE, 0);
     }
@@ -208,7 +208,7 @@ TEST_CASE("PID q16: integrator windup clamped", "[espFoC][q16][stability]")
 TEST_CASE("PID q16: output saturation prevents runaway", "[espFoC][q16][stability]")
 {
     esp_foc_pid_controller_t pid = {0};
-    esp_foc_pid_init_from_float(&pid, 100.0f, 0.0f, 0.0f, 0.0f, 0.001f, -0.5f, 0.5f, 10.0f);
+    esp_foc_pid_init_from_float(&pid, 100.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.001f, -0.5f, 0.5f, 10.0f);
     q16_t out = esp_foc_pid_update(&pid, q16_from_float(100.0f), 0);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.5f, q16_to_float(out));
 }
@@ -216,7 +216,7 @@ TEST_CASE("PID q16: output saturation prevents runaway", "[espFoC][q16][stabilit
 TEST_CASE("PID q16: alternating sign error stays bounded", "[espFoC][q16][stability]")
 {
     esp_foc_pid_controller_t pid = {0};
-    esp_foc_pid_init_from_float(&pid, 1.0f, 5.0f, 0.01f, 0.0f, 0.001f, -10.0f, 10.0f, 5.0f);
+    esp_foc_pid_init_from_float(&pid, 1.0f, 5.0f, 0.01f, 0.0f, 0.0f, 0.001f, -10.0f, 10.0f, 5.0f);
     for (int i = 0; i < 2000; i++) {
         float ref = (i & 1) ? 0.5f : -0.5f;
         q16_t out = esp_foc_pid_update(&pid, q16_from_float(ref), 0);
@@ -255,8 +255,8 @@ TEST_CASE("full pipeline q16: 10000 steps bounded and deterministic", "[espFoC][
     esp_foc_biquad_q16_t filt_d, filt_q;
 
     const float dt = 1.0f / 20000.0f;
-    esp_foc_pid_init_from_float(&pid_d, 0.4f, 60.0f, 0.0f, 0.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
-    esp_foc_pid_init_from_float(&pid_q, 0.4f, 60.0f, 0.0f, 0.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
+    esp_foc_pid_init_from_float(&pid_d, 0.4f, 60.0f, 0.0f, 0.0f, 1.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
+    esp_foc_pid_init_from_float(&pid_q, 0.4f, 60.0f, 0.0f, 0.0f, 1.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
     esp_foc_biquad_butterworth_lpf_design_q16(&filt_d, 60.0f, 20000.0f);
     esp_foc_biquad_butterworth_lpf_design_q16(&filt_q, 60.0f, 20000.0f);
 

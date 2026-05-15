@@ -78,7 +78,7 @@ class ScopePanel(QWidget):
         self._async_decode = async_decode
         self._reader = reader
         self._sample_dt = sample_period_s
-        self._uniform_dt_s = scope_uniform_dt_s(20000.0, demo=False)
+        self._uniform_dt_s = scope_uniform_dt_s(20000.0)
         self._scope_synth_t = 0.0
         self._display_lag_s = float(self.DISPLAY_LAG_S)
         self._live_priority = False

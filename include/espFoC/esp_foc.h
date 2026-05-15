@@ -17,7 +17,6 @@
 #include "espFoC/esp_foc_controls.h"
 #include "espFoC/gui_link/esp_foc_scope.h"
 #include "espFoC/calibration/esp_foc_calibration.h"
-#include "espFoC/tuning/esp_foc_axis_tuning.h"
 
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                         esp_foc_inverter_t *inverter,
@@ -31,3 +30,19 @@ esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_stop(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_set_regulation_callback(esp_foc_axis_t *axis,
                                               esp_foc_motor_regulation_callback_t callback);
+
+esp_foc_err_t esp_foc_axis_set_current_loop_gains_q16(
+    esp_foc_axis_t *axis,
+    q16_t kp,
+    q16_t ki,
+    q16_t kd,
+    q16_t kff,
+    q16_t integrator_limit);
+
+void esp_foc_axis_get_current_loop_gains_q16(
+    const esp_foc_axis_t *axis,
+    q16_t *kp,
+    q16_t *ki,
+    q16_t *kd,
+    q16_t *kff,
+    q16_t *integrator_limit);

@@ -141,7 +141,7 @@ class SensorsDebugPanel(QWidget):
         self._pending_decoded: List[Tuple[float, Tuple[float, ...]]] = []
         self._decode_thread: Optional[threading.Thread] = None
         self._t0 = time.monotonic()
-        self._uniform_dt_s = scope_uniform_dt_s(20000.0, demo=False)
+        self._uniform_dt_s = scope_uniform_dt_s(20000.0)
         self._scope_synth_t = 0.0
         self._time_buf: Deque[float] = deque(maxlen=BUFFER_CAP)
         self._plot_bufs: List[Deque[float]] = [
@@ -285,7 +285,7 @@ class SensorsDebugPanel(QWidget):
             self._uniform_dt_s = float(dt_s)
 
     def set_counts_per_rev(self, cpr: int) -> None:
-        """Optional: sync CPR from Generate App / hardware profile (clamped 1…65536)."""
+        """Set encoder counts-per-revolution hint for the synthetic plot (1…65536)."""
         if cpr < 1:
             cpr = 1
         if cpr > 65536:

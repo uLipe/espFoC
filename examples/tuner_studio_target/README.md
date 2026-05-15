@@ -34,10 +34,5 @@ ESP32, switch to UART under `Component config` →
    the alignment routine including the natural-direction probe.
 4. Engage **Override active** and dial `iq_ref` in to spin the
    motor under tuner control. Watch the SVM hexagon and scope.
-5. Tune Kp/Ki via the MPZ recompute button or by hand.
+5. Tune Kp/Ki/Kd/Kff by hand (or use the Analysis tab for guidance).
 6. Click **Save to NVS** when satisfied.
-
-The **Generate App** tab (template codegen + NVS export helpers) appears only
-when you run the GUI with **`--demo`** (simulated firmware). For a production
-IDF tree from your pin map and gains, use `espfoc_studio.codegen.generate_sensored_app`
-or copy from `tools/espfoc_studio/templates/sensored_app` — see `doc/TUNING.md`.

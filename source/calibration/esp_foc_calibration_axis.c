@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include "esp_log.h"
 #include "espFoC/calibration/esp_foc_calibration.h"
-#include "espFoC/tuning/esp_foc_axis_tuning.h"
+#include "espFoC/esp_foc.h"
 
 void esp_foc_axis_refresh_encoder_q16_scales(esp_foc_axis_t *axis);
 
@@ -42,31 +42,19 @@ static void log_blob_boot_d(unsigned axis_id,
     const bool have_off = (af & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) != 0u;
     const bool have_dir = (af & ESP_FOC_CAL_ALIGN_FLAG_DIR) != 0u
                           && (nat_d == Q16_ONE || nat_d == Q16_MINUS_ONE);
-#if defined(CONFIG_ESP_FOC_USE_AUTOGEN_GAINS) && CONFIG_ESP_FOC_USE_AUTOGEN_GAINS
     ESP_LOGD(
         TAG,
-        "axis %u detail: profile %s v%d hash=0x%08x",
+        "axis %u detail: profile_hash=0x%08x",
         axis_id,
-        CONFIG_ESP_FOC_MOTOR_PROFILE,
-        (int)CONFIG_ESP_FOC_PROFILE_VERSION,
         (unsigned)esp_foc_calibration_profile_hash());
-#else
-    ESP_LOGD(TAG, "axis %u detail: hash=0x%08x (autogen off)",
-             axis_id, (unsigned)esp_foc_calibration_profile_hash());
-#endif
     {
-        int32_t ppn = esp_foc_calibration_get_pole_pairs(cal);
         ESP_LOGD(
             TAG,
-            "axis %u detail: PI Kp=%.4f Ki=%.2f ILim=%.3f I-lpf=%.1fHz "
-            "motor R=%.4f L=%.4e bw=%.1f pole_pairs_stored=%d",
+            "axis %u detail: Kp=%.4f Ki=%.4f Kd=%.4f Kff=%.4f ILim=%.3f I-lpf=%.1fHz",
             axis_id,
             (double)q16_to_float(cal->kp), (double)q16_to_float(cal->ki),
-            (double)q16_to_float(cal->integrator_limit), (double)fc_lpf_hz,
-            (double)q16_to_float(cal->motor_r_ohm),
-            (double)q16_to_float(cal->motor_l_h),
-            (double)q16_to_float(cal->bandwidth_hz),
-            (int)ppn);
+            (double)q16_to_float(cal->kd), (double)q16_to_float(cal->kff),
+            (double)q16_to_float(cal->integrator_limit), (double)fc_lpf_hz);
     }
     ESP_LOGD(
         TAG,
@@ -88,9 +76,6 @@ void esp_foc_calibration_axis_init_store(
     if (axis->cal.axis_id >= ESP_FOC_CALIBRATION_MAX_AXES) {
         axis->cal.axis_id = 0;
     }
-    axis->cal.motor_r_ohm = 0;
-    axis->cal.motor_l_h = 0;
-    axis->cal.bandwidth_hz = 0;
 }
 
 void esp_foc_calibration_axis_boot_apply(
@@ -118,14 +103,14 @@ void esp_foc_calibration_axis_boot_apply(
     for (int i = 0; i < 2; ++i) {
         axis->torque_controller[i].kp = cal.kp;
         axis->torque_controller[i].ki = cal.ki;
+        axis->torque_controller[i].kd = cal.kd;
+        axis->torque_controller[i].kff = cal.kff;
         axis->torque_controller[i].integrator_limit = cal.integrator_limit;
+        esp_foc_pid_reset(&axis->torque_controller[i]);
     }
     if (cal.current_filter_fc_hz > 0 && inout_current_filter_fc_hz != NULL) {
         *inout_current_filter_fc_hz = q16_to_float(cal.current_filter_fc_hz);
     }
-    axis->cal.motor_r_ohm = cal.motor_r_ohm;
-    axis->cal.motor_l_h = cal.motor_l_h;
-    axis->cal.bandwidth_hz = cal.bandwidth_hz;
     {
         uint8_t aflags;
         uint16_t enc0;
@@ -222,6 +207,8 @@ void esp_foc_calibration_axis_align_persist_snapshot(esp_foc_axis_t *axis)
             for (int i = 0; i < 2; ++i) {
                 data.kp = axis->torque_controller[i].kp;
                 data.ki = axis->torque_controller[i].ki;
+                data.kd = axis->torque_controller[i].kd;
+                data.kff = axis->torque_controller[i].kff;
                 data.integrator_limit = axis->torque_controller[i].integrator_limit;
             }
             data.current_filter_fc_hz = axis->current_filter_fc_hz_q16;
@@ -229,47 +216,22 @@ void esp_foc_calibration_axis_align_persist_snapshot(esp_foc_axis_t *axis)
         esp_foc_calibration_pack_align(&data, aflags, z, axis->natural_direction);
         esp_foc_calibration_pack_pole_pairs(
             &data, (int32_t)axis->motor_pole_pairs);
-        if (esp_foc_calibration_save(axis->cal.axis_id, &data) == ESP_FOC_OK) {
-            axis->cal.motor_r_ohm = data.motor_r_ohm;
-            axis->cal.motor_l_h = data.motor_l_h;
-            axis->cal.bandwidth_hz = data.bandwidth_hz;
-        }
+        (void)esp_foc_calibration_save(axis->cal.axis_id, &data);
     }
 }
 
-static q16_t read_q16_le(const uint8_t *p)
-{
-    uint32_t u = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
-                 ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-    return (q16_t)u;
-}
-
-esp_foc_err_t esp_foc_calibration_axis_tuner_persist(
-    esp_foc_axis_t *axis,
-    const uint8_t *motor_r_l_bw_q16,
-    size_t payload_len)
+esp_foc_err_t esp_foc_calibration_axis_tuner_persist(esp_foc_axis_t *axis)
 {
     esp_foc_calibration_data_t data;
     if (esp_foc_calibration_load(axis->cal.axis_id, &data) != ESP_FOC_OK) {
         memset(&data, 0, sizeof(data));
     }
-    esp_foc_axis_get_current_pi_gains_q16(axis, &data.kp, &data.ki,
-                                          &data.integrator_limit);
+    esp_foc_axis_get_current_loop_gains_q16(axis, &data.kp, &data.ki, &data.kd,
+                                            &data.kff, &data.integrator_limit);
     data.current_filter_fc_hz = axis->current_filter_fc_hz_q16;
-    if (motor_r_l_bw_q16 != NULL && payload_len >= 12) {
-        data.motor_r_ohm = read_q16_le(motor_r_l_bw_q16);
-        data.motor_l_h = read_q16_le(motor_r_l_bw_q16 + 4);
-        data.bandwidth_hz = read_q16_le(motor_r_l_bw_q16 + 8);
-    }
     esp_foc_calibration_pack_pole_pairs(
         &data, (int32_t)axis->motor_pole_pairs);
-    esp_foc_err_t err = esp_foc_calibration_save(axis->cal.axis_id, &data);
-    if (err == ESP_FOC_OK) {
-        axis->cal.motor_r_ohm = data.motor_r_ohm;
-        axis->cal.motor_l_h = data.motor_l_h;
-        axis->cal.bandwidth_hz = data.bandwidth_hz;
-    }
-    return err;
+    return esp_foc_calibration_save(axis->cal.axis_id, &data);
 }
 
 esp_foc_err_t esp_foc_calibration_axis_tuner_load_apply(esp_foc_axis_t *axis)
@@ -279,8 +241,8 @@ esp_foc_err_t esp_foc_calibration_axis_tuner_load_apply(esp_foc_axis_t *axis)
     if (err != ESP_FOC_OK) {
         return err;
     }
-    err = esp_foc_axis_set_current_pi_gains_q16(axis, data.kp, data.ki,
-                                                data.integrator_limit);
+    err = esp_foc_axis_set_current_loop_gains_q16(
+        axis, data.kp, data.ki, data.kd, data.kff, data.integrator_limit);
     if (err == ESP_FOC_OK && data.current_filter_fc_hz > 0 &&
         axis->isensor_driver != NULL &&
         axis->isensor_driver->set_filter_cutoff != NULL) {
@@ -291,9 +253,6 @@ esp_foc_err_t esp_foc_calibration_axis_tuner_load_apply(esp_foc_axis_t *axis)
         axis->current_filter_fc_hz_q16 = data.current_filter_fc_hz;
     }
     if (err == ESP_FOC_OK) {
-        axis->cal.motor_r_ohm = data.motor_r_ohm;
-        axis->cal.motor_l_h = data.motor_l_h;
-        axis->cal.bandwidth_hz = data.bandwidth_hz;
         {
             int32_t ppn = esp_foc_calibration_get_pole_pairs(&data);
             if (ppn >= 1 && ppn <= 64) {
@@ -310,12 +269,10 @@ esp_foc_err_t esp_foc_calibration_axis_tuner_load_apply(esp_foc_axis_t *axis)
                 (nstore == Q16_MINUS_ONE)         ? "CCW" : "?";
             ESP_LOGD(
                 TAG,
-                "LOAD axis %u: pp=%d R=%.4f L=%.4e bw=%.1f align off=%d enc=%u dir=%d %s",
+                "LOAD axis %u: pp=%d Kff=%.4f align off=%d enc=%u dir=%d %s",
                 (unsigned)axis->cal.axis_id,
                 axis->motor_pole_pairs,
-                (double)q16_to_float(data.motor_r_ohm),
-                (double)q16_to_float(data.motor_l_h),
-                (double)q16_to_float(data.bandwidth_hz),
+                (double)q16_to_float(data.kff),
                 (int)((af & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) ? 1 : 0),
                 (unsigned)eraw,
                 (int)((af & ESP_FOC_CAL_ALIGN_FLAG_DIR) ? 1 : 0),
@@ -342,14 +299,9 @@ void esp_foc_calibration_axis_align_persist_snapshot(esp_foc_axis_t *axis)
     (void)axis;
 }
 
-esp_foc_err_t esp_foc_calibration_axis_tuner_persist(
-    esp_foc_axis_t *axis,
-    const uint8_t *motor_r_l_bw_q16,
-    size_t payload_len)
+esp_foc_err_t esp_foc_calibration_axis_tuner_persist(esp_foc_axis_t *axis)
 {
     (void)axis;
-    (void)motor_r_l_bw_q16;
-    (void)payload_len;
     return ESP_FOC_ERR_AXIS_INVALID_STATE;
 }
 
@@ -363,7 +315,5 @@ esp_foc_err_t esp_foc_calibration_axis_tuner_load_apply(esp_foc_axis_t *axis)
 
 void esp_foc_calibration_axis_tuner_clear_cache(esp_foc_axis_t *axis)
 {
-    axis->cal.motor_r_ohm = 0;
-    axis->cal.motor_l_h = 0;
-    axis->cal.bandwidth_hz = 0;
+    (void)axis;
 }
