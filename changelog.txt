@@ -6,6 +6,11 @@ This file is used to generate GitHub releases. All versions from 2.0.0 onward ar
 
 ## Unreleased
 
+### Removed
+
+- **`legacy/` tree** removed (observer implementations and `test_observers_q16.c`). Sensorless angle observers are not part of the supported component surface; use a hardware rotor sensor or `rotor_sensor_simu` for bring-up.
+- **Example rename:** `examples/axis_sensored` → `examples/axis_simple` (main `axis_simple.c`, `hw_axis_simple.kconfig`, CMake `project(axis_simple)`).
+
 ### Features
 
 - **Tuner `CMD_PING` (0x00B4):** minimal EXEC with no payload; host tools use it for link liveness so periodic tuner polls are not conflated with CONNECTED / NO LINK. espFoC Studio runs ping every 5 s on the poll worker thread (independent of poll cadence).

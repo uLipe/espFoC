@@ -10,7 +10,6 @@ Unity-based unit tests for the espFoC component. They cover logic that does not 
 - **test_driver_mocks.c**: Mock API tests (`set_voltages` Q16, `get_dc_link_voltage`, `get_inverter_pwm_rate`, `read_counts`, `fetch_isensors`, etc.)
 - **test_driver_q16_api.c**: Additional mock tests (overlaps part of **test_driver_mocks.c**)
 - **test_axis_flow.c**: Axis flow with mocks — init, align, `set_regulation_callback`, `run`; checks that the regulation callback runs and `set_voltages` receives FOC output
-- **test_observers_q16.c**: Observer smoke tests (simu, PLL, KF, PMSM model) — `update` with Q16 inputs, getters, and `reset`
 - **test_q16_numerical_stability.c**: Numerical stability of the Q16.16 pipeline — arithmetic boundary saturation (overflow/underflow), sin/cos identity and wrap-around, Clarke/Park roundtrips at small and large signals, limit_voltage edge cases, PID sustained zero-error / windup / alternating-sign, EMA convergence and oscillation bounds, SVPWM extreme-input duty clamping, full 10000-step pipeline stability, Q16↔IQ31 bridge consistency, angle normalization wraps. Tags: `[espFoC][q16][stability]`
 
 ## Building and running

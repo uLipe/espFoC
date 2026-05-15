@@ -21,8 +21,7 @@ Targets: ESP32, ESP32-S3, ESP32-P4 (ESP-IDF v5+).
 > **3.0 is a breaking release.** The legacy continuous-time PI
 > formula and the `motor_resistance / motor_inductance / motor_inertia`
 > fields are gone — gains come from the build-time autotuner or the
-> runtime tuner. The 3-PWM LEDC driver and the WIP `axis_sensorless`
-> example were also dropped. See [`changelog.txt`](changelog.txt) for
+> runtime tuner. The 3-PWM LEDC driver was also dropped. See [`changelog.txt`](changelog.txt) for
 > the full migration list.
 
 ---
@@ -44,7 +43,7 @@ set(EXTRA_COMPONENT_DIRS "path/to/espFoC")
 Then pick an example as a starting point:
 
 ```bash
-cd examples/axis_sensored
+cd examples/axis_simple
 idf.py set-target esp32s3
 idf.py build flash monitor
 ```
@@ -131,7 +130,7 @@ covered in [`doc/TUNING.md`](doc/TUNING.md).
 
 ## Minimal example
 
-Sensored current mode with a 6-PWM MCPWM inverter, an AS5600 encoder
+Encoder-based current mode with a 6-PWM MCPWM inverter, an AS5600 encoder
 and an ADC shunt. PI gains come from the build-time autotuner for the
 motor profile selected via `CONFIG_ESP_FOC_MOTOR_PROFILE`; the runtime
 tuner / TunerStudio can rewrite them later.
@@ -182,7 +181,7 @@ void app_main(void)
 
 ## Examples
 
-- `examples/axis_sensored` — reference bring-up (sensored current mode).
+- `examples/axis_simple` — reference bring-up (encoder + current-mode FOC).
 - `examples/tuner_studio_target` — service-mode firmware for live tuning
   with TunerStudio (`--port`).
 - `examples/tuner_demo` — runs in QEMU, exercises autogen gains,
@@ -196,7 +195,7 @@ void app_main(void)
 
 Q16.16 fixed-point (`q16_t`) is used everywhere in the hot path:
 currents, voltages, angles, PID, filters, SVPWM. A Q1.31 (IQ31) LUT
-backs sin/cos and the observers. Float is reserved for setup-time
+backs sin/cos for Park transforms. Float is reserved for setup-time
 conversions via `q16_from_float()` / `q16_to_float()`; the control
 loop contains no floating-point operations.
 
@@ -209,7 +208,7 @@ espFoC/
 ├── doc/
 │   ├── images/         # architecture, TunerStudio screenshot, demo gif
 │   └── TUNING.md       # deep dive: autogen, runtime API, protocol, CLI
-├── examples/           # axis_sensored / tuner_studio_target /
+├── examples/           # axis_simple / tuner_studio_target /
 │                       # tuner_demo / unit_test_runner / ...
 ├── include/espFoC/     # public API
 ├── scripts/

@@ -50,7 +50,7 @@ jobs:
       run: |
         ./idf/install.sh
         . ./idf/export.sh
-        pushd examples/axis_sensored
+        pushd examples/axis_simple
         idf.py set-target esp32s3
         idf.py build
         idf.py set-target esp32p4

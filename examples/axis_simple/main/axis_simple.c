@@ -23,7 +23,7 @@
  */
 
 /*
- * Sensored quick start: canonical IQ31 API (esp_foc_initialize_axis / align / run).
+ * Simple FOC example: canonical IQ31 API (esp_foc_initialize_axis / align / run).
  */
 
 #include "esp_log.h"
@@ -196,7 +196,7 @@ static void initialize_foc_drivers(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Initializing espFoC sensored axis (IQ31)");
+    ESP_LOGI(TAG, "Initializing espFoC axis_simple (IQ31)");
 
     /* Default bypass gains at init; tune via link or NVS as needed. */
     initialize_foc_drivers();

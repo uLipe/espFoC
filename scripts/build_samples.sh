@@ -24,8 +24,8 @@ build_one() {
     popd >/dev/null
 }
 
-build_one examples/axis_sensored set-target esp32s3 build
-build_one examples/axis_sensored set-target esp32p4 build
+build_one examples/axis_simple set-target esp32s3 build
+build_one examples/axis_simple set-target esp32p4 build
 
 build_one examples/tuner_demo set-target esp32 build
 

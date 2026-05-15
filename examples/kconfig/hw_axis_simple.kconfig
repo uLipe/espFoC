@@ -1,4 +1,4 @@
-menu "Free-running FoC (axis_sensored) — hardware"
+menu "Free-running FoC (axis_simple) — hardware"
 
     config FOC_PWM_U_PIN
         int "GPIO: phase U (high side)"
@@ -22,7 +22,7 @@ menu "Free-running FoC (axis_sensored) — hardware"
         help
             Passed to the MCPWM inverter: -1 skips the enable output; 0+ uses that GPIO
             (see FOC_PWM_EN_ACT_LOW for polarity). A negative return value in the
-            C API encodes active-low (see axis_sensored.c).
+            C API encodes active-low (see axis_simple.c).
 
     config FOC_PWM_EN_ACT_LOW
         bool "Active-low enable (inverted)"

@@ -1,0 +1,1 @@
+source "../../kconfig/hw_axis_simple.kconfig"
