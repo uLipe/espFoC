@@ -18,8 +18,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "espFoC/esp_foc.h"
-#include "espFoC/esp_foc_axis_tuning.h"
-#include "espFoC/esp_foc_tuner.h"
+#include "espFoC/tuning/esp_foc_axis_tuning.h"
+#include "espFoC/gui_link/esp_foc_tuner.h"
 
 static const char *TAG = "tuner-demo";
 

@@ -100,6 +100,9 @@ static q16_t mock_rotor_read_counts(esp_foc_rotor_sensor_t *self)
 {
     mock_rotor_sensor_t *m = MOCK_ROTOR_FROM_SELF(self);
     m->read_counts_count++;
+    if (m->scripted_counts_idx < m->scripted_counts_count) {
+        m->counts = m->scripted_counts_reads[m->scripted_counts_idx++];
+    }
     {
         float c = fmodf(m->counts, m->counts_per_rev);
         if (c < 0.0f) {
@@ -120,6 +123,27 @@ static int64_t mock_rotor_read_accumulated_i64(esp_foc_rotor_sensor_t *self)
         m->last_accum_i64 = (int64_t)llroundf(m->accumulated);
     }
     return m->last_accum_i64;
+}
+
+void mock_rotor_sensor_script_counts(mock_rotor_sensor_t *m,
+                                    const float *seq, int n)
+{
+    if (m == NULL || seq == NULL) {
+        return;
+    }
+    if (n < 0) {
+        n = 0;
+    }
+    int cap = (int)(sizeof(m->scripted_counts_reads) /
+                    sizeof(m->scripted_counts_reads[0]));
+    if (n > cap) {
+        n = cap;
+    }
+    for (int i = 0; i < n; ++i) {
+        m->scripted_counts_reads[i] = seq[i];
+    }
+    m->scripted_counts_count = n;
+    m->scripted_counts_idx = 0;
 }
 
 void mock_rotor_sensor_script_accumulated(mock_rotor_sensor_t *m,

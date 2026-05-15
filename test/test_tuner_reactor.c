@@ -13,9 +13,9 @@
 #include <string.h>
 #include <unity.h>
 #include "espFoC/esp_foc.h"
-#include "espFoC/esp_foc_tuner.h"
-#include "espFoC/esp_foc_axis_tuning.h"
-#include "espFoC/esp_foc_link.h"
+#include "espFoC/gui_link/esp_foc_tuner.h"
+#include "espFoC/tuning/esp_foc_axis_tuning.h"
+#include "espFoC/gui_link/esp_foc_link.h"
 #include "espFoC/utils/esp_foc_q16.h"
 #include "mock_drivers.h"
 

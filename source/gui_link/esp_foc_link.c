@@ -5,7 +5,7 @@
  */
 
 #include <string.h>
-#include "espFoC/esp_foc_link.h"
+#include "espFoC/gui_link/esp_foc_link.h"
 
 /* CRC-16/CCITT, polynomial 0x1021, init 0xFFFF, no reflection, no xor-out.
  * Implemented bit-by-bit so the static footprint stays at zero (no LUT).

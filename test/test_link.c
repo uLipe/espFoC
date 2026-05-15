@@ -6,7 +6,7 @@
 
 #include <string.h>
 #include <unity.h>
-#include "espFoC/esp_foc_link.h"
+#include "espFoC/gui_link/esp_foc_link.h"
 
 static void encode_decode_roundtrip(esp_foc_link_channel_t channel,
                                     uint8_t seq,

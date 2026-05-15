@@ -14,8 +14,8 @@ and shows:
 * the three-phase time-series underneath, physical units (V), matching
   the scope tab's channels 0/1/2.
 
-Rendering is buffered on the reader side and flushed at 20 FPS so
-scope bursts after a current step do not stall the Qt loop.
+Rendering is buffered on the reader side and flushed at a modest UI
+rate so scope bursts after a current step do not stall the Qt loop.
 """
 
 from __future__ import annotations
@@ -41,7 +41,15 @@ from PySide6.QtWidgets import (
 from ..link import LinkReader
 from ..link.scope_sample import decode_scope_payload_to_floats_csv_first
 from .crosshair import attach_crosshair
+from .plot_display import (
+    configure_dynamic_curve,
+    configure_rolling_time_xaxis,
+    decimate_xy_for_display,
+    decimation_indices_peak_union,
+    rolling_plot_x_upper,
+)
 from .scope_panel import ScopePanel
+from .scope_stream_timing import scope_uniform_dt_s
 
 
 _HEX_COLOR = "#6e7681"
@@ -70,14 +78,17 @@ def _clarke(u_u: float, u_v: float, u_w: float) -> tuple[float, float]:
 class SvmPanel(QWidget):
     """Hexagon + live Vα/Vβ vector + fading trail + three-phase plot."""
 
-    TRAIL_CAP = 600           # hexagon trail length, samples
-    WAVEFORM_CAP = 1024       # waveform history, samples
-    WAVEFORM_WINDOW_S = 0.5   # visible span in the three-phase plot
-    AUTOSCALE_ALPHA = 0.04    # EWMA weight for hexagon radius
-    RENDER_INTERVAL_MS = 50   # 20 FPS — smooth but lighter than the scope
-    INBOX_CAP = 256           # bound scope spam — drop older frames first
+    TRAIL_CAP = 200
+    TRAIL_TAIL_SAMPLES = 56
+    WAVEFORM_CAP = 480
+    WAVEFORM_WINDOW_S = 0.12
+    AUTOSCALE_ALPHA = 0.04
+    RENDER_INTERVAL_MS = 80
+    WAVEFORM_DISPLAY_MAX = 220
+    TRAIL_DISPLAY_MAX = 48
+    INBOX_CAP = 8192
     PU_FLOOR = 1e-4          # min divisor for per-unit; keeps [-1,1] stable
-    MAX_FRAMES_PER_UI_TICK = ScopePanel.MAX_FRAMES_PER_UI_TICK
+    MAX_FRAMES_PER_UI_TICK = 8192
 
     def __init__(self, reader: Optional[LinkReader] = None,
                  sample_period_s: float = 1e-3 * 4) -> None:
@@ -87,6 +98,8 @@ class SvmPanel(QWidget):
         super().__init__()
         self._reader = reader
         self._sample_dt = sample_period_s  # backwards-compat only
+        self._uniform_dt_s = scope_uniform_dt_s(20000.0, demo=False)
+        self._scope_synth_t = 0.0
         self._inbox_lock = threading.Lock()
         # Same (t_mono, payload) pattern as ScopePanel so the waveform
         # frequency tracks real time even when frames arrive bursty.
@@ -115,6 +128,7 @@ class SvmPanel(QWidget):
         self._plot.setLabel('left', "β (pu)", units="")
         self._plot.setLabel('bottom', "α (pu)", units="")
         self._plot.showGrid(x=True, y=True, alpha=0.15)
+        configure_rolling_time_xaxis(self._plot)
         self._plot.setMinimumHeight(380)
         self._hex_crosshair = attach_crosshair(
             self._plot,
@@ -156,8 +170,11 @@ class SvmPanel(QWidget):
             brush=[pg.mkBrush(QColor(c)) for c in _PHASE_COLORS])
         self._plot.addItem(self._phase_vec_tips)
 
+        _trail_pen_color = QColor(_TRAIL_COLOR)
+        _trail_pen_color.setAlpha(120)
         self._trail_curve = self._plot.plot(
-            pen=pg.mkPen(QColor(_TRAIL_COLOR), width=1))
+            pen=pg.mkPen(_trail_pen_color, width=1))
+        configure_dynamic_curve(self._trail_curve)
         self._arrow_curve = self._plot.plot(
             pen=pg.mkPen(QColor(_ARROW_COLOR), width=3))
         self._head_scatter = pg.ScatterPlotItem(
@@ -198,6 +215,7 @@ class SvmPanel(QWidget):
         self._wave_plot.setLabel('bottom', "time", units='s')
         self._wave_plot.showGrid(x=True, y=True, alpha=0.2)
         self._wave_plot.setMinimumHeight(220)
+        configure_rolling_time_xaxis(self._wave_plot)
         self._wave_plot.setXRange(0.0, self.WAVEFORM_WINDOW_S, padding=0)
         self._wave_plot.enableAutoRange(axis='x', enable=False)
         self._wave_plot.addLegend()
@@ -210,6 +228,8 @@ class SvmPanel(QWidget):
             pen=pg.mkPen(QColor(_PHASE_COLORS[1]), width=2), name="u_v (ch1)")
         self._uw_curve = self._wave_plot.plot(
             pen=pg.mkPen(QColor(_PHASE_COLORS[2]), width=2), name="u_w (ch2)")
+        for _c in (self._uu_curve, self._uv_curve, self._uw_curve):
+            configure_dynamic_curve(_c)
         root.addWidget(self._wave_plot, 1)
 
         # --- Render timer ------------------------------------------------
@@ -220,6 +240,11 @@ class SvmPanel(QWidget):
 
         if reader is not None:
             reader.register_scope_callback(self._on_frame_reader_thread)
+
+    def set_uniform_sample_period_s(self, dt_s: float) -> None:
+        if dt_s > 1e-9:
+            self._uniform_dt_s = float(dt_s)
+            self._sample_dt = self._uniform_dt_s
 
     # --- Subscription helpers --------------------------------------------
 
@@ -241,6 +266,7 @@ class SvmPanel(QWidget):
         with self._inbox_lock:
             self._inbox.clear()
         self._t0 = time.monotonic()
+        self._scope_synth_t = 0.0
         for buf in (self._alpha_buf, self._beta_buf,
                     self._time_buf, self._uu_buf, self._uv_buf, self._uw_buf):
             buf.clear()
@@ -271,7 +297,7 @@ class SvmPanel(QWidget):
             n_take = min(self.MAX_FRAMES_PER_UI_TICK, len(self._inbox))
             pending = [self._inbox.popleft() for _ in range(n_take)]
 
-        for t_mono, payload in pending:
+        for _t_mono, payload in pending:
             try:
                 allv = decode_scope_payload_to_floats_csv_first(payload)
             except ValueError:
@@ -284,7 +310,8 @@ class SvmPanel(QWidget):
             self._last_abc = (u_u, u_v, u_w)
             self._alpha_buf.append(a)
             self._beta_buf.append(b)
-            self._time_buf.append(t_mono - self._t0)
+            self._time_buf.append(self._scope_synth_t)
+            self._scope_synth_t += self._uniform_dt_s
             self._uu_buf.append(u_u)
             self._uv_buf.append(u_v)
             self._uw_buf.append(u_w)
@@ -320,11 +347,21 @@ class SvmPanel(QWidget):
                 for d, pn in zip(self._PHASE_DIRS, (uu_n, uv_n, uw_n))
             ]))
 
-        t_a = np.fromiter(self._alpha_buf, dtype=float,
-                          count=len(self._alpha_buf))
-        t_b = np.fromiter(self._beta_buf, dtype=float,
-                          count=len(self._beta_buf))
-        self._trail_curve.setData(t_a * inv, t_b * inv)
+        ab = list(self._alpha_buf)
+        bb = list(self._beta_buf)
+        tail = self.TRAIL_TAIL_SAMPLES
+        if len(ab) > tail:
+            ab = ab[-tail:]
+            bb = bb[-tail:]
+        t_a = np.asarray(ab, dtype=np.float64)
+        t_b = np.asarray(bb, dtype=np.float64)
+        ta_d, tb_d = decimate_xy_for_display(
+            t_a * inv,
+            t_b * inv,
+            self.TRAIL_DISPLAY_MAX,
+            method="uniform",
+        )
+        self._trail_curve.setData(ta_d, tb_d)
         self._arrow_curve.setData([0.0, a_n], [0.0, b_n])
         self._head_scatter.setData(pos=np.array([[a_n, b_n]]))
 
@@ -333,15 +370,25 @@ class SvmPanel(QWidget):
         t_rels = np.fromiter(self._time_buf, dtype=float,
                              count=len(self._time_buf))
         t_arr = t_rels - float(t_rels[0])
-        self._uu_curve.setData(t_arr,
-                               np.fromiter(self._uu_buf, dtype=float,
-                                           count=len(self._uu_buf)))
-        self._uv_curve.setData(t_arr,
-                               np.fromiter(self._uv_buf, dtype=float,
-                                           count=len(self._uv_buf)))
-        self._uw_curve.setData(t_arr,
-                               np.fromiter(self._uw_buf, dtype=float,
-                                           count=len(self._uw_buf)))
+        uu = np.fromiter(self._uu_buf, dtype=float, count=len(self._uu_buf))
+        uv = np.fromiter(self._uv_buf, dtype=float, count=len(self._uv_buf))
+        uw = np.fromiter(self._uw_buf, dtype=float, count=len(self._uw_buf))
+        n_w = int(t_arr.shape[0])
+        mp_w = self.WAVEFORM_DISPLAY_MAX
+        if n_w <= mp_w:
+            t_d = t_arr
+            self._uu_curve.setData(t_d, uu)
+            self._uv_curve.setData(t_d, uv)
+            self._uw_curve.setData(t_d, uw)
+        else:
+            w_idx = decimation_indices_peak_union([uu, uv, uw], mp_w)
+            t_d = t_arr[w_idx]
+            self._uu_curve.setData(t_d, uu[w_idx])
+            self._uv_curve.setData(t_d, uv[w_idx])
+            self._uw_curve.setData(t_d, uw[w_idx])
+
+        x_up = rolling_plot_x_upper(t_d, self.WAVEFORM_WINDOW_S)
+        self._wave_plot.setXRange(0.0, x_up, padding=0)
 
         mag_pu = mag * inv
         self._alpha_label.setText(f"α = {a_n:+8.3f} pu")

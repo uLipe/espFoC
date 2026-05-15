@@ -1,13 +1,13 @@
 /*
  * MIT License
  *
- * Unit tests for the runtime axis tuning API (esp_foc_axis_tuning.h).
+ * Unit tests for the runtime axis tuning API (tuning/esp_foc_axis_tuning.h).
  */
 
 #include <string.h>
 #include <unity.h>
 #include "espFoC/esp_foc.h"
-#include "espFoC/esp_foc_axis_tuning.h"
+#include "espFoC/tuning/esp_foc_axis_tuning.h"
 #include "espFoC/utils/esp_foc_design_mpz.h"
 #include "espFoC/esp_foc_controls.h"
 #include "mock_drivers.h"

@@ -87,6 +87,7 @@ typedef enum {
     ESP_FOC_TUNER_CMD_OVERRIDE_ON       = 0x00A0, /* no payload */
     ESP_FOC_TUNER_CMD_OVERRIDE_OFF      = 0x00A1, /* no payload */
     ESP_FOC_TUNER_CMD_ALIGN_AXIS        = 0x00A2, /* blocking; emits LOG progress */
+    ESP_FOC_TUNER_CMD_STOP_AXIS         = 0x00A3, /* blocking; park + teardown loops */
 
     ESP_FOC_TUNER_CMD_PERSIST_NVS       = 0x00B0, /* save current gains */
     ESP_FOC_TUNER_CMD_LOAD_NVS          = 0x00B1, /* apply NVS overlay */
@@ -101,6 +102,7 @@ typedef enum {
 #define ESP_FOC_AXIS_STATE_ALIGNED        (1u << 1)
 #define ESP_FOC_AXIS_STATE_RUNNING        (1u << 2)
 #define ESP_FOC_AXIS_STATE_TUNER_OVERRIDE (1u << 3)
+#define ESP_FOC_AXIS_STATE_ALIGNING       (1u << 4)
 
 /**
  * @brief Register an axis under a stable id so the host can address it.

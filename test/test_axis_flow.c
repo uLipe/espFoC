@@ -60,7 +60,7 @@ TEST_CASE("axis align: enable and set_voltages sequence", "[espFoC][axis_flow]")
     esp_foc_err_t err = esp_foc_align_axis(&axis);
 
     TEST_ASSERT_EQUAL(ESP_FOC_OK, err);
-    TEST_ASSERT_EQUAL(ESP_FOC_OK, axis.rotor_aligned);
+    TEST_ASSERT_EQUAL(ESP_FOC_AXIS_STATE_ALIGNED, axis.state);
     TEST_ASSERT_EQUAL(enable_before + 1, mock_inv.enable_count);
     TEST_ASSERT_TRUE(mock_inv.set_voltages_count > set_voltages_before);
     /* New alignment zeroes the encoder twice: once after the initial
@@ -162,4 +162,37 @@ TEST_CASE("axis run: regulator runs and set_voltages receives FOC output", "[esp
 
     TEST_ASSERT_TRUE(mock_inv.set_voltages_count >= 1);
     TEST_ASSERT_TRUE(axis_run_regulator_called_count >= 1);
+}
+
+TEST_CASE("axis stop: returns to idle and allows re-align", "[espFoC][axis_flow]")
+{
+    setup_sensored_mocks();
+    esp_foc_initialize_axis(&axis, mock_inverter_interface(&mock_inv),
+                            mock_rotor_sensor_interface(&mock_rotor), NULL, settings);
+    esp_foc_align_axis(&axis);
+    esp_foc_set_regulation_callback(&axis, axis_run_regulator_cb);
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_run(&axis));
+    TEST_ASSERT_EQUAL(ESP_FOC_AXIS_STATE_RUNNING, axis.state);
+
+    for (int i = 0; i < 5; i++) {
+        mock_inverter_trigger_callback(&mock_inv);
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_stop(&axis));
+    TEST_ASSERT_EQUAL(ESP_FOC_AXIS_STATE_IDLE, axis.state);
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_stop(&axis));
+    TEST_ASSERT_TRUE(mock_inv.disable_count >= 1);
+
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_align_axis(&axis));
+    TEST_ASSERT_EQUAL(ESP_FOC_AXIS_STATE_ALIGNED, axis.state);
+}
+
+TEST_CASE("axis stop: refuses while aligning", "[espFoC][axis_flow]")
+{
+    setup_sensored_mocks();
+    esp_foc_initialize_axis(&axis, mock_inverter_interface(&mock_inv),
+                            mock_rotor_sensor_interface(&mock_rotor), NULL, settings);
+    axis.state = ESP_FOC_AXIS_STATE_ALIGNING;
+    TEST_ASSERT_EQUAL(ESP_FOC_ERR_ALIGNMENT_IN_PROGRESS, esp_foc_stop(&axis));
 }

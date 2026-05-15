@@ -2,11 +2,13 @@ set(srcs    "source/motor_control/esp_foc_core.c"
             "source/motor_control/control_strategy/esp_foc_control_current_mode_sensored.c"
             "source/motor_control/esp_foc_angle_predictor.c"
             "source/motor_control/esp_foc_biquad_q16.c"
-            "source/motor_control/esp_foc_calibration.c"
+            "source/calibration/esp_foc_calibration_format.c"
+            "source/calibration/esp_foc_calibration_nvs.c"
+            "source/calibration/esp_foc_calibration_axis.c"
             "source/motor_control/esp_foc_design_mpz.c"
-            "source/motor_control/esp_foc_link.c"
-            "source/motor_control/esp_foc_axis_tuning.c"
-            "source/motor_control/esp_foc_scope.c"
+            "source/gui_link/esp_foc_link.c"
+            "source/tuning/esp_foc_axis_tuning.c"
+            "source/gui_link/esp_foc_scope.c"
             "source/motor_control/esp_foc_iq31.c"
             "source/motor_control/esp_foc_q16.c"
             "source/motor_control/observers/esp_foc_pll_observer.c"
@@ -40,13 +42,13 @@ list(APPEND srcs    "source/drivers/inverter_3pwm_mcpwm.c"
                     "source/osal/os_interface_idf.c")
 
 if(CONFIG_ESP_FOC_TUNER_ENABLE)
-    list(APPEND srcs "source/motor_control/esp_foc_tuner.c")
+    list(APPEND srcs "source/gui_link/esp_foc_tuner.c")
 endif()
 if(CONFIG_ESP_FOC_BRIDGE_UART)
-    list(APPEND srcs "source/drivers/esp_foc_bridge_uart.c")
+    list(APPEND srcs "source/drivers/gui_link/esp_foc_bridge_uart.c")
 endif()
 if(CONFIG_ESP_FOC_BRIDGE_USBCDC)
-    list(APPEND srcs "source/drivers/esp_foc_bridge_usbcdc.c")
+    list(APPEND srcs "source/drivers/gui_link/esp_foc_bridge_usbcdc.c")
 endif()
 
 idf_component_register(SRCS "${srcs}"

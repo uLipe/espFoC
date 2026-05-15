@@ -5,11 +5,10 @@
  */
 
 #include <sdkconfig.h>
-#include "espFoC/esp_foc_axis_tuning.h"
+#include <stdint.h>
+#include "espFoC/tuning/esp_foc_axis_tuning.h"
 #include "espFoC/esp_foc_controls.h"
 
-/* Apply (kp, ki, integrator_limit) to both torque controllers atomically.
- * Called with the axis lock held. */
 static void apply_gains_locked(esp_foc_axis_t *axis,
                                q16_t kp, q16_t ki, q16_t integrator_limit)
 {
@@ -17,7 +16,6 @@ static void apply_gains_locked(esp_foc_axis_t *axis,
         axis->torque_controller[i].kp = kp;
         axis->torque_controller[i].ki = ki;
         axis->torque_controller[i].integrator_limit = integrator_limit;
-        /* Reset integrator/error history so post-swap response is well-defined. */
         axis->torque_controller[i].integrator = 0;
         axis->torque_controller[i].prev_error = 0;
     }
@@ -36,20 +34,10 @@ esp_foc_err_t esp_foc_axis_retune_current_pi_q16(
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
-    /* Pull the loop period straight from the PID itself — that field
-     * is set in esp_foc_initialize_axis() to the actual rate the
-     * controller fires at (PWM period under ISR_HOT_PATH, or
-     * pwm_period * downsampling under the legacy task path). Using
-     * the PWM rate * a hardcoded DOWNSAMPLING constant here is wrong
-     * the moment those two stop matching — exactly what the ISR hot
-     * path did, leaving the MPZ designer convinced fs = 2 kHz and
-     * rejecting any bandwidth above 1 kHz with OUT_OF_RANGE. */
     q16_t loop_dt_q16 = axis->torque_controller[0].dt;
     if (loop_dt_q16 <= 0) {
         return ESP_FOC_ERR_TIMESTEP_TOO_SMALL;
     }
-    /* loop_ts_us = round(loop_dt_q16 * 1e6 / Q16_ONE), int64 to keep
-     * things honest at small dt values (25 us = 1638 in Q16). */
     uint32_t loop_ts_us = (uint32_t)(((int64_t)loop_dt_q16 * 1000000LL
                                       + (int64_t)Q16_ONE / 2)
                                      / (int64_t)Q16_ONE);
@@ -105,11 +93,6 @@ void esp_foc_axis_get_current_pi_gains_q16(
     if (axis == NULL) {
         return;
     }
-    /* Reading three q16_t (32-bit) fields without a lock is safe on 32-bit
-     * targets: each field is naturally aligned and read atomically. The PID
-     * never updates these from inside its own context, only the tuning API
-     * does, so the worst case is observing a stale snapshot, never a torn
-     * single value. */
     if (kp != NULL) {
         *kp = axis->torque_controller[0].kp;
     }

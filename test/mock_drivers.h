@@ -47,6 +47,9 @@ typedef struct {
     int64_t scripted_reads[8];
     int scripted_count;
     int scripted_idx;
+    float scripted_counts_reads[8];
+    int scripted_counts_count;
+    int scripted_counts_idx;
 } mock_rotor_sensor_t;
 
 void mock_rotor_sensor_init(mock_rotor_sensor_t *m, float counts_per_rev);
@@ -54,6 +57,9 @@ esp_foc_rotor_sensor_t *mock_rotor_sensor_interface(mock_rotor_sensor_t *m);
 void mock_rotor_sensor_script_accumulated(mock_rotor_sensor_t *m,
                                           const int64_t *seq,
                                           int n);
+void mock_rotor_sensor_script_counts(mock_rotor_sensor_t *m,
+                                     const float *seq,
+                                     int n);
 
 typedef struct {
     esp_foc_isensor_t interface;

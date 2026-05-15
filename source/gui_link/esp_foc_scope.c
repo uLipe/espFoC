@@ -26,7 +26,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include "espFoC/esp_foc.h"
-#include "espFoC/esp_foc_link.h"
+#include "espFoC/gui_link/esp_foc_link.h"
 #include "esp_log.h"
 #if defined(CONFIG_ESP_FOC_SCOPE_LEGACY_CSV) && CONFIG_ESP_FOC_SCOPE_LEGACY_CSV
 #include <stdio.h>
@@ -145,7 +145,7 @@ void esp_foc_scope_initalize(void)
     if(!scope_enable) {
         scope_enable = true;
         esp_foc_init_bus_callback();
-        esp_foc_create_runner(esp_foc_scope_daemon_thread, NULL, -1);
+        esp_foc_create_runner(esp_foc_scope_daemon_thread, NULL, -1, NULL);
         esp_foc_sleep_ms(10);
     }
 }

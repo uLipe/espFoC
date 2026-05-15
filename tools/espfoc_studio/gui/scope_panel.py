@@ -1,14 +1,11 @@
 """Scope panel: rolling time-series of every channel emitted by the
 firmware's esp_foc_scope.
 
-The firmware sends SCOPE v1 binary (Q16.16 as int32 LE) or, for older
-builds, CSV floats on the SCOPE link channel. This panel:
-
-* discovers the channel count from the first line (so any number of
-  scope_add_channel() calls work without UI changes);
-* draws one curve per channel with a deterministic palette;
-* provides a checkbox per channel so the user can hide / show signals
-  on the fly — useful when overlaying six SVPWM phases at once.
+Decoded samples go into a **long ring buffer**; the plot shows a window
+that lags the newest sample by :attr:`ScopePanel.DISPLAY_LAG_S` so USB
+bursts are absorbed instead of discarded. Eviction drops only history
+older than ``window + lag + margin``. Optional :meth:`set_live_priority`
+shortens the lag while the GUI runs blocking tuner traffic.
 """
 
 from __future__ import annotations
@@ -36,92 +33,85 @@ from PySide6.QtWidgets import (
 from ..link import LinkReader
 from ..link.scope_sample import decode_scope_payload_to_floats_csv_first
 from .crosshair import attach_crosshair
+from .plot_display import (
+    configure_dynamic_curve,
+    configure_rolling_time_xaxis,
+    decimation_indices_peak_union,
+    rolling_plot_x_upper,
+)
+from .scope_stream_timing import scope_uniform_dt_s
 
 
-# 8-entry palette tuned for legibility on a dark pyqtgraph background.
 _CHANNEL_COLORS = (
-    "#4fc3f7",  # cyan
-    "#ffb74d",  # amber
-    "#81c784",  # green
-    "#e57373",  # red
-    "#ba68c8",  # purple
-    "#f06292",  # pink
-    "#aed581",  # lime
-    "#fff176",  # yellow
+    "#4fc3f7",
+    "#ffb74d",
+    "#81c784",
+    "#e57373",
+    "#ba68c8",
+    "#f06292",
+    "#aed581",
+    "#fff176",
 )
 
 
 class ScopePanel(QWidget):
-    """Receives SCOPE frames from a LinkReader and plots them.
+    WINDOW_S = 2.0
+    RENDER_INTERVAL_MS = 55
+    MAX_DISPLAY_POINTS_PER_CURVE = 1600
+    INBOX_CAP = 8192
+    MAX_RAW_FRAMES_DECODE_BATCH = 2048
+    MAX_FRAMES_PER_UI_TICK = 2048
+    # Legacy names for SensorsDebugPanel (strip charts still use pending merge).
+    BUFFER_CAP = 4096
+    MAX_PENDING_DECODED = 8192
+    MAX_MERGE_SAMPLES_PER_TICK = 8192
 
-    Raw payloads go to a bounded inbox; a dedicated decode thread turns
-    them into float tuples so the Qt timer only merges samples and
-    redraws. Decoding off the GUI thread keeps the UI responsive when a
-    burst of scope frames arrives."""
-
-    WINDOW_S = 2.0         # rolling window length
-    BUFFER_CAP = 4096      # max samples retained per channel
-    RENDER_INTERVAL_MS = 20  # timer cadence; actual plot rate is bounded below
-    INBOX_CAP = 512        # drop aggressively — prefer losing samples to GUI stalls
-    MAX_PENDING_DECODED = 384  # decoded backlog cap before UI drops half (small = low latency)
-    # Hard cap on GUI-thread merge work per tick. Prefer dropping samples over
-    # blocking the Qt event loop (serial + scope together amplify jank).
-    MAX_MERGE_SAMPLES_PER_TICK = 48
-    # Decode worker takes at most this many raw frames per wake so one backlog
-    # burst cannot monopolize CPU before the UI runs.
-    MAX_RAW_FRAMES_DECODE_BATCH = 256
-    MAX_FRAMES_PER_UI_TICK = 16  # SVM / Sensors: frames drained per tick on GUI thread
+    RING_MAX_SAMPLES = 200_000
+    DISPLAY_LAG_S = 0.35
+    LIVE_PRIORITY_LAG_S = 0.05
+    EVICT_MARGIN_S = 1.5
 
     def __init__(self, reader: Optional[LinkReader] = None,
                  sample_period_s: float = 1e-3 * 4,
                  async_decode: bool = True) -> None:
-        """sample_period_s is kept for backwards compatibility but no
-        longer drives the time axis — the panel now timestamps each
-        frame on arrival with time.monotonic(), so the visible
-        frequency is immune to inbox drops, render-tick batching, or
-        the firmware shipping samples at a slightly different rate
-        than advertised."""
         super().__init__()
         self._async_decode = async_decode
         self._reader = reader
-        self._sample_dt = sample_period_s  # kept for backwards-compat only
+        self._sample_dt = sample_period_s
+        self._uniform_dt_s = scope_uniform_dt_s(20000.0, demo=False)
+        self._scope_synth_t = 0.0
+        self._display_lag_s = float(self.DISPLAY_LAG_S)
+        self._live_priority = False
+
+        self._history_lock = threading.Lock()
+        self._history: Deque[Tuple[float, Tuple[float, ...]]] = deque(
+            maxlen=self.RING_MAX_SAMPLES)
+
         self._inbox_lock = threading.Lock()
-        # Inbox holds (t_mono, payload) so the time axis is wall-clock
-        # locked from the moment the reader thread sees the frame, not
-        # an accumulating "samples seen so far" counter that lags or
-        # leads the actual data rate.
         self._inbox: Deque[Tuple[float, bytes]] = deque(maxlen=self.INBOX_CAP)
-        self._pending_lock = threading.Lock()
-        self._pending_decoded: List[Tuple[float, Tuple[float, ...]]] = []
         self._worker_stop = threading.Event()
         self._decode_thread: Optional[threading.Thread] = None
         self._t0 = time.monotonic()
-        self._time_buf: Deque[float] = deque(maxlen=self.BUFFER_CAP)
-        self._channel_bufs: List[Deque[float]] = []
         self._curves: List[pg.PlotDataItem] = []
         self._checkboxes: List[QCheckBox] = []
         self._n_channels = 0
 
+        self._x_buf_a: Optional[np.ndarray] = None
+        self._x_buf_b: Optional[np.ndarray] = None
+        self._y_bufs_a: List[Optional[np.ndarray]] = []
+        self._y_bufs_b: List[Optional[np.ndarray]] = []
+        self._ping_pong = False
+
         root = QHBoxLayout(self)
 
-        # Left gutter with the channel toggles + Autoset button.
-        # Sized as min/max instead of fixed so the plot grabs all the
-        # horizontal slack first when the window grows, but the gutter
-        # never collapses below something readable.
         gutter = QFrame()
         gutter.setFrameShape(QFrame.NoFrame)
         gutter.setMinimumWidth(140)
         self._gutter_layout = QVBoxLayout(gutter)
         self._gutter_layout.setContentsMargins(4, 4, 4, 4)
-        # "Autoset" lives at the top so it is always reachable even
-        # when the channels list scrolls — clicking it re-enables
-        # autorange on both axes, drops the buffered history and
-        # rebases the time axis to "now". Use this whenever a manual
-        # zoom / pan parked the viewport away from the live cursor.
         autoset_btn = QPushButton("Autoset")
         autoset_btn.setToolTip(
-            "Re-center the scope: clear history, reset time origin "
-            "to now and re-enable axis autorange.")
+            "Clear ring buffer and synthetic time; re-enable Y autorange.")
         autoset_btn.clicked.connect(self.autoset)
         self._gutter_layout.addWidget(autoset_btn)
         self._gutter_layout.addWidget(QLabel("Channels"))
@@ -133,13 +123,12 @@ class ScopePanel(QWidget):
         scroll.setWidget(gutter)
         root.addWidget(scroll)
 
-        # Plot: x is seconds within the rolling window, 0 = oldest sample
-        # on screen, WINDOW_S ≈ newest (right).
         self._plot = pg.PlotWidget(title="Scope — firmware CSV stream")
         self._plot.setLabel('left', "amplitude")
         self._plot.setLabel('bottom', "time", units='s')
         self._plot.showGrid(x=True, y=True, alpha=0.3)
         self._plot.setMinimumHeight(380)
+        configure_rolling_time_xaxis(self._plot)
         self._plot.setXRange(0.0, self.WINDOW_S, padding=0)
         self._plot.enableAutoRange(axis='x', enable=False)
         self._crosshair = attach_crosshair(
@@ -147,7 +136,6 @@ class ScopePanel(QWidget):
             fmt=lambda x, y: f"t = {x:.3f} s\ny = {y:+.4g}")
         root.addWidget(self._plot, 1)
 
-        # Render timer merges decoded samples and updates curves.
         self._render_timer = QTimer(self)
         self._render_timer.setInterval(self.RENDER_INTERVAL_MS)
         self._render_timer.timeout.connect(self._render_tick)
@@ -172,14 +160,35 @@ class ScopePanel(QWidget):
             self._decode_thread.join(timeout=1.5)
         super().closeEvent(event)
 
-    # --- Public helpers ---------------------------------------------------
+    def _effective_lag_s(self) -> float:
+        if self._live_priority:
+            return min(self._display_lag_s, self.LIVE_PRIORITY_LAG_S)
+        return self._display_lag_s
+
+    def _playback_head_s(self, t_newest: float, t_oldest: float) -> float:
+        """Replay head = newest minus lag; if lag exceeds buffered span, show up to newest."""
+        h = t_newest - self._effective_lag_s()
+        if h < t_oldest:
+            return t_newest
+        return h
 
     def set_sample_period(self, dt_s: float) -> None:
-        """No-op kept for backwards compatibility. The time axis is
-        wall-clock-locked now; the firmware's actual scope rate does
-        not need to be communicated to the panel any more."""
         if dt_s > 0:
-            self._sample_dt = dt_s
+            self.set_uniform_sample_period_s(dt_s)
+
+    def set_uniform_sample_period_s(self, dt_s: float) -> None:
+        if dt_s > 1e-9:
+            self._uniform_dt_s = float(dt_s)
+            self._sample_dt = self._uniform_dt_s
+
+    def set_display_lag_s(self, lag_s: float) -> None:
+        """Plot trails newest sample by *lag_s* (absorbs transport bursts)."""
+        if lag_s >= 0.0:
+            self._display_lag_s = float(lag_s)
+
+    def set_live_priority(self, active: bool) -> None:
+        """Shorten lag during blocking GUI→target traffic (e.g. NVS save)."""
+        self._live_priority = bool(active)
 
     def attach_reader(self, reader: LinkReader) -> None:
         if self._reader is not None and self._reader is not reader:
@@ -190,29 +199,27 @@ class ScopePanel(QWidget):
                 pass
             with self._inbox_lock:
                 self._inbox.clear()
-            with self._pending_lock:
-                self._pending_decoded.clear()
+            with self._history_lock:
+                self._history.clear()
+                self._scope_synth_t = 0.0
         self._reader = reader
         reader.register_scope_callback(self._on_frame_reader_thread)
 
     def autoset(self) -> None:
-        """Drop history, rebase time to 'now' and snap the viewport
-        back to the rolling window. Recovers from manual zoom / pan
-        that parked the viewport off the live cursor."""
         with self._inbox_lock:
             self._inbox.clear()
-        with self._pending_lock:
-            self._pending_decoded.clear()
+        with self._history_lock:
+            self._history.clear()
+            self._scope_synth_t = 0.0
         self._t0 = time.monotonic()
-        self._time_buf.clear()
-        for buf in self._channel_bufs:
-            buf.clear()
+        self._x_buf_a = self._x_buf_b = None
+        self._y_bufs_a = []
+        self._y_bufs_b = []
+        self._ping_pong = False
         for curve in self._curves:
             curve.setData([], [])
         self._plot.setXRange(0.0, self.WINDOW_S, padding=0)
         self._plot.enableAutoRange(axis='y', enable=True)
-
-    # --- Frame path -------------------------------------------------------
 
     def _on_frame_reader_thread(self, channel: int, seq: int,
                                 payload: bytes) -> None:
@@ -220,22 +227,38 @@ class ScopePanel(QWidget):
         with self._inbox_lock:
             self._inbox.append((t_mono, payload))
 
-    def _decode_raw_batch(self, batch: List[Tuple[float, bytes]]) -> None:
-        out: List[Tuple[float, Tuple[float, ...]]] = []
-        for t_mono, payload in batch:
+    def _decode_batch_values(self, batch: List[Tuple[float, bytes]]
+                             ) -> List[Tuple[float, ...]]:
+        out: List[Tuple[float, ...]] = []
+        for _t_mono, payload in batch:
             try:
                 values = decode_scope_payload_to_floats_csv_first(payload)
             except ValueError:
                 continue
             if not values:
                 continue
-            out.append((t_mono, tuple(values)))
-        if not out:
+            out.append(tuple(values))
+        return out
+
+    def _flush_rows_to_ring(self, rows: List[Tuple[float, ...]]) -> None:
+        if not rows:
             return
-        with self._pending_lock:
-            self._pending_decoded.extend(out)
-            while len(self._pending_decoded) > self.MAX_PENDING_DECODED:
-                del self._pending_decoded[: len(self._pending_decoded) // 2]
+        dt = self._uniform_dt_s
+        with self._history_lock:
+            for vals in rows:
+                self._history.append((self._scope_synth_t, vals))
+                self._scope_synth_t += dt
+            self._evict_old_locked()
+
+    def _evict_old_locked(self) -> None:
+        if not self._history:
+            return
+        t_newest = self._history[-1][0]
+        t_oldest = self._history[0][0]
+        t_play = self._playback_head_s(t_newest, t_oldest)
+        t_cut = t_play - self.WINDOW_S - self.EVICT_MARGIN_S
+        while self._history and self._history[0][0] < t_cut:
+            self._history.popleft()
 
     def _decode_worker_loop(self) -> None:
         while not self._worker_stop.is_set():
@@ -249,7 +272,8 @@ class ScopePanel(QWidget):
                 if self._worker_stop.wait(0.003):
                     break
                 continue
-            self._decode_raw_batch(batch)
+            rows = self._decode_batch_values(batch)
+            self._flush_rows_to_ring(rows)
 
     def _render_tick(self) -> None:
         if not self._async_decode:
@@ -260,49 +284,81 @@ class ScopePanel(QWidget):
                     take = min(n, self.MAX_RAW_FRAMES_DECODE_BATCH)
                     batch = [self._inbox.popleft() for _ in range(take)]
             if batch:
-                self._decode_raw_batch(batch)
+                self._flush_rows_to_ring(self._decode_batch_values(batch))
 
-        chunk: List[Tuple[float, Tuple[float, ...]]]
-        with self._pending_lock:
-            chunk = self._pending_decoded
-            self._pending_decoded = []
+        with self._history_lock:
+            if not self._history:
+                return
+            t_newest = self._history[-1][0]
+            t_oldest = self._history[0][0]
+            t_play = self._playback_head_s(t_newest, t_oldest)
+            t_lo = t_play - self.WINDOW_S
+            xs: List[float] = []
+            ycols: Optional[List[List[float]]] = None
+            for t_s, vals in self._history:
+                if t_s < t_lo:
+                    continue
+                if t_s > t_play:
+                    break
+                xs.append(t_s)
+                if ycols is None:
+                    ycols = [[] for _ in range(len(vals))]
+                nc = len(ycols)
+                for i in range(nc):
+                    v = float(vals[i]) if i < len(vals) else 0.0
+                    ycols[i].append(v)
 
-        cap = self.MAX_MERGE_SAMPLES_PER_TICK
-        if len(chunk) > cap:
-            chunk = chunk[-cap:]
-
-        for t_mono, values in chunk:
-            self._ensure_channels(len(values))
-            self._time_buf.append(t_mono - self._t0)
-            for i, v in enumerate(values):
-                self._channel_bufs[i].append(v)
-
-        while self._time_buf and (self._time_buf[-1] - self._time_buf[0]
-                                  > self.WINDOW_S):
-            self._time_buf.popleft()
-            for buf in self._channel_bufs:
-                buf.popleft()
-
-        if not self._time_buf:
+        if not xs or ycols is None:
             return
-        t_rels = np.fromiter(self._time_buf, dtype=float,
-                             count=len(self._time_buf))
-        t_arr = t_rels - float(t_rels[0])
-        for i, curve in enumerate(self._curves):
-            if self._checkboxes[i].isChecked():
-                y_arr = np.fromiter(self._channel_bufs[i], dtype=float,
-                                    count=len(self._channel_bufs[i]))
-                curve.setData(t_arr, y_arr)
-            else:
-                curve.setData([], [])
+        max_ch = len(ycols)
+        self._ensure_channels(max_ch)
+        t_arr0 = np.asarray(xs, dtype=np.float64)
+        t_arr = t_arr0 - float(t_arr0[0])
 
-    # --- Channel lazy-init ------------------------------------------------
+        use_a = not self._ping_pong
+        self._ping_pong = not self._ping_pong
+        if use_a:
+            self._x_buf_a = t_arr
+            x_plot = self._x_buf_a
+        else:
+            self._x_buf_b = t_arr
+            x_plot = self._x_buf_b
+
+        n = int(x_plot.shape[0])
+        mp = self.MAX_DISPLAY_POINTS_PER_CURVE
+        y_for_peak: List[np.ndarray] = []
+        for i in range(min(len(ycols), len(self._checkboxes))):
+            if self._checkboxes[i].isChecked():
+                y_for_peak.append(np.asarray(ycols[i], dtype=np.float64))
+        if n <= mp or not y_for_peak:
+            dec_idx: Optional[np.ndarray] = None
+            x_dec = x_plot
+        else:
+            dec_idx = decimation_indices_peak_union(y_for_peak, mp)
+            x_dec = x_plot[dec_idx]
+
+        for i, curve in enumerate(self._curves):
+            if i >= len(ycols) or not self._checkboxes[i].isChecked():
+                curve.setData([], [])
+                continue
+            y_arr = np.asarray(ycols[i], dtype=np.float64)
+            y_dec = y_arr if dec_idx is None else y_arr[dec_idx]
+            if use_a:
+                while len(self._y_bufs_a) <= i:
+                    self._y_bufs_a.append(None)
+                self._y_bufs_a[i] = y_dec
+            else:
+                while len(self._y_bufs_b) <= i:
+                    self._y_bufs_b.append(None)
+                self._y_bufs_b[i] = y_dec
+            curve.setData(x_dec, y_dec)
+
+        x_up = rolling_plot_x_upper(x_dec, self.WINDOW_S)
+        self._plot.setXRange(0.0, x_up, padding=0)
 
     def _ensure_channels(self, n: int) -> None:
         if n <= self._n_channels:
             return
-        # Remove the spacer we added on construction so new widgets line
-        # up cleanly.
         spacer = self._gutter_layout.takeAt(self._gutter_layout.count() - 1)
         for idx in range(self._n_channels, n):
             color = _CHANNEL_COLORS[idx % len(_CHANNEL_COLORS)]
@@ -315,18 +371,13 @@ class ScopePanel(QWidget):
             self._checkboxes.append(cb)
             curve = self._plot.plot(
                 pen=pg.mkPen(color=QColor(color), width=2))
+            configure_dynamic_curve(curve)
             self._curves.append(curve)
-            self._channel_bufs.append(deque(maxlen=self.BUFFER_CAP))
-        # Re-add the stretch at the bottom.
         if spacer is not None and spacer.spacerItem() is not None:
             self._gutter_layout.addItem(spacer)
         else:
             self._gutter_layout.addStretch(1)
         self._n_channels = n
 
-    # --- Backwards-compatible polling hook --------------------------------
-
     def poll(self) -> None:
-        """Older MainWindow called this from a timer. Now that scope
-        frames are pushed directly from the reader, this is a no-op
-        kept to keep the timer wiring happy."""
+        pass

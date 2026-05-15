@@ -2,24 +2,6 @@
  * MIT License
  *
  * Copyright (c) 2021 Felipe Neves
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
 
 #include <sys/cdefs.h>
@@ -34,21 +16,48 @@
 static portMUX_TYPE spinlock =  portMUX_INITIALIZER_UNLOCKED;
 static int debug_pin_internal = -1;
 
-int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority)
+int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority,
+                          void **out_task_handle)
 {
-    /* Allows cretion of low-priority tasks */
     int cpu_num = 1;
-    if(priority < 0) {
+    if (priority < 0) {
         priority = (configMAX_PRIORITIES - 8);
         cpu_num = PRO_CPU_NUM;
     }
 
-    int ret = xTaskCreatePinnedToCore(runner,"", CONFIG_FOC_TASK_STACK_SIZE, argument, configMAX_PRIORITIES - priority, NULL, cpu_num);
+    TaskHandle_t created = NULL;
+    int ret = xTaskCreatePinnedToCore(runner, "", CONFIG_FOC_TASK_STACK_SIZE,
+                                      argument, configMAX_PRIORITIES - priority,
+                                      &created, cpu_num);
     if (ret != pdPASS) {
         return -ESP_ERR_NO_MEM;
     }
-
+    if (out_task_handle != NULL) {
+        *out_task_handle = (void *)created;
+    }
     return 0;
+}
+
+bool esp_foc_runner_is_alive(void *task_handle)
+{
+    if (task_handle == NULL) {
+        return false;
+    }
+    eTaskState st = eTaskGetState((TaskHandle_t)task_handle);
+    return st != eDeleted && st != eInvalid;
+}
+
+void esp_foc_runner_wake(void *task_handle)
+{
+    if (task_handle != NULL) {
+        xTaskNotifyGive((TaskHandle_t)task_handle);
+    }
+}
+
+bool esp_foc_in_task_context(void)
+{
+    return xTaskGetSchedulerState() == taskSCHEDULER_RUNNING &&
+           xTaskGetCurrentTaskHandle() != NULL && !xPortInIsrContext();
 }
 
 void esp_foc_sleep_ms(int sleep_ms)

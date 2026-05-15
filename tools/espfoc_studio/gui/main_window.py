@@ -28,6 +28,7 @@ from .analysis_panel import AnalysisPanel
 from .generate_app_panel import GenerateAppPanel
 from .sensors_debug_panel import SensorsDebugPanel
 from .scope_panel import ScopePanel
+from .scope_stream_timing import scope_uniform_dt_s
 from .svm_panel import SvmPanel
 from .tuning_panel import TuningPanel
 from .tuner_poll_worker import TunerPollSnapshot, TunerPollWorker
@@ -153,6 +154,8 @@ class MainWindow(QMainWindow):
             self._poll_worker.poll_tick, Qt.QueuedConnection)
         self._tuning.long_operation.connect(
             self._poll_worker.set_paused, Qt.QueuedConnection)
+        self._tuning.long_operation.connect(
+            self._scope.set_live_priority, Qt.QueuedConnection)
         self._poll_thread.started.connect(self._poll_worker.start_timer)
         self._poll_thread.start()
 
@@ -170,6 +173,11 @@ class MainWindow(QMainWindow):
         if fs_hz > 1.0:
             self._analysis.set_loop_rate_hz(fs_hz)
             self._tuning.set_loop_rate_hz(fs_hz)
+            scope_dt = scope_uniform_dt_s(
+                fs_hz, demo=(self._link_mode == "demo"))
+            self._scope.set_uniform_sample_period_s(scope_dt)
+            self._svm.set_uniform_sample_period_s(scope_dt)
+            self._sensors.set_uniform_sample_period_s(scope_dt)
         if shadows is not None:
             t = shadows
             self._tuning.apply_nvs_shadow_floats(

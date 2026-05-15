@@ -31,7 +31,14 @@ from PySide6.QtWidgets import (
 from ..link import LinkReader
 from ..link.scope_sample import decode_scope_payload_to_floats_csv_first
 from .crosshair import attach_crosshair
+from .plot_display import (
+    configure_dynamic_curve,
+    configure_rolling_time_xaxis,
+    decimation_indices_peak_union,
+    rolling_plot_x_upper,
+)
 from .scope_panel import ScopePanel
+from .scope_stream_timing import scope_uniform_dt_s
 
 SENSOR_CH_FIRST = 6
 SENSOR_N = 6
@@ -42,8 +49,9 @@ INBOX_CAP = ScopePanel.INBOX_CAP
 MAX_PENDING_DECODED = ScopePanel.MAX_PENDING_DECODED
 MAX_MERGE_SAMPLES_PER_TICK = ScopePanel.MAX_MERGE_SAMPLES_PER_TICK
 MAX_RAW_FRAMES_DECODE_BATCH = ScopePanel.MAX_RAW_FRAMES_DECODE_BATCH
-# Six stacked PlotWidgets: slightly lower FPS than Scope to keep repaints smooth.
-SENSORS_RENDER_INTERVAL_MS = 33
+# Six stacked PlotWidgets: modest UI rate; full-rate merge stays in deques.
+SENSORS_RENDER_INTERVAL_MS = 55
+STRIP_DISPLAY_MAX_POINTS = 800
 # Tall strip chart; scroll the page to see numeric readouts below.
 PLOT_MIN_HEIGHT = 220
 
@@ -133,6 +141,8 @@ class SensorsDebugPanel(QWidget):
         self._pending_decoded: List[Tuple[float, Tuple[float, ...]]] = []
         self._decode_thread: Optional[threading.Thread] = None
         self._t0 = time.monotonic()
+        self._uniform_dt_s = scope_uniform_dt_s(20000.0, demo=False)
+        self._scope_synth_t = 0.0
         self._time_buf: Deque[float] = deque(maxlen=BUFFER_CAP)
         self._plot_bufs: List[Deque[float]] = [
             deque(maxlen=BUFFER_CAP) for _ in range(SENSOR_N)]
@@ -239,13 +249,14 @@ class SensorsDebugPanel(QWidget):
         plot.setLabel("bottom", "time", units="s")
         plot.showGrid(x=True, y=True, alpha=0.25)
         plot.setMinimumHeight(PLOT_MIN_HEIGHT)
+        configure_rolling_time_xaxis(plot)
         plot.setXRange(0.0, WINDOW_S, padding=0)
         plot.enableAutoRange(axis="x", enable=False)
         plot.enableAutoRange(axis="y", enable=True)
         vb = plot.getViewBox()
         vb.setMouseEnabled(x=False, y=True)
         c = plot.plot(pen=pg.mkPen(QColor("#4fc3f7"), width=1.5))
-        c.setClipToView(True)
+        configure_dynamic_curve(c)
         _ = attach_crosshair(
             plot, fmt=lambda x, y: f"t = {x:.3f} s\ny = {y:+.5g}")
         self._plots.append(plot)
@@ -269,6 +280,10 @@ class SensorsDebugPanel(QWidget):
         self._active = active
         self.setEnabled(active)
 
+    def set_uniform_sample_period_s(self, dt_s: float) -> None:
+        if dt_s > 1e-9:
+            self._uniform_dt_s = float(dt_s)
+
     def set_counts_per_rev(self, cpr: int) -> None:
         """Optional: sync CPR from Generate App / hardware profile (clamped 1…65536)."""
         if cpr < 1:
@@ -288,6 +303,7 @@ class SensorsDebugPanel(QWidget):
                 self._inbox.clear()
             with self._pending_lock:
                 self._pending_decoded.clear()
+        self._scope_synth_t = 0.0
         self._reader = reader
         reader.register_scope_callback(self._on_frame_reader_thread)
 
@@ -350,12 +366,12 @@ class SensorsDebugPanel(QWidget):
 
         need = SENSOR_CH_FIRST + SENSOR_N
         last_vals: Optional[Tuple[float, ...]] = None
-        for t_mono, vals in chunk:
+        for _t_mono, vals in chunk:
             if len(vals) < need or not self._active:
                 continue
             last_vals = vals
-            t_rel = t_mono - self._t0
-            self._time_buf.append(t_rel)
+            self._time_buf.append(self._scope_synth_t)
+            self._scope_synth_t += self._uniform_dt_s
             cpr = self._cpr_spin.value()
             for r in range(SENSOR_N):
                 f = vals[SENSOR_CH_FIRST + r]
@@ -404,15 +420,33 @@ class SensorsDebugPanel(QWidget):
                 p.setXRange(0.0, WINDOW_S, padding=0)
             return
         t_arr = t_arr[-n:]
-        for p in self._plots:
-            p.setXRange(0.0, WINDOW_S, padding=0)
+        mp = STRIP_DISPLAY_MAX_POINTS
+        y_checked = [
+            np.fromiter(list(self._plot_bufs[r])[-n:], dtype=float, count=n)
+            for r in range(len(self._curves))
+            if self._trace_cbs[r].isChecked()
+        ]
+        if n <= mp:
+            strip_idx = None
+            t_d = t_arr
+        elif y_checked:
+            strip_idx = decimation_indices_peak_union(y_checked, mp)
+            t_d = t_arr[strip_idx]
+        else:
+            strip_idx = None
+            t_d = t_arr
         for r, c in enumerate(self._curves):
             if self._trace_cbs[r].isChecked():
                 y = np.fromiter(
                     list(self._plot_bufs[r])[-n:], dtype=float, count=n)
-                c.setData(t_arr, y)
+                y_d = y if strip_idx is None else y[strip_idx]
+                c.setData(t_d, y_d)
             else:
                 c.setData([], [])
+
+        x_up = rolling_plot_x_upper(t_d, WINDOW_S)
+        for p in self._plots:
+            p.setXRange(0.0, x_up, padding=0)
 
     def poll(self) -> None:
         pass

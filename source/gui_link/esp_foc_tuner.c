@@ -6,18 +6,15 @@
 
 #include <string.h>
 #include <stdio.h>
-#include "esp_log.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "espFoC/esp_foc_tuner.h"
-#include "espFoC/esp_foc_axis_tuning.h"
+#include "espFoC/gui_link/esp_foc_tuner.h"
+#include "espFoC/tuning/esp_foc_axis_tuning.h"
 #include "espFoC/esp_foc.h"
-#include "espFoC/esp_foc_link.h"
-#include "espFoC/esp_foc_calibration.h"
+#include "espFoC/gui_link/esp_foc_link.h"
+#include "espFoC/calibration/esp_foc_calibration.h"
 #include "espFoC/utils/esp_foc_q16.h"
-
-static const char *tun_tag = "esp_foc_tuner";
 
 /* Per-axis registry. Pointers are only mutated from esp_foc_tuner_attach_axis,
  * which is expected to be called from a non-time-critical context. */
@@ -55,11 +52,14 @@ static uint8_t compute_axis_state(const esp_foc_axis_t *axis)
     if (axis->magic == ESP_FOC_AXIS_MAGIC) {
         s |= ESP_FOC_AXIS_STATE_INITIALIZED;
     }
-    if (axis->rotor_aligned == ESP_FOC_OK) {
+    if (axis->state == ESP_FOC_AXIS_STATE_ALIGNING) {
+        s |= ESP_FOC_AXIS_STATE_ALIGNING;
+    }
+    if (axis->state == ESP_FOC_AXIS_STATE_ALIGNED ||
+        axis->state == ESP_FOC_AXIS_STATE_RUNNING) {
         s |= ESP_FOC_AXIS_STATE_ALIGNED;
     }
-    /* esp_foc_run() spawns the outer-loop runner which sets regulator_ev. */
-    if (axis->regulator_ev != NULL) {
+    if (axis->state == ESP_FOC_AXIS_STATE_RUNNING) {
         s |= ESP_FOC_AXIS_STATE_RUNNING;
     }
     if (axis->tuner_override.active) {
@@ -123,10 +123,10 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
             b[0] = compute_axis_state(axis);
             break;
         case ESP_FOC_TUNER_PARAM_AXIS_LAST_ERR:
-            b[0] = (uint8_t)(int8_t)axis->rotor_aligned;
+            b[0] = (uint8_t)(int8_t)axis->state;
             break;
         case ESP_FOC_TUNER_PARAM_NVS_PRESENT:
-            b[0] = esp_foc_calibration_present(axis->nvs_axis_id) ? 1 : 0;
+            b[0] = esp_foc_calibration_present(axis->cal.axis_id) ? 1 : 0;
             break;
         case ESP_FOC_TUNER_PARAM_SKIP_TORQUE_U8:
             b[0] = axis->skip_torque_control ? 1u : 0u;
@@ -180,9 +180,9 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
     case ESP_FOC_TUNER_PARAM_V_MAX_Q16:       value = axis->max_voltage; break;
     case ESP_FOC_TUNER_PARAM_I_FILTER_FC_Q16: value = axis->current_filter_fc_hz_q16; break;
     case ESP_FOC_TUNER_PARAM_LOOP_FS_HZ_Q16:  value = axis->current_filter_fs_hz_q16; break;
-    case ESP_FOC_TUNER_PARAM_MOTOR_R_OHM_Q16: value = axis->nvs_motor_r_ohm; break;
-    case ESP_FOC_TUNER_PARAM_MOTOR_L_H_Q16:   value = axis->nvs_motor_l_h; break;
-    case ESP_FOC_TUNER_PARAM_MOTOR_BW_HZ_Q16: value = axis->nvs_bandwidth_hz; break;
+    case ESP_FOC_TUNER_PARAM_MOTOR_R_OHM_Q16: value = axis->cal.motor_r_ohm; break;
+    case ESP_FOC_TUNER_PARAM_MOTOR_L_H_Q16:   value = axis->cal.motor_l_h; break;
+    case ESP_FOC_TUNER_PARAM_MOTOR_BW_HZ_Q16: value = axis->cal.bandwidth_hz; break;
     default:
         return ESP_FOC_ERR_INVALID_ARG;
     }
@@ -334,7 +334,8 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
     if (id == ESP_FOC_TUNER_CMD_OVERRIDE_ON) {
         /* Refuse to take over an axis that is not aligned: spinning a
          * motor with an unaligned encoder produces wild currents. */
-        if (axis->rotor_aligned != ESP_FOC_OK) {
+        if (axis->state != ESP_FOC_AXIS_STATE_ALIGNED &&
+            axis->state != ESP_FOC_AXIS_STATE_RUNNING) {
             return ESP_FOC_ERR_NOT_ALIGNED;
         }
         esp_foc_critical_enter();
@@ -357,6 +358,12 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
         esp_foc_critical_leave();
         return ESP_FOC_OK;
 #endif
+    }
+
+    if (id == ESP_FOC_TUNER_CMD_STOP_AXIS) {
+        esp_foc_err_t err = esp_foc_stop(axis);
+        tuner_log(err == ESP_FOC_OK ? "axis: stopped" : "axis: stop refused");
+        return err;
     }
 
     if (id == ESP_FOC_TUNER_CMD_ALIGN_AXIS) {
@@ -385,31 +392,11 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
     }
 
     if (id == ESP_FOC_TUNER_CMD_PERSIST_NVS) {
-        /* Payload [R_q16, L_q16, bw_q16] — host knows the motor params
-         * the user just typed in; firmware combines them with its own
-         * current Kp/Ki/integrator_limit + the live current-filter
-         * cutoff before persisting. */
-        esp_foc_calibration_data_t data;
-        if (esp_foc_calibration_load(axis->nvs_axis_id, &data) != ESP_FOC_OK) {
-            memset(&data, 0, sizeof(data));
-        }
-        esp_foc_axis_get_current_pi_gains_q16(axis, &data.kp, &data.ki,
-                                              &data.integrator_limit);
-        data.current_filter_fc_hz = axis->current_filter_fc_hz_q16;
-        if (payload != NULL && payload_len >= 12) {
-            const uint8_t *p = (const uint8_t *)payload;
-            data.motor_r_ohm = read_q16(p);
-            data.motor_l_h = read_q16(p + 4);
-            data.bandwidth_hz = read_q16(p + 8);
-        }
-        esp_foc_calibration_pack_pole_pairs(
-            &data, (int32_t)axis->motor_pole_pairs);
-        esp_foc_err_t err = esp_foc_calibration_save(axis->nvs_axis_id, &data);
-        if (err == ESP_FOC_OK) {
-            axis->nvs_motor_r_ohm = data.motor_r_ohm;
-            axis->nvs_motor_l_h = data.motor_l_h;
-            axis->nvs_bandwidth_hz = data.bandwidth_hz;
-        }
+        esp_foc_err_t err = esp_foc_calibration_axis_tuner_persist(
+            axis,
+            (payload != NULL && payload_len >= 12)
+            ? (const uint8_t *)payload : NULL,
+            payload_len);
         if (err == ESP_FOC_OK) {
             char msg[72];
             (void)snprintf(
@@ -424,75 +411,24 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
     }
 
     if (id == ESP_FOC_TUNER_CMD_LOAD_NVS) {
-        esp_foc_calibration_data_t data;
-        esp_foc_err_t err = esp_foc_calibration_load(axis->nvs_axis_id, &data);
+        esp_foc_err_t err = esp_foc_calibration_axis_tuner_load_apply(axis);
         if (err != ESP_FOC_OK) {
             tuner_log("calibration: nothing to load");
             return err;
         }
-        err = esp_foc_axis_set_current_pi_gains_q16(axis, data.kp, data.ki,
-                                                    data.integrator_limit);
-        if (err == ESP_FOC_OK && data.current_filter_fc_hz > 0 &&
-            axis->isensor_driver != NULL &&
-            axis->isensor_driver->set_filter_cutoff != NULL) {
-            float fc = q16_to_float(data.current_filter_fc_hz);
-            float fs = q16_to_float(axis->current_filter_fs_hz_q16);
-            axis->isensor_driver->set_filter_cutoff(axis->isensor_driver,
-                                                    fc, fs);
-            axis->current_filter_fc_hz_q16 = data.current_filter_fc_hz;
-        }
-        if (err == ESP_FOC_OK) {
-            axis->nvs_motor_r_ohm = data.motor_r_ohm;
-            axis->nvs_motor_l_h = data.motor_l_h;
-            axis->nvs_bandwidth_hz = data.bandwidth_hz;
-            {
-                int32_t ppn = esp_foc_calibration_get_pole_pairs(&data);
-                if (ppn >= 1 && ppn <= 64) {
-                    axis->motor_pole_pairs = (int)ppn;
-                    esp_foc_axis_refresh_encoder_q16_scales(axis);
-                }
-            }
-            {
-                uint8_t af;
-                uint16_t eraw;
-                q16_t nstore;
-                esp_foc_calibration_get_align(&data, &af, &eraw, &nstore);
-                const char *cw = (nstore == Q16_ONE)   ? "CW" :
-                    (nstore == Q16_MINUS_ONE)         ? "CCW" : "?";
-                ESP_LOGI(
-                    tun_tag,
-                    "LOAD_NVS axis %u: pole pairs=%d  R=%.4f ohm L=%.4e H "
-                    "bw=%.1f  align: off=%d enc=%u dir=%d %s",
-                    (unsigned)axis->nvs_axis_id,
-                    axis->motor_pole_pairs,
-                    (double)q16_to_float(data.motor_r_ohm),
-                    (double)q16_to_float(data.motor_l_h),
-                    (double)q16_to_float(data.bandwidth_hz),
-                    (int)((af & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) ? 1 : 0),
-                    (unsigned)eraw,
-                    (int)((af & ESP_FOC_CAL_ALIGN_FLAG_DIR) ? 1 : 0),
-                    (af & ESP_FOC_CAL_ALIGN_FLAG_DIR) ? cw : "—");
-            }
-        }
-        if (err == ESP_FOC_OK) {
-            char tmsg[80];
-            (void)snprintf(
-                tmsg, sizeof(tmsg),
-                "calibration: NVS applied (pole pairs=%d)",
-                axis->motor_pole_pairs);
-            tuner_log(tmsg);
-        } else {
-            tuner_log("calibration: apply failed");
-        }
+        char tmsg[80];
+        (void)snprintf(
+            tmsg, sizeof(tmsg),
+            "calibration: NVS applied (pole pairs=%d)",
+            axis->motor_pole_pairs);
+        tuner_log(tmsg);
         return err;
     }
 
     if (id == ESP_FOC_TUNER_CMD_ERASE_NVS) {
         esp_foc_err_t err = esp_foc_calibration_erase();
         if (err == ESP_FOC_OK) {
-            axis->nvs_motor_r_ohm = 0;
-            axis->nvs_motor_l_h = 0;
-            axis->nvs_bandwidth_hz = 0;
+            esp_foc_calibration_axis_tuner_clear_cache(axis);
         }
         tuner_log(err == ESP_FOC_OK
                   ? "calibration: NVS namespace erased"

@@ -97,41 +97,41 @@ def test_mainwindow_demo_boots_polls_and_streams_scope():
         reader.stop()
 
 
-def test_scope_panel_wallclock_and_autoset():
-    """Time axis tracks wall clock (not sample count) and Autoset
-    drops history + rebases the time origin."""
+def test_scope_panel_uniform_time_and_autoset():
+    """X-axis advances by uniform_dt per frame (low-speed scope), even when
+    USB delivers a burst with identical wall timestamps."""
     from espfoc_studio.gui.scope_panel import ScopePanel
 
     app = QApplication.instance() or QApplication(sys.argv)
     panel = ScopePanel(async_decode=False)
-    # Inject fewer frames than ScopePanel.MAX_MERGE_SAMPLES_PER_TICK so one
-    # _render_tick merges all (production caps merges per tick for GUI FPS).
+    panel.set_uniform_sample_period_s(1e-3)
+    panel.set_display_lag_s(0.0)
     n_inj = min(40, ScopePanel.MAX_MERGE_SAMPLES_PER_TICK - 1)
     base = time.monotonic()
-    for i in range(n_inj):
-        # Patch the inbox directly so we control the timestamps.
+    for _i in range(n_inj):
         with panel._inbox_lock:
-            panel._inbox.append((
-                base + i * 1e-3, _scope_bin_32(1.0, 2.0, 3.0)))
+            panel._inbox.append((base, _scope_bin_32(1.0, 2.0, 3.0)))
     panel._render_tick()
     assert panel._n_channels == 3
-    assert len(panel._time_buf) == n_inj
-    span = panel._time_buf[-1] - panel._time_buf[0]
+    with panel._history_lock:
+        hist = list(panel._history)
+    assert len(hist) == n_inj
+    times = [t for t, _ in hist]
+    span = times[-1] - times[0]
     exp = (n_inj - 1) * 1e-3
-    assert exp - 0.015 < span < exp + 0.015, (
-        f"span={span!r} not wall-clock locked (expected ~{exp})")
+    assert abs(span - exp) < 1e-9, f"span={span!r} expected {exp!r}"
+    for i in range(1, len(times)):
+        assert abs(times[i] - times[i - 1] - 1e-3) < 1e-12
 
-    # Autoset clears state and rebases.
     panel.autoset()
-    assert len(panel._time_buf) == 0
-    for buf in panel._channel_bufs:
-        assert len(buf) == 0
-    # Subsequent injection lands at near-zero relative time.
+    with panel._history_lock:
+        assert len(panel._history) == 0
     with panel._inbox_lock:
         panel._inbox.append((time.monotonic(), _scope_bin_32(4.0, 5.0, 6.0)))
     panel._render_tick()
-    assert len(panel._time_buf) == 1
-    assert panel._time_buf[0] < 0.05  # fresh origin
+    with panel._history_lock:
+        assert len(panel._history) == 1
+        assert panel._history[0][0] == 0.0
 
 
 def test_generate_app_embeds_hardware_section():
@@ -217,6 +217,18 @@ def test_generate_app_build_mode_toggle():
         reader.stop()
 
 
+def test_scope_stream_timing_hw_and_demo():
+    from espfoc_studio.gui.scope_stream_timing import (
+        LOW_SPEED_DOWNSAMPLING,
+        scope_uniform_dt_s,
+    )
+
+    dt_hw = scope_uniform_dt_s(20000.0, demo=False)
+    assert abs(dt_hw - LOW_SPEED_DOWNSAMPLING / 20000.0) < 1e-15
+    dt_demo = scope_uniform_dt_s(40000.0, demo=True)
+    assert abs(dt_demo - (40.0 * 4.0) / 40000.0) < 1e-15
+
+
 def test_scope_panel_roll_mode_x_axis_stays_bounded():
     """X is seconds within the visible window (0 = oldest on screen);
     values stay in [0, WINDOW_S] even if the panel has been running
@@ -250,7 +262,8 @@ def test_scope_panel_roll_mode_x_axis_stays_bounded():
 
 def main() -> int:
     tests = [test_mainwindow_demo_boots_polls_and_streams_scope,
-             test_scope_panel_wallclock_and_autoset,
+             test_scope_panel_uniform_time_and_autoset,
+             test_scope_stream_timing_hw_and_demo,
              test_scope_panel_roll_mode_x_axis_stays_bounded,
              test_generate_app_embeds_hardware_section,
              test_build_worker_idf_path_helper,

@@ -12,9 +12,9 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "driver/uart.h"
-#include "espFoC/esp_foc_link.h"
-#include "espFoC/esp_foc_tuner.h"
-#include "espFoC/esp_foc_bridge_uart.h"
+#include "espFoC/gui_link/esp_foc_link.h"
+#include "espFoC/gui_link/esp_foc_tuner.h"
+#include "espFoC/drivers/gui_link/esp_foc_bridge_uart.h"
 
 static const char *TAG = "ESPFOC_BRIDGE_UART";
 

@@ -11,7 +11,7 @@
 
 #include <string.h>
 #include <unity.h>
-#include "espFoC/esp_foc_calibration.h"
+#include "espFoC/calibration/esp_foc_calibration.h"
 #include "espFoC/utils/esp_foc_q16.h"
 
 #if defined(CONFIG_ESP_FOC_CALIBRATION_NVS)

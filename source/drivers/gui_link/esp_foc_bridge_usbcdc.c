@@ -14,9 +14,9 @@
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
 #include "tinyusb_cdc_acm.h"
-#include "espFoC/esp_foc_link.h"
-#include "espFoC/esp_foc_tuner.h"
-#include "espFoC/esp_foc_bridge_usbcdc.h"
+#include "espFoC/gui_link/esp_foc_link.h"
+#include "espFoC/gui_link/esp_foc_tuner.h"
+#include "espFoC/drivers/gui_link/esp_foc_bridge_usbcdc.h"
 
 static const char *TAG = "ESPFOC_BRIDGE_USB";
 #define READER_STACK_BYTES 4096

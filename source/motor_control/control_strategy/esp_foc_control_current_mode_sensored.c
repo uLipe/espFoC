@@ -26,6 +26,8 @@
 #include <stdint.h>
 #include "esp_log.h"
 #include "esp_attr.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "espFoC/esp_foc.h"
 #include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/utils/foc_math_q16.h"
@@ -55,6 +57,11 @@ static const char * tag = "ESP_FOC_CONTROL";
 
 static void foc_hot_isr(void *data)
 {
+    esp_foc_axis_t *axis = (esp_foc_axis_t *)data;
+    if (axis == NULL || axis->state != ESP_FOC_AXIS_STATE_RUNNING) {
+        return;
+    }
+
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
         esp_foc_debug_pin_set();
 #endif
@@ -62,7 +69,6 @@ static void foc_hot_isr(void *data)
 #if defined(CONFIG_ESP_FOC_SCOPE)
     uint64_t hot_path_t0 = esp_foc_now_useconds();
 #endif
-    esp_foc_axis_t *axis = (esp_foc_axis_t *)data;
 
     /* 1) Previous sample (n-1), published by the ADC ISR. */
     q16_t i_alpha = axis->latest_i_alpha;
@@ -187,8 +193,14 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
                                                  foc_hot_isr,
                                                  axis);
 
-    while (1) {
+    while (!axis->runner_shutdown) {
         esp_foc_wait_notifier();
+        if (axis->runner_shutdown) {
+            break;
+        }
+        if (axis->state != ESP_FOC_AXIS_STATE_RUNNING) {
+            continue;
+        }
 
         /* 1) Read the slow encoder. May block on I2C / SPI for ~125 us. */
         axis->rotor_shaft_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
@@ -214,6 +226,10 @@ void do_current_mode_sensored_low_speed_loop(void *arg)
         /* 4) Wake the regulator task so the user callback can refresh
          *    target_i_d / target_i_q / target_u_d / target_u_q before
          *    the next batch of PWM cycles. */
-        esp_foc_send_notification(axis->regulator_ev);
+        if (axis->regulator_ev != NULL) {
+            esp_foc_send_notification(axis->regulator_ev);
+        }
     }
+    axis->low_speed_ev = NULL;
+    vTaskDelete(NULL);
 }

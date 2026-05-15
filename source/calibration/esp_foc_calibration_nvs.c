@@ -5,88 +5,13 @@
  */
 
 #include <sdkconfig.h>
-#include "espFoC/esp_foc_calibration.h"
-
-void esp_foc_calibration_pack_align(esp_foc_calibration_data_t *d,
-                                   uint8_t flags,
-                                   uint16_t enc_zero_12b,
-                                   q16_t natural_direction)
-{
-    if (d == NULL) {
-        return;
-    }
-    d->reserved[0] = flags;
-    d->reserved[1] = 0;
-    d->reserved[2] = (uint8_t)(enc_zero_12b & 0xFFu);
-    d->reserved[3] = (uint8_t)((enc_zero_12b >> 8) & 0xFFu);
-    uint32_t nd = (uint32_t)(int32_t)natural_direction;
-    d->reserved[4] = (uint8_t)(nd & 0xFFu);
-    d->reserved[5] = (uint8_t)((nd >> 8) & 0xFFu);
-    d->reserved[6] = (uint8_t)((nd >> 16) & 0xFFu);
-    d->reserved[7] = (uint8_t)((nd >> 24) & 0xFFu);
-}
-
-void esp_foc_calibration_get_align(const esp_foc_calibration_data_t *d,
-                                  uint8_t *flags,
-                                  uint16_t *enc_zero_12b,
-                                  q16_t *natural_direction)
-{
-    if (d == NULL) {
-        return;
-    }
-    if (flags != NULL) {
-        *flags = d->reserved[0];
-    }
-    if (enc_zero_12b != NULL) {
-        *enc_zero_12b = (uint16_t)d->reserved[2] |
-            ((uint16_t)d->reserved[3] << 8);
-    }
-    if (natural_direction != NULL) {
-        uint32_t u = (uint32_t)d->reserved[4] |
-            ((uint32_t)d->reserved[5] << 8) |
-            ((uint32_t)d->reserved[6] << 16) |
-            ((uint32_t)d->reserved[7] << 24);
-        *natural_direction = (q16_t)u;
-    }
-}
-
-void esp_foc_calibration_pack_pole_pairs(esp_foc_calibration_data_t *d,
-                                        int32_t motor_pole_pairs)
-{
-    if (d == NULL) {
-        return;
-    }
-    if (motor_pole_pairs < 1) {
-        motor_pole_pairs = 0;
-    } else if (motor_pole_pairs > 64) {
-        motor_pole_pairs = 64;
-    }
-    {
-        uint32_t u = (uint32_t)motor_pole_pairs;
-        d->reserved[8] = (uint8_t)(u & 0xFFu);
-        d->reserved[9] = (uint8_t)((u >> 8) & 0xFFu);
-        d->reserved[10] = (uint8_t)((u >> 16) & 0xFFu);
-        d->reserved[11] = (uint8_t)((u >> 24) & 0xFFu);
-    }
-}
-
-int32_t esp_foc_calibration_get_pole_pairs(const esp_foc_calibration_data_t *d)
-{
-    if (d == NULL) {
-        return 0;
-    }
-    uint32_t u = (uint32_t)d->reserved[8] | ((uint32_t)d->reserved[9] << 8) |
-                 ((uint32_t)d->reserved[10] << 16) |
-                 ((uint32_t)d->reserved[11] << 24);
-    return (int32_t)u;
-}
+#include "espFoC/calibration/esp_foc_calibration.h"
 
 #if defined(CONFIG_ESP_FOC_CALIBRATION_NVS)
 
 #include <stdio.h>
 #include <string.h>
 #include "esp_log.h"
-#include "espFoC/utils/esp_foc_q16.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -97,9 +22,6 @@ static const char *TAG = "ESP_FOC_CALIB";
 #define ESPFOC_CAL_VERSION    1u
 #define ESPFOC_CAL_MAX_AXES   4
 
-/* Wire format on NVS. The payload (everything after `crc32`) is what
- * the public API exchanges as esp_foc_calibration_data_t. The header
- * stays tiny so the blob fits comfortably in a single NVS entry. */
 typedef struct __attribute__((packed)) {
     uint32_t magic;
     uint8_t  version;
@@ -111,8 +33,6 @@ typedef struct __attribute__((packed)) {
     esp_foc_calibration_data_t payload;
 } espfoc_cal_blob_t;
 
-/* CRC-32 (IEEE 802.3 polynomial). Bit-by-bit; calibration save/load
- * is a cold path, no LUT cost worth paying for. */
 static uint32_t crc32_ieee(const uint8_t *data, size_t len)
 {
     uint32_t crc = 0xFFFFFFFFu;
@@ -139,10 +59,6 @@ static uint32_t fnv1a_32(const char *s)
 uint32_t esp_foc_calibration_profile_hash(void)
 {
 #if defined(CONFIG_ESP_FOC_USE_AUTOGEN_GAINS) && CONFIG_ESP_FOC_USE_AUTOGEN_GAINS
-    /* Hash "<profile_name>:<version>" so bumping CONFIG_ESP_FOC_PROFILE_VERSION
-     * invalidates persisted calibrations even when the profile name
-     * stays the same — useful after editing the JSON in a way that
-     * changes its meaning. */
     char buf[80];
     snprintf(buf, sizeof(buf), "%s:%d",
              CONFIG_ESP_FOC_MOTOR_PROFILE,
@@ -155,9 +71,6 @@ uint32_t esp_foc_calibration_profile_hash(void)
 
 static esp_foc_err_t ensure_nvs(void)
 {
-    /* Idempotent: nvs_flash_init returns ESP_ERR_NVS_NEW_VERSION_FOUND
-     * or ESP_ERR_NVS_NO_FREE_PAGES on the first run after a partition
-     * format change; both are recoverable by erasing and retrying. */
     static bool ready = false;
     if (ready) {
         return ESP_FOC_OK;
@@ -225,35 +138,19 @@ esp_foc_err_t esp_foc_calibration_save(uint8_t axis_id,
         const float fcli = (data->current_filter_fc_hz != 0)
                             ? q16_to_float(data->current_filter_fc_hz) : 0.0f;
         esp_foc_calibration_get_align(data, &af, &enc0, &nat_d);
-        ESP_LOGI(
+        ESP_LOGD(
             TAG,
-            "axis %u: save OK  profile_hash=0x%08x  Kp=%.4f Ki=%.2f ILim=%.3f  I-lpf=%.1fHz",
+            "axis %u: save OK profile_hash=0x%08x Kp=%.4f Ki=%.2f ILim=%.3f I-lpf=%.1fHz "
+            "R=%.4f L=%.4e bw=%.1f align0=%u",
             axis_id, (unsigned)blob.profile_hash,
             (double)q16_to_float(data->kp), (double)q16_to_float(data->ki),
-            (double)q16_to_float(data->integrator_limit), (double)fcli);
-        ESP_LOGI(
-            TAG,
-            "axis %u: save  motor: R=%.4f Ohm  L=%.4e H  bandwidth=%.1f Hz (audit / MPZ input)",
-            axis_id, (double)q16_to_float(data->motor_r_ohm),
+            (double)q16_to_float(data->integrator_limit), (double)fcli,
+            (double)q16_to_float(data->motor_r_ohm),
             (double)q16_to_float(data->motor_l_h),
-            (double)q16_to_float(data->bandwidth_hz));
-        {
-            const char *nlab = "?";
-            if (nat_d == Q16_ONE) {
-                nlab = "CW";
-            } else if (nat_d == Q16_MINUS_ONE) {
-                nlab = "CCW";
-            }
-            const int offv = (af & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) ? 1 : 0;
-            const int dirv = (af & ESP_FOC_CAL_ALIGN_FLAG_DIR) ? 1 : 0;
-            ESP_LOGI(
-                TAG,
-                "axis %u: save  align: off_flag=%d enc_raw=%u  dir_flag=%d nat_stored=%s",
-                axis_id, offv,
-                (unsigned)((af & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) != 0u ? enc0 : 0u),
-                dirv,
-                (af & ESP_FOC_CAL_ALIGN_FLAG_DIR) != 0u ? nlab : "—");
-        }
+            (double)q16_to_float(data->bandwidth_hz),
+            (unsigned)af);
+        (void)enc0;
+        (void)nat_d;
     }
     return ESP_FOC_OK;
 }
@@ -270,7 +167,6 @@ esp_foc_err_t esp_foc_calibration_load(uint8_t axis_id,
     }
     nvs_handle_t h;
     if (nvs_open(ESPFOC_CAL_NS, NVS_READONLY, &h) != ESP_OK) {
-        /* Namespace doesn't exist yet — nothing to load. */
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
     char key[16];
@@ -285,17 +181,16 @@ esp_foc_err_t esp_foc_calibration_load(uint8_t axis_id,
     if (blob.magic != ESPFOC_CAL_MAGIC ||
         blob.version != ESPFOC_CAL_VERSION ||
         blob.payload_len != sizeof(blob.payload)) {
-        ESP_LOGW(TAG, "axis %u stored blob header invalid, ignoring", axis_id);
+        ESP_LOGD(TAG, "axis %u: stored blob header invalid", axis_id);
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
     if (crc32_ieee((const uint8_t *)&blob.payload,
                    sizeof(blob.payload)) != blob.crc32) {
-        ESP_LOGW(TAG, "axis %u stored blob CRC mismatch, ignoring", axis_id);
+        ESP_LOGD(TAG, "axis %u: stored blob CRC mismatch", axis_id);
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
     if (blob.profile_hash != esp_foc_calibration_profile_hash()) {
-        ESP_LOGW(TAG, "axis %u stored profile_hash 0x%08x != current 0x%08x — "
-                      "calibration was made for a different motor, ignoring",
+        ESP_LOGD(TAG, "axis %u: profile_hash 0x%08x != current 0x%08x",
                  axis_id, (unsigned)blob.profile_hash,
                  (unsigned)esp_foc_calibration_profile_hash());
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
@@ -312,7 +207,7 @@ esp_foc_err_t esp_foc_calibration_erase(void)
     }
     nvs_handle_t h;
     if (nvs_open(ESPFOC_CAL_NS, NVS_READWRITE, &h) != ESP_OK) {
-        return ESP_FOC_OK; /* nothing to erase */
+        return ESP_FOC_OK;
     }
     esp_err_t err = nvs_erase_all(h);
     if (err == ESP_OK) {
@@ -332,7 +227,7 @@ bool esp_foc_calibration_present(uint8_t axis_id)
     return esp_foc_calibration_load(axis_id, &scratch) == ESP_FOC_OK;
 }
 
-#else /* CONFIG_ESP_FOC_CALIBRATION_NVS not set — stub everything. */
+#else /* !CONFIG_ESP_FOC_CALIBRATION_NVS */
 
 uint32_t esp_foc_calibration_profile_hash(void) { return 0u; }
 

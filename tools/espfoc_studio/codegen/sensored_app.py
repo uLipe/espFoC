@@ -27,7 +27,7 @@ from typing import List, Optional
 from ..gui.hardware_panel import HardwareConfig
 
 
-# Mirrors the on-flash layout in source/motor_control/esp_foc_calibration.c.
+# Mirrors the on-flash layout in source/calibration/esp_foc_calibration_nvs.c.
 _BLOB_MAGIC = 0xE5F0CC11
 _BLOB_VERSION = 1
 

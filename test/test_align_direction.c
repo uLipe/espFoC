@@ -45,8 +45,8 @@ TEST_CASE("alignment: positive deflection sets natural_direction = CW",
     setup(ESP_FOC_MOTOR_NATURAL_DIRECTION_CCW);
     /* Two reads: ticks_zero (after set_to_zero), ticks_after (post probe).
      * +250 counts >> ESP_FOC_DIR_PROBE_MIN_COUNTS (50) so CW wins. */
-    int64_t script[2] = {0, 250};
-    mock_rotor_sensor_script_accumulated(&s_rotor, script, 2);
+    float script[2] = {0.0f, 250.0f};
+    mock_rotor_sensor_script_counts(&s_rotor, script, 2);
     TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_align_axis(&s_axis));
     TEST_ASSERT_EQUAL_INT32(Q16_ONE, s_axis.natural_direction);
 }
@@ -55,8 +55,8 @@ TEST_CASE("alignment: negative deflection sets natural_direction = CCW",
           "[espFoC][align]")
 {
     setup(ESP_FOC_MOTOR_NATURAL_DIRECTION_CW);
-    int64_t script[2] = {0, -250};
-    mock_rotor_sensor_script_accumulated(&s_rotor, script, 2);
+    float script[2] = {0.0f, -250.0f};
+    mock_rotor_sensor_script_counts(&s_rotor, script, 2);
     TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_align_axis(&s_axis));
     TEST_ASSERT_EQUAL_INT32(Q16_MINUS_ONE, s_axis.natural_direction);
 }
@@ -66,8 +66,8 @@ TEST_CASE("alignment: stuck rotor keeps the settings hint",
 {
     setup(ESP_FOC_MOTOR_NATURAL_DIRECTION_CCW);
     /* 5 counts << 50 threshold — inconclusive, hint must survive. */
-    int64_t script[2] = {0, 5};
-    mock_rotor_sensor_script_accumulated(&s_rotor, script, 2);
+    float script[2] = {0.0f, 5.0f};
+    mock_rotor_sensor_script_counts(&s_rotor, script, 2);
     TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_align_axis(&s_axis));
     TEST_ASSERT_EQUAL_INT32(Q16_MINUS_ONE, s_axis.natural_direction);
 }
@@ -76,8 +76,8 @@ TEST_CASE("alignment: rejects double-call without re-init",
           "[espFoC][align]")
 {
     setup(ESP_FOC_MOTOR_NATURAL_DIRECTION_CW);
-    int64_t script[2] = {0, 100};
-    mock_rotor_sensor_script_accumulated(&s_rotor, script, 2);
+    float script[2] = {0.0f, 100.0f};
+    mock_rotor_sensor_script_counts(&s_rotor, script, 2);
     TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_align_axis(&s_axis));
     TEST_ASSERT_EQUAL(ESP_FOC_ERR_AXIS_INVALID_STATE,
                       esp_foc_align_axis(&s_axis));

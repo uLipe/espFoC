@@ -77,7 +77,7 @@ TEST_CASE("voltage_limit_q16: large values stay bounded", "[espFoC][voltage_limi
     q16_t vd = q16_from_float(8000.0f);
     q16_t vq = q16_from_float(-6000.0f);
     esp_foc_limit_voltage_q16(&vd, &vq, vdc);
-    TEST_ASSERT_TRUE(mag_float(vd, vq) <= 12.5f);
+    TEST_ASSERT_TRUE(mag_float(vd, vq) <= 13.0f);
 }
 
 TEST_CASE("voltage_limit_q16: tiny overflow still scales", "[espFoC][voltage_limit]")

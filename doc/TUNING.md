@@ -58,7 +58,7 @@ estimates) for the CI log.
 
 ## Runtime tuning API
 
-`include/espFoC/esp_foc_axis_tuning.h` exposes three primitives that
+`include/espFoC/tuning/esp_foc_axis_tuning.h` exposes three primitives that
 apply atomically through a short critical section; the integrator is
 reset on every swap to keep the post-swap response well-defined:
 
@@ -290,7 +290,7 @@ the CLI surfaces through `axis-state`.
 Once the loop is dialled in, persist the gains:
 
 ```c
-#include "espFoC/esp_foc_calibration.h"
+#include "espFoC/calibration/esp_foc_calibration.h"
 
 esp_foc_calibration_data_t cal = {
     .kp = my_kp_q16, .ki = my_ki_q16,
@@ -318,7 +318,7 @@ the guard rail that prevents loading gimbal calibration on a
 scooter motor by accident.
 
 The on-flash format is documented in
-`source/motor_control/esp_foc_calibration.c`:
+`source/calibration/esp_foc_calibration_nvs.c`:
 
 ```
 [magic=0xE5F0CC11][version=1][reserved][profile_hash:u32]

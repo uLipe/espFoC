@@ -9,8 +9,8 @@
 #include <string.h>
 #include <unity.h>
 #include "espFoC/esp_foc.h"
-#include "espFoC/esp_foc_tuner.h"
-#include "espFoC/esp_foc_axis_tuning.h"
+#include "espFoC/gui_link/esp_foc_tuner.h"
+#include "espFoC/tuning/esp_foc_axis_tuning.h"
 #include "espFoC/utils/esp_foc_q16.h"
 #include "mock_drivers.h"
 
@@ -219,7 +219,7 @@ TEST_CASE("tuner: override ON then OFF flips state bit",
     setup_attached_axis();
     /* Manually mark the axis aligned (bypass real alignment for this unit
      * test; align_axis needs hardware sequence). */
-    s_axis.rotor_aligned = ESP_FOC_OK;
+    s_axis.state = ESP_FOC_AXIS_STATE_ALIGNED;
 
     size_t resp_len = 0;
     TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(
@@ -247,7 +247,7 @@ TEST_CASE("tuner: motion target writes refused while override is OFF",
           "[espFoC][tuner]")
 {
     setup_attached_axis();
-    s_axis.rotor_aligned = ESP_FOC_OK;
+    s_axis.state = ESP_FOC_AXIS_STATE_ALIGNED;
     /* override is OFF (default). Writing a motion target must fail. */
     uint8_t payload[4];
     serialize_q16_le(payload, q16_from_float(2.5f));
@@ -317,7 +317,7 @@ TEST_CASE("tuner: motion writes land in shadow when override is ON",
           "[espFoC][tuner]")
 {
     setup_attached_axis();
-    s_axis.rotor_aligned = ESP_FOC_OK;
+    s_axis.state = ESP_FOC_AXIS_STATE_ALIGNED;
 
     size_t resp_len = 0;
     TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(

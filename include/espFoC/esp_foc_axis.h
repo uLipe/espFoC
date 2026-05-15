@@ -5,6 +5,7 @@
 
 #include <stdbool.h>
 #include <sdkconfig.h>
+#include "espFoC/esp_foc_err.h"
 #include "espFoC/esp_foc_units_q16.h"
 #include "espFoC/utils/pid_controller.h"
 #include "espFoC/utils/biquad_q16.h"
@@ -29,6 +30,13 @@ typedef void (*esp_foc_motor_regulation_callback_t)(
     esp_foc_q_current_q16_t *iq_ref,
     esp_foc_d_voltage_q16_t *ud_forward,
     esp_foc_q_voltage_q16_t *uq_forward);
+
+typedef struct {
+    uint8_t axis_id;
+    q16_t motor_r_ohm;
+    q16_t motor_l_h;
+    q16_t bandwidth_hz;
+} esp_foc_axis_cal_cache_t;
 
 typedef struct {
     esp_foc_motor_direction_t natural_direction;  /* hint; alignment can override */
@@ -102,15 +110,14 @@ struct esp_foc_axis_s {
     q16_t dc_link_to_normalized;
     q16_t max_voltage;
     int motor_pole_pairs;
-    /* NVS key; copied from settings.motor_unit in esp_foc_initialize_axis. */
-    uint8_t nvs_axis_id;
-    /* Last known motor params from NVS (tuner readback; q16, Ohm / H / Hz). */
-    q16_t nvs_motor_r_ohm;
-    q16_t nvs_motor_l_h;
-    q16_t nvs_bandwidth_hz;
+    esp_foc_axis_cal_cache_t cal;
     q16_t natural_direction;
 
-    esp_foc_err_t rotor_aligned;
+    esp_foc_axis_state_t state;
+    volatile bool runner_shutdown;
+    void *runner_low_speed_hdl;
+    void *runner_outer_hdl;
+
     esp_foc_pid_controller_t torque_controller[2];
     /* Velocity smoothing biquad. Cutoff dialled at init from
      * CONFIG_ESP_FOC_VELOCITY_FILTER_CUTOFF_HZ. The current i_q / i_d

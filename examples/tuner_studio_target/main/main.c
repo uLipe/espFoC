@@ -19,7 +19,7 @@
 #include "freertos/task.h"
 
 #include "espFoC/esp_foc.h"
-#include "espFoC/esp_foc_tuner.h"
+#include "espFoC/gui_link/esp_foc_tuner.h"
 #include "espFoC/inverter_6pwm_mcpwm.h"
 #include "espFoC/rotor_sensor_as5600.h"
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
@@ -214,7 +214,7 @@ void app_main(void)
     ESP_LOGI(TAG, "ready — connect TunerStudio and click Align");
 
     while (1) {
-        if (s_axis.rotor_aligned == ESP_FOC_OK) {
+        if (s_axis.state == ESP_FOC_AXIS_STATE_ALIGNED) {
             ESP_LOGI(TAG, "alignment detected — starting control loop");
             esp_foc_run(&s_axis);
             break;

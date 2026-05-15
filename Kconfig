@@ -38,30 +38,6 @@ menu "espFoC Settings"
             default y
     endmenu
 
-    menu "Scope (telemetry)"
-        config ESP_FOC_SCOPE
-            bool "Enable scope channel support"
-            default n
-
-        config ESP_FOC_SCOPE_NUM_CHANNELS
-            int "Max scope channels"
-            default 8
-
-        config ESP_FOC_SCOPE_LEGACY_CSV
-            bool "Use legacy SCOPE as CSV floats (sprintf)"
-            depends on ESP_FOC_SCOPE
-            default n
-            help
-                When n (default) the link sends SCOPE v1 binary (Q16 int32
-                per channel, see host scope_sample.py). When y, the old
-                comma-separated %f line is used for a matching host build.
-
-        config ESP_FOC_SCOPE_BUFFER_SIZE
-            int "Scope ring buffer (frames per half-buffer)"
-            default 4096 if ESP_FOC_SCOPE_NUM_CHANNELS = 8
-            default 1024
-    endmenu
-
     menu "Optional hardware drivers"
         config ESP_FOC_ENABLE_PCNT_DRIVER
             bool "Build PCNT-based rotor sensor driver (encoder pulse counting)"
@@ -99,7 +75,29 @@ menu "espFoC Settings"
 
     endmenu
 
-    menu "Tuner, bridges, NVS"
+    menu "GUI link"
+        config ESP_FOC_SCOPE
+            bool "Enable scope channel support"
+            default n
+
+        config ESP_FOC_SCOPE_NUM_CHANNELS
+            int "Max scope channels"
+            default 8
+
+        config ESP_FOC_SCOPE_LEGACY_CSV
+            bool "Use legacy SCOPE as CSV floats (sprintf)"
+            depends on ESP_FOC_SCOPE
+            default n
+            help
+                When n (default) the link sends SCOPE v1 binary (Q16 int32
+                per channel, see host scope_sample.py). When y, the old
+                comma-separated %f line is used for a matching host build.
+
+        config ESP_FOC_SCOPE_BUFFER_SIZE
+            int "Scope ring buffer (frames per half-buffer)"
+            default 4096 if ESP_FOC_SCOPE_NUM_CHANNELS = 8
+            default 1024
+
         config ESP_FOC_TUNER_ENABLE
             bool "Runtime PI tuner and protocol (esp_foc_tuner)"
             default n
