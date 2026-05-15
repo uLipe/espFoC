@@ -21,7 +21,10 @@ Targets: ESP32, ESP32-S3, ESP32-P4 (ESP-IDF v5+).
 > **3.0 is a breaking release.** The legacy continuous-time PI
 > formula and the `motor_resistance / motor_inductance / motor_inertia`
 > fields are gone — gains come from the build-time autotuner or the
-> runtime tuner. The 3-PWM LEDC driver was also dropped. See [`changelog.txt`](changelog.txt) for
+> runtime tuner. The 3-PWM LEDC driver was also dropped. The former
+> `esp_foc_controls.h` tunables are Kconfig options (`CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING`,
+> `CONFIG_ESP_FOC_ISENSOR_CALIBRATION_ROUNDS`). The motor regulation callback
+> is three arguments only (`id_ref`, `iq_ref`). See [`changelog.txt`](changelog.txt) for
 > the full migration list.
 
 ---
@@ -31,7 +34,7 @@ Targets: ESP32, ESP32-S3, ESP32-P4 (ESP-IDF v5+).
 Via the IDF component registry:
 
 ```bash
-idf.py add-dependency "ulipe/espfoc^2.0.0"
+idf.py add-dependency "ulipe/espfoc^3.0.0"
 ```
 
 Or clone the repo and add it to your project:
@@ -55,16 +58,20 @@ idf.py build flash monitor
 ![espFoC architecture](doc/images/architecture.png)
 
 Each axis owns one inverter, one rotor sensor and (optionally) one
-current sensor. The application sets Id/Iq references in a
-regulation callback; espFoC handles Clarke/Park transforms, the PI
-current loop, SVPWM modulation and the PWM duty outputs. Control
-timing is driven by the PWM peripheral — the ADC samples are
-PWM-synchronised and the Id/Iq loop runs in a deterministic task.
+current sensor. You implement a **regulation callback** that updates
+`id_ref` / `iq_ref` each outer-loop tick; espFoC runs Clarke/Park, the
+current PIs, inverse Park, SVPWM and PWM updates. The inner current loop
+and modulation run in the **PWM ISR** at carrier frequency; a dedicated
+task reads the encoder and invokes your callback at roughly **PWM rate
+÷ `CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING`** (see *espFoC Settings → Control
+loop* in `menuconfig`). Platform primitives (tasks, critical sections,
+timers) go through **`include/espFoC/osal/os_interface.h`** so motor code
+does not depend on FreeRTOS headers.
 
 Inverter and rotor drivers are pluggable:
 
 - Inverters: 3-PWM MCPWM, 6-PWM MCPWM (hardware dead-time).
-- Rotor sensors: AS5600, AS5048A, quadrature via PCNT, open-loop.
+- Rotor sensors: AS5600, AS5048A, quadrature via PCNT, simulated rotor (`rotor_sensor_simu` + optional `rotor_sensor_simu_wire_ud_uq` for open-loop bring-up).
 - Current sensing: ADC shunt (continuous or one-shot).
 
 ---
@@ -135,6 +142,11 @@ and an ADC shunt. PI gains come from the build-time autotuner for the
 motor profile selected via `CONFIG_ESP_FOC_MOTOR_PROFILE`; the runtime
 tuner / TunerStudio can rewrite them later.
 
+The snippet below is **illustrative** (placeholders for pins and ADC
+config will not compile until you fill them in). For a **complete,
+buildable** wiring and init sequence, use
+[`examples/axis_simple/main/axis_simple.c`](examples/axis_simple/main/axis_simple.c).
+
 ```c
 #include "esp_log.h"
 #include "esp_err.h"
@@ -153,13 +165,9 @@ static esp_foc_motor_control_settings_t settings = {
 
 static void regulation_callback(esp_foc_axis_t *axis_cb,
                                 esp_foc_d_current_q16_t *id_ref,
-                                esp_foc_q_current_q16_t *iq_ref,
-                                esp_foc_d_voltage_q16_t *ud_ff,
-                                esp_foc_q_voltage_q16_t *uq_ff)
+                                esp_foc_q_current_q16_t *iq_ref)
 {
     (void)axis_cb;
-    ud_ff->raw = 0;
-    uq_ff->raw = 0;
     id_ref->raw = 0;
     iq_ref->raw = q16_from_float(2.0f);
 }
@@ -176,6 +184,9 @@ void app_main(void)
     esp_foc_set_regulation_callback(&axis, regulation_callback);
 }
 ```
+
+At init, shunt calibration uses **`CONFIG_ESP_FOC_ISENSOR_CALIBRATION_ROUNDS`**
+averages (same *Control loop* menu as downsampling).
 
 ---
 
@@ -215,10 +226,11 @@ espFoC/
 │   ├── gen_pi_gains.py # build-time MPZ autotuner
 │   └── motors/*.json   # motor profiles consumed by the autotuner
 ├── source/
-│   ├── drivers/        # platform drivers (inverters, encoders, shunts)
-│   ├── motor_control/  # axis core, MPZ design, calibration, tuner,
-│   │                   # link codec
-│   └── osal/           # OS abstraction
+│   ├── calibration/    # NVS calibration format and axis helpers
+│   ├── drivers/        # inverters, encoders, shunts, tuner bridges
+│   ├── gui_link/       # binary link codec, scope, tuner reactor
+│   ├── motor_control/  # axis core (FOC ISR + slow loop), MPZ, Q16 helpers
+│   └── osal/           # OS abstraction (tasks, critical sections, esp_timer)
 ├── test/               # Unity unit tests (run via examples/unit_test_runner)
 └── tools/espfoc_studio # PySide6 + pyqtgraph GUI, CLI, host protocol
 ```
