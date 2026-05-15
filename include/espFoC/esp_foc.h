@@ -14,7 +14,6 @@
 #include "espFoC/osal/os_interface.h"
 #include "espFoC/esp_foc_err.h"
 #include "espFoC/esp_foc_axis.h"
-#include "espFoC/esp_foc_controls.h"
 #include "espFoC/gui_link/esp_foc_scope.h"
 #include "espFoC/calibration/esp_foc_calibration.h"
 

@@ -1,5 +1,4 @@
 set(srcs    "source/motor_control/esp_foc_core.c"
-            "source/motor_control/control_strategy/esp_foc_control_current_mode_sensored.c"
             "source/motor_control/esp_foc_biquad_q16.c"
             "source/calibration/esp_foc_calibration_format.c"
             "source/calibration/esp_foc_calibration_nvs.c"

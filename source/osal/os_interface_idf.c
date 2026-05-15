@@ -5,8 +5,10 @@
  */
 
 #include <sys/cdefs.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include "espFoC/esp_foc.h"
+#include "esp_err.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -135,4 +137,109 @@ int esp_foc_debug_pin_clear(void)
     gpio_set_level(debug_pin_internal, false);
 
     return 0;
+}
+
+void esp_foc_runner_delete_self(void)
+{
+    vTaskDelete(NULL);
+}
+
+uint32_t esp_foc_ms_to_wait_ticks(unsigned ms)
+{
+    return (uint32_t)pdMS_TO_TICKS(ms);
+}
+
+int esp_foc_task_spawn(foc_loop_runner fn, void *arg, size_t stack_bytes,
+                       int freertos_priority, void **out_task_handle_opt)
+{
+    if (fn == NULL) {
+        return -1;
+    }
+    TaskHandle_t h = NULL;
+    BaseType_t ok = xTaskCreate(fn, "espfoc", (configSTACK_DEPTH_TYPE)stack_bytes, arg,
+                                (UBaseType_t)freertos_priority, &h);
+    if (ok != pdPASS) {
+        return -2;
+    }
+    if (out_task_handle_opt != NULL) {
+        *out_task_handle_opt = (void *)h;
+    }
+    return 0;
+}
+
+struct esp_foc_timer {
+    esp_timer_handle_t h;
+    esp_foc_timer_callback_t cb;
+    void *arg;
+};
+
+static void esp_foc_timer_trampoline(void *p)
+{
+    esp_foc_timer_t *t = (esp_foc_timer_t *)p;
+    if (t->cb != NULL) {
+        t->cb(t->arg);
+    }
+}
+
+int esp_foc_timer_create(esp_foc_timer_callback_t cb, void *arg, esp_foc_timer_t **out)
+{
+    if (cb == NULL || out == NULL) {
+        return -1;
+    }
+    esp_foc_timer_t *t = (esp_foc_timer_t *)calloc(1, sizeof(*t));
+    if (t == NULL) {
+        return -2;
+    }
+    t->cb = cb;
+    t->arg = arg;
+    const esp_timer_create_args_t args = {
+        .callback = &esp_foc_timer_trampoline,
+        .arg = t,
+        .name = "espfoc_t",
+        .dispatch_method = ESP_TIMER_TASK,
+    };
+    esp_err_t e = esp_timer_create(&args, &t->h);
+    if (e != ESP_OK) {
+        free(t);
+        return (int)e;
+    }
+    *out = t;
+    return 0;
+}
+
+void esp_foc_timer_destroy(esp_foc_timer_t *t)
+{
+    if (t == NULL) {
+        return;
+    }
+    (void)esp_timer_stop(t->h);
+    (void)esp_timer_delete(t->h);
+    free(t);
+}
+
+int esp_foc_timer_arm_oneshot_us(esp_foc_timer_t *t, uint64_t period_us)
+{
+    if (t == NULL || period_us == 0ULL) {
+        return -1;
+    }
+    esp_err_t e = esp_timer_start_once(t->h, period_us);
+    return (e == ESP_OK) ? 0 : (int)e;
+}
+
+int esp_foc_timer_arm_periodic_us(esp_foc_timer_t *t, uint64_t period_us)
+{
+    if (t == NULL || period_us == 0ULL) {
+        return -1;
+    }
+    (void)esp_timer_stop(t->h);
+    esp_err_t e = esp_timer_start_periodic(t->h, period_us);
+    return (e == ESP_OK) ? 0 : (int)e;
+}
+
+void esp_foc_timer_cancel(esp_foc_timer_t *t)
+{
+    if (t == NULL) {
+        return;
+    }
+    (void)esp_timer_stop(t->h);
 }

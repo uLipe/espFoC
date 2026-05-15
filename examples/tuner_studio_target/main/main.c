@@ -32,10 +32,6 @@
 #endif
 #include "espFoC/utils/esp_foc_q16.h"
 
-#if defined(CONFIG_ESP_FOC_SCOPE) && CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS >= 13
-extern q16_t esp_foc_debug_scope_hot_path_dt_us_q16;
-#endif
-
 static const char *TAG = "tuner-target";
 
 static esp_foc_axis_t s_axis;
@@ -53,15 +49,11 @@ uint32_t esp_foc_tuner_firmware_type(void)
  * tuner owns targets (override latched after alignment); keep zeros here. */
 static void parked_regulation_cb(esp_foc_axis_t *axis,
                                  esp_foc_d_current_q16_t *id_ref,
-                                 esp_foc_q_current_q16_t *iq_ref,
-                                 esp_foc_d_voltage_q16_t *ud_ff,
-                                 esp_foc_q_voltage_q16_t *uq_ff)
+                                 esp_foc_q_current_q16_t *iq_ref)
 {
     (void)axis;
     id_ref->raw = q16_from_float(0.0f);
     iq_ref->raw = q16_from_float(0.0f);
-    ud_ff->raw = q16_from_float(0.0f);
-    uq_ff->raw = q16_from_float(0.0f);
 }
 
 static void wire_scope_channels(void)
@@ -73,7 +65,7 @@ static void wire_scope_channels(void)
     esp_foc_scope_add_channel(&s_axis.u_u.raw, 0);
     esp_foc_scope_add_channel(&s_axis.u_v.raw, 1);
     esp_foc_scope_add_channel(&s_axis.u_w.raw, 2);
-    esp_foc_scope_add_channel(&s_axis.rotor_elec_angle, 3);
+    esp_foc_scope_add_channel((const q16_t *)(const volatile void *)&s_axis.rotor_elec_angle, 3);
     esp_foc_scope_add_channel(&s_axis.i_q.raw, 4);
     esp_foc_scope_add_channel(&s_axis.u_q.raw, 5);
 #if CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS >= 12
@@ -86,7 +78,7 @@ static void wire_scope_channels(void)
     esp_foc_scope_add_channel(&s_axis.i_alpha.raw, 10);
     esp_foc_scope_add_channel(&s_axis.i_beta.raw, 11);
 #if CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS >= 13
-    /* Last channel: FOC hot-path time [µs] (esp_foc_control_current_mode_sensored.c). */
+    /* Last channel: FOC hot-path time [µs] (see esp_foc_core.c). */
     esp_foc_scope_add_channel(&esp_foc_debug_scope_hot_path_dt_us_q16, 12);
 #endif
 #endif

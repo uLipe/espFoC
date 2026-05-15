@@ -6,7 +6,6 @@
 #include <stddef.h>
 #include "sdkconfig.h"
 #include "espFoC/rotor_sensor_simu.h"
-#include "espFoC/esp_foc_controls.h"
 #include "espFoC/osal/os_interface.h"
 #include "espFoC/utils/esp_foc_q16.h"
 #include "esp_log.h"
@@ -181,7 +180,7 @@ esp_foc_rotor_sensor_t *rotor_sensor_simu_new(int port,
     o->v_line_volts = q16_to_float(vdc_q16) * INV_SQRT3_F;
 
     float pwm_hz = (float)CONFIG_ESP_FOC_PWM_RATE_HZ;
-    o->dt_outer_s = (1.0f / pwm_hz) * (float)ESP_FOC_LOW_SPEED_DOWNSAMPLING;
+    o->dt_outer_s = (1.0f / pwm_hz) * (float)CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING;
 
     o->j_kgm2 = (float)CONFIG_ESP_FOC_ROTOR_SIMU_DEFAULT_J_X1E7 * 1e-7f;
     if (o->j_kgm2 < 1e-9f) {

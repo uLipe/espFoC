@@ -81,6 +81,19 @@ menu "espFoC Settings"
             range 100 1000
             default 200
 
+        config ESP_FOC_LOW_SPEED_DOWNSAMPLING
+            int "Outer loop downsample factor (PWM ticks per slow loop)"
+            range 1 1000
+            default 10
+            help
+                The PWM ISR counts down this many ticks before notifying the
+                slow encoder task once.
+
+        config ESP_FOC_ISENSOR_CALIBRATION_ROUNDS
+            int "Current sensor calibration averaging rounds"
+            range 1 10000
+            default 100
+
     endmenu
 
     menu "Diagnostics"

@@ -10,6 +10,7 @@ This file is used to generate GitHub releases. All versions from 2.0.0 onward ar
 
 - **`legacy/` tree** removed (observer implementations and `test_observers_q16.c`). Sensorless angle observers are not part of the supported component surface; use a hardware rotor sensor or `rotor_sensor_simu` for bring-up.
 - **Example rename:** `examples/axis_sensored` → `examples/axis_simple` (main `axis_simple.c`, `hw_axis_simple.kconfig`, CMake `project(axis_simple)`).
+- **`esp_foc_controls.h` removed:** use Kconfig `CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING` and `CONFIG_ESP_FOC_ISENSOR_CALIBRATION_ROUNDS`. FOC PWM ISR and encoder slow loop are inlined in `esp_foc_core.c`; `esp_foc_axis_t` no longer carries internal runner callback pointers (user `regulation_cb` unchanged).
 
 ### Features
 

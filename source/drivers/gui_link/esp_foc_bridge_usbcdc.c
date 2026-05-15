@@ -8,8 +8,6 @@
 
 #if defined(CONFIG_ESP_FOC_BRIDGE_USBCDC)
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "esp_log.h"
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"

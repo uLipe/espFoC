@@ -6,7 +6,7 @@ Inner-loop rate is ``read_loop_fs_hz()`` (PWM rate or legacy decimated rate).
 
 from __future__ import annotations
 
-# Must match ``ESP_FOC_LOW_SPEED_DOWNSAMPLING`` in include/espFoC/esp_foc_controls.h
+# Must match ``CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING`` (espFoC Kconfig).
 LOW_SPEED_DOWNSAMPLING = 10
 
 

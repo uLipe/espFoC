@@ -25,8 +25,6 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "esp_log.h"
 #include "espFoC/esp_foc.h"
 
@@ -46,6 +44,10 @@
 
 
 static const char *tag = "ESP_FOC_CORE";
+
+#if defined(CONFIG_ESP_FOC_SCOPE)
+q16_t esp_foc_debug_scope_hot_path_dt_us_q16;
+#endif
 
 void esp_foc_axis_refresh_encoder_q16_scales(esp_foc_axis_t *axis)
 {
@@ -101,6 +103,148 @@ static void wait_runner_dead(void *task_handle)
     }
 }
 
+/* -------------------------------------------------------------------------
+ * PWM ISR hot path: read published Clarke currents, current PI, SVPWM.
+ * ------------------------------------------------------------------------- */
+static void foc_hot_isr(void *data)
+{
+    esp_foc_axis_t *axis = (esp_foc_axis_t *)data;
+    if (axis == NULL || axis->state != ESP_FOC_AXIS_STATE_RUNNING) {
+        return;
+    }
+
+#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
+    esp_foc_debug_pin_set();
+#endif
+
+#if defined(CONFIG_ESP_FOC_SCOPE)
+    uint64_t hot_path_t0 = esp_foc_now_useconds();
+#endif
+
+    q16_t i_alpha = axis->latest_i_alpha;
+    q16_t i_beta = axis->latest_i_beta;
+
+    if (axis->isensor_driver != NULL) {
+        axis->isensor_driver->sample_isensors(axis->isensor_driver);
+    }
+
+    q16_t e_sin = q16_sin(q16_normalize_angle(axis->rotor_elec_angle));
+    q16_t e_cos = q16_cos(q16_normalize_angle(axis->rotor_elec_angle));
+
+    q16_t i_d, i_q;
+    q16_park(e_sin, e_cos, i_alpha, i_beta, &i_d, &i_q);
+
+    axis->i_alpha.raw = i_alpha;
+    axis->i_beta.raw = i_beta;
+    axis->i_d.raw = i_d;
+    axis->i_q.raw = i_q;
+
+    {
+        q16_t uq = esp_foc_pid_update(&axis->torque_controller[0],
+                                      axis->target_i_q.raw, i_q);
+        q16_t ud = esp_foc_pid_update(&axis->torque_controller[1],
+                                      axis->target_i_d.raw, i_d);
+        axis->u_q.raw = q16_mul(uq, axis->mod_index_limit_q16);
+        axis->u_d.raw = q16_mul(ud, axis->mod_index_limit_q16);
+    }
+
+    esp_foc_modulate_dq_to_duties(e_sin, e_cos, axis->u_d.raw, axis->u_q.raw,
+                                  &axis->u_alpha.raw,
+                                  &axis->u_beta.raw,
+                                  &axis->u_u.raw,
+                                  &axis->u_v.raw,
+                                  &axis->u_w.raw,
+                                  axis->mod_index_limit_q16);
+
+    axis->inverter_driver->set_duties(axis->inverter_driver,
+                                      axis->u_u.raw,
+                                      axis->u_v.raw,
+                                      axis->u_w.raw);
+
+    if (axis->downsampling_low_speed) {
+        axis->downsampling_low_speed--;
+        if (!axis->downsampling_low_speed) {
+            axis->downsampling_low_speed = CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING;
+            if (axis->low_speed_ev != NULL) {
+                esp_foc_send_notification_from_isr(axis->low_speed_ev);
+            }
+        }
+    }
+#if defined(CONFIG_ESP_FOC_SCOPE)
+    esp_foc_debug_scope_hot_path_dt_us_q16 =
+        calc_time_isr_q16(hot_path_t0, esp_foc_now_useconds());
+#endif
+
+#ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
+    esp_foc_debug_pin_clear();
+#endif
+}
+
+/* -------------------------------------------------------------------------
+ * Slow loop: encoder, electrical angle, velocity filter, scope, regulator.
+ * ------------------------------------------------------------------------- */
+static void core_low_speed_loop(void *arg)
+{
+    esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
+
+    axis->low_speed_ev = esp_foc_get_event_handle();
+    axis->downsampling_low_speed = CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING;
+
+    ESP_LOGI(tag, "FOC outer loop (PWM ISR hot path)");
+
+    uint32_t cpr = axis->rotor_sensor_driver->get_counts_per_revolution(
+        axis->rotor_sensor_driver);
+    if (cpr == 0u) {
+        ESP_LOGE(tag, "FATAL, INVALID CPR, CHECK YOUR ROTOR SENSOR!");
+        abort();
+    }
+
+    axis->rotor_shaft_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+    axis->rotor_position = q16_mul(axis->rotor_shaft_ticks, axis->natural_direction);
+    axis->rotor_position_prev = axis->rotor_position;
+    axis->current_speed = 0;
+    axis->rotor_elec_angle = q16_mul(q16_mul(axis->rotor_position,
+                                            axis->encoder_inv_cpr_q16),
+                                            q16_from_int(axis->motor_pole_pairs));
+
+    axis->inverter_driver->set_inverter_callback(axis->inverter_driver,
+                                                 foc_hot_isr,
+                                                 axis);
+
+    while (!axis->runner_shutdown) {
+        esp_foc_wait_notifier();
+        if (axis->runner_shutdown) {
+            break;
+        }
+        if (axis->state != ESP_FOC_AXIS_STATE_RUNNING) {
+            continue;
+        }
+
+        axis->rotor_shaft_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+        axis->rotor_position = q16_mul(axis->rotor_shaft_ticks, axis->natural_direction);
+
+        axis->rotor_elec_angle = q16_mul(q16_mul(axis->rotor_position, axis->encoder_inv_cpr_q16),
+                                 q16_from_int(axis->motor_pole_pairs));
+
+        q16_t dtheta = q16_sub(axis->rotor_position, axis->rotor_position_prev);
+        q16_t raw_speed = q16_mul(dtheta,
+                                   axis->inv_dt *
+                                       q16_from_int(CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING));
+        axis->current_speed = esp_foc_biquad_q16_update(
+                                  &axis->velocity_filter, raw_speed);
+        axis->rotor_position_prev = axis->rotor_position;
+
+#if defined(CONFIG_ESP_FOC_SCOPE)
+        esp_foc_scope_data_push();
+#endif
+        if (axis->regulator_ev != NULL) {
+            esp_foc_send_notification(axis->regulator_ev);
+        }
+    }
+    axis->low_speed_ev = NULL;
+    esp_foc_runner_delete_self();
+}
+
 static void do_foc_outer_loop(void *arg)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)arg;
@@ -130,7 +274,7 @@ static void do_foc_outer_loop(void *arg)
         axis->regulator_cb(axis, &axis->target_i_d, &axis->target_i_q);
     }
     axis->regulator_ev = NULL;
-    vTaskDelete(NULL);
+    esp_foc_runner_delete_self();
 }
 
 static void apply_default_bypass_current_pid(esp_foc_pid_controller_t *pid,
@@ -197,7 +341,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->target_i_q.raw = 0;
 
     if (isensor != NULL) {
-        axis->isensor_driver->calibrate_isensors(axis->isensor_driver, ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
+        axis->isensor_driver->calibrate_isensors(axis->isensor_driver,
+                                                 CONFIG_ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
     }
 
     /* Current-loop PIDs: default bypass (Kp=Ki=Kd=0, Kff=1). NVS overlay
@@ -262,10 +407,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     /* natural_direction: defaults above; NVS may have overridden;
      * esp_foc_align_axis() probes and overrides unless NVS has a
      * stored direction bit. */
-
-    axis->high_speed_loop_cb = do_current_mode_sensored_high_speed_loop;
-    axis->low_speed_loop_cb = do_current_mode_sensored_low_speed_loop;
-    axis->outer_loop_cb = do_foc_outer_loop;
 
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
     esp_foc_debug_pin_init(CONFIG_ESP_FOC_DEBUG_PIN);
@@ -387,13 +528,13 @@ esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis)
     axis->runner_shutdown = false;
     axis->state = ESP_FOC_AXIS_STATE_RUNNING;
 
-    if (esp_foc_create_runner(axis->outer_loop_cb, axis, 2,
+    if (esp_foc_create_runner(do_foc_outer_loop, axis, 2,
                               &axis->runner_outer_hdl) != 0) {
         axis->state = ESP_FOC_AXIS_STATE_ALIGNED;
         axis->runner_outer_hdl = NULL;
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
-    if (esp_foc_create_runner(axis->low_speed_loop_cb, axis, 1,
+    if (esp_foc_create_runner(core_low_speed_loop, axis, 1,
                               &axis->runner_low_speed_hdl) != 0) {
         axis->runner_shutdown = true;
         esp_foc_runner_wake(axis->runner_outer_hdl);

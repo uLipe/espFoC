@@ -8,10 +8,9 @@
 
 #if defined(CONFIG_ESP_FOC_BRIDGE_UART)
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "esp_log.h"
 #include "driver/uart.h"
+#include "espFoC/osal/os_interface.h"
 #include "espFoC/gui_link/esp_foc_link.h"
 #include "espFoC/gui_link/esp_foc_tuner.h"
 #include "espFoC/drivers/gui_link/esp_foc_bridge_uart.h"
@@ -34,7 +33,7 @@ static void reader_task(void *arg)
     uint8_t buf[256];
     while (1) {
         int n = uart_read_bytes(UART_NUM, buf, sizeof(buf),
-                                pdMS_TO_TICKS(50));
+                                esp_foc_ms_to_wait_ticks(50));
         if (n > 0) {
             for (int i = 0; i < n; ++i) {
                 esp_foc_tuner_process_byte(buf[i]);
@@ -62,13 +61,8 @@ void esp_foc_tuner_init_bus_callback(void)
     ESP_ERROR_CHECK(uart_set_pin(UART_NUM, UART_TX_PIN, UART_RX_PIN,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     esp_foc_tuner_reactor_reset();
-    /* Cores fixed at 1; the reader task is light and shouldn't fight the
-     * control loop on PRO_CPU. Pinning is left to the user via xTaskCreate
-     * if they need a specific layout. */
-    BaseType_t ok = xTaskCreate(reader_task, "espfoc_uart_rx",
-                                READER_STACK_BYTES, NULL,
-                                tskIDLE_PRIORITY + 4, NULL);
-    if (ok != pdPASS) {
+    /* Reader task priority is low (idle+4) so it does not contend with the FOC runners. */
+    if (esp_foc_task_spawn(reader_task, NULL, READER_STACK_BYTES, 4, NULL) != 0) {
         ESP_LOGE(TAG, "failed to spawn UART reader task");
     }
     s_bus_ready = true;
