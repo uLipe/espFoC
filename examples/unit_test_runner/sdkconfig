@@ -2038,6 +2038,14 @@ CONFIG_ESP_FOC_CUSTOM_MATH=y
 # end of Optional hardware drivers
 
 #
+# Rotor sensor simulation (open-loop)
+#
+CONFIG_ESP_FOC_ROTOR_SIMU_DEFAULT_J_X1E7=500
+CONFIG_ESP_FOC_ROTOR_SIMU_DEFAULT_B_X1E7=100
+CONFIG_ESP_FOC_ROTOR_SIMU_DEFAULT_KT_X1E7=1000
+# end of Rotor sensor simulation (open-loop)
+
+#
 # Control loop
 #
 CONFIG_ESP_FOC_CURRENT_FILTER_CUTOFF_HZ=8000

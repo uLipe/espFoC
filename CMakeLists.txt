@@ -30,6 +30,7 @@ list(APPEND srcs    "source/drivers/inverter_3pwm_mcpwm.c"
                     "source/drivers/rotor_sensor_as5600.c"
                     "source/drivers/rotor_sensor_as5048.c"
                     "source/drivers/rotor_sensor_pcnt.c"
+                    "source/drivers/rotor_sensor_simu.c"
                     "source/drivers/current_sensor_adc.c"
                     "source/drivers/current_sensor_adc_one_shot.c"
                     "source/osal/os_interface_idf.c")

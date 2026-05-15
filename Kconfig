@@ -43,6 +43,30 @@ menu "espFoC Settings"
             default n
     endmenu
 
+    menu "Rotor sensor simulation (open-loop)"
+        config ESP_FOC_ROTOR_SIMU_DEFAULT_J_X1E7
+            int "Default mechanical inertia J * 1e7 [kg·m²]"
+            range 1 1000000
+            default 500
+            help
+                Used by rotor_sensor_simu for omega integration. Example: 500
+                means J = 5e-5 kg·m².
+
+        config ESP_FOC_ROTOR_SIMU_DEFAULT_B_X1E7
+            int "Default viscous damping B * 1e7 [N·m·s/rad]"
+            range 0 1000000
+            default 100
+            help
+                Mechanical viscous term. 100 => B = 1e-5 N·m·s/rad.
+
+        config ESP_FOC_ROTOR_SIMU_DEFAULT_KT_X1E7
+            int "Default torque constant Kt * 1e7 [N·m/A]"
+            range 1 1000000
+            default 1000
+            help
+                Maps simulated i_q to electrical torque. 1000 => 1e-4 N·m/A.
+    endmenu
+
     menu "Control loop"
         config ESP_FOC_CURRENT_FILTER_CUTOFF_HZ
             int "Isensor biquad low-pass cutoff [Hz]"
