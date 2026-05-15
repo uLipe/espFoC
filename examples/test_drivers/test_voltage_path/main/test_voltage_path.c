@@ -28,11 +28,15 @@ void test_vdq_pipeline_single(float vd_in,
     q16_t valpha, vbeta;
     q16_t vu, vv, vw;
 
-    esp_foc_modulate_dq_voltage(e_sin, e_cos,
-                                vd, vq,
-                                &valpha, &vbeta,
-                                &vu, &vv, &vw,
-                                q16_from_float(vmax));
+    q16_t da, db, dc;
+    esp_foc_modulate_dq_to_duties(e_sin, e_cos,
+                                  vd, vq,
+                                  &valpha, &vbeta,
+                                  &da, &db, &dc,
+                                  q16_from_float(vmax));
+    vu = da;
+    vv = db;
+    vw = dc;
 
     float va_rec = q16_to_float(vu);
     float vb_rec = q16_to_float(vv);

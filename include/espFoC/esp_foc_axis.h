@@ -98,17 +98,18 @@ struct esp_foc_axis_s {
     q16_t rotor_position_prev;
     /* At init: q16_from_float(1/cpr); shaft_rev = q16_mul(counts_q16, this). */
     q16_t encoder_inv_cpr_q16;
-    /* At init: 2*pi*pp/cpr — legacy path; ω_e from encoder counts/s. */
+    /* At init: 2*pi*pp/cpr — ω_e from encoder counts/s (rad/s Q16). */
     q16_t encoder_counts_speed_to_omega_e_q16;
-    /* Outer loop writes (encoder-direct θe); ISR hot path reads — volatile for tear-free visibility. */
+    /* θe_norm ∈ [0, Q16_ONE) ↔ [0, 2π) rad; outer loop writes, ISR reads. */
     volatile q16_t rotor_elec_angle;
 
     int downsampling_low_speed;
     int skip_torque_control;
 
-    q16_t dc_link_voltage;
-    q16_t dc_link_to_normalized;
-    q16_t max_voltage;
+    /** Nominal DC bus [V] Q16, read once at init from the inverter driver. */
+    q16_t vdc_q16;
+    /** Circular |Vdq| cap in pu (typically ESP_FOC_MOD_INDEX_LIMIT_Q16). */
+    q16_t mod_index_limit_q16;
     int motor_pole_pairs;
     esp_foc_axis_cal_cache_t cal;
     q16_t natural_direction;

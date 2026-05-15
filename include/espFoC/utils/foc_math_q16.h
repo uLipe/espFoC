@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-/** Normalize electrical angle in radians to [0, 1). */
+/** Normalize electrical angle: θ_norm ∈ [0, Q16_ONE) ↔ θ_rad ∈ [0, 2π). */
 static inline q16_t q16_normalize_angle(q16_t angle_rad)
 {
     while (angle_rad < 0)
@@ -59,7 +59,7 @@ static inline void q16_inverse_clarke(q16_t alpha, q16_t beta,
 }
 
 /**
- * Clamp (vd,vq) to magnitude <= |v_dc| in Q16 space (same geometry as float hypot).
+ * Clamp (vd,vq) to magnitude <= |v_dc| in per-unit Q16 (same geometry as float hypot).
  *
  * Canonical form: scale = v_dc / |V| with |V| from
  * hypot; then v_d *= scale, v_q *= scale — no component-wise divide by |V|.

@@ -90,41 +90,36 @@ TEST_CASE("modulator_q16: modulate_dq typical operating point", "[espFoC][modula
     q16_t exp_a, exp_b;
     esp_foc_limit_voltage_q16(&vd, &vq, vmax);
     q16_inverse_park(sq, cq, vd, vq, &exp_a, &exp_b);
-    q16_t qa, qb, qu, qv, qw;
-    esp_foc_modulate_dq_voltage(sq, cq,
-                                q16_from_float(0.2f), q16_from_float(0.35f),
-                                &qa, &qb, &qu, &qv, &qw,
-                                vmax);
+    q16_t qa, qb, da, db, dc;
+    esp_foc_modulate_dq_to_duties(sq, cq,
+                                  q16_from_float(0.2f), q16_from_float(0.35f),
+                                  &qa, &qb, &da, &db, &dc,
+                                  vmax);
     TEST_ASSERT_EQUAL_INT(exp_a, qa);
     TEST_ASSERT_EQUAL_INT(exp_b, qb);
-    q16_t eu, ev, ew;
-    esp_foc_svm_alpha_beta_to_phase_volts(exp_a, exp_b, &eu, &ev, &ew);
-    TEST_ASSERT_EQUAL_INT(eu, qu);
-    TEST_ASSERT_EQUAL_INT(ev, qv);
-    TEST_ASSERT_EQUAL_INT(ew, qw);
 }
 
 TEST_CASE("modulator_q16: modulate_dq voltage limit scales dq", "[espFoC][modulator_q16]")
 {
-    q16_t qa, qb, qu, qv, qw;
-    esp_foc_modulate_dq_voltage(q16_from_float(1.0f), 0,
-                                q16_from_float(0.95f), q16_from_float(0.95f),
-                                &qa, &qb, &qu, &qv, &qw,
-                                q16_from_float(0.5f));
-    TEST_ASSERT_TRUE(fabsf(q16_to_float(qu)) < 1.0f);
-    TEST_ASSERT_TRUE(fabsf(q16_to_float(qv)) < 1.0f);
-    TEST_ASSERT_TRUE(fabsf(q16_to_float(qw)) < 1.0f);
+    q16_t qa, qb, da, db, dc;
+    esp_foc_modulate_dq_to_duties(q16_from_float(1.0f), 0,
+                                  q16_from_float(0.95f), q16_from_float(0.95f),
+                                  &qa, &qb, &da, &db, &dc,
+                                  q16_from_float(0.5f));
+    assert_duty_unit(da);
+    assert_duty_unit(db);
+    assert_duty_unit(dc);
 }
 
 TEST_CASE("modulator_q16: modulate_dq zero dq", "[espFoC][modulator_q16]")
 {
-    q16_t qa, qb, qu, qv, qw;
-    esp_foc_modulate_dq_voltage(0, Q16_ONE, 0, 0, &qa, &qb, &qu, &qv, &qw,
-                                Q16_ONE);
+    q16_t qa, qb, da, db, dc;
+    esp_foc_modulate_dq_to_duties(0, Q16_ONE, 0, 0, &qa, &qb, &da, &db, &dc,
+                                  Q16_ONE);
     TEST_ASSERT_FLOAT_WITHIN(AB_TOL, 0.0f, q16_to_float(qa));
-    TEST_ASSERT_FLOAT_WITHIN(AB_TOL, 0.0f, q16_to_float(qu));
-    TEST_ASSERT_FLOAT_WITHIN(AB_TOL, 0.0f, q16_to_float(qv));
-    TEST_ASSERT_FLOAT_WITHIN(AB_TOL, 0.0f, q16_to_float(qw));
+    TEST_ASSERT_FLOAT_WITHIN(0.025f, 0.5f, q16_to_float(da));
+    TEST_ASSERT_FLOAT_WITHIN(0.025f, 0.5f, q16_to_float(db));
+    TEST_ASSERT_FLOAT_WITHIN(0.025f, 0.5f, q16_to_float(dc));
 }
 
 TEST_CASE("modulator_q16: get_dq_currents balanced currents", "[espFoC][modulator_q16]")

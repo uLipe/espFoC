@@ -30,9 +30,14 @@ typedef int32_t q16_t;
 /** -1.0 */
 #define Q16_MINUS_ONE ((q16_t)-65536)
 
-/** 2*pi radians (for angle helpers) */
+/** Literal 2π rad in Q16 (filter/design math only — not electrical angle storage). */
 #define Q16_TWO_PI ((q16_t)411775)
 #define Q16_INV_TWO_PI ((q16_t)10430)
+
+/** Per-unit voltage: Q16_ONE = linear SVPWM ceiling (Vdc/√3 at axis init). */
+#define ESP_FOC_VPU_ONE_Q16 Q16_ONE
+/** Industrial headroom on the voltage circle (83.3 % of VPU_ONE). */
+#define ESP_FOC_MOD_INDEX_LIMIT_Q16 ((q16_t)(((int64_t)Q16_ONE * 833) / 1000))
 
 #define Q16_K3_CLARKE ((q16_t)37837)
 #define Q16_SQRT3_OVER_2 ((q16_t)56756)

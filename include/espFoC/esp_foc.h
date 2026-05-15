@@ -12,7 +12,6 @@
 #include "espFoC/drivers/current_sensor_interface.h"
 #include "espFoC/drivers/rotor_sensor_interface.h"
 #include "espFoC/osal/os_interface.h"
-#include "espFoC/observer/esp_foc_observer_interface.h"
 #include "espFoC/esp_foc_err.h"
 #include "espFoC/esp_foc_axis.h"
 #include "espFoC/esp_foc_controls.h"

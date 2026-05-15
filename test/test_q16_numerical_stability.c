@@ -172,9 +172,9 @@ TEST_CASE("q16 limit_voltage: within limit unchanged", "[espFoC][q16][stability]
 
 TEST_CASE("q16 limit_voltage: exceeds limit is scaled", "[espFoC][q16][stability]")
 {
-    q16_t vd = q16_from_float(8.0f);
-    q16_t vq = q16_from_float(8.0f);
-    q16_t vdc = q16_from_float(5.0f);
+    q16_t vd = q16_from_float(0.8f);
+    q16_t vq = q16_from_float(0.8f);
+    q16_t vdc = q16_from_float(0.5f);
     esp_foc_limit_voltage_q16(&vd, &vq, vdc);
     float mag = sqrtf(q16_to_float(vd) * q16_to_float(vd) + q16_to_float(vq) * q16_to_float(vq));
     TEST_ASSERT_FLOAT_WITHIN(0.5f, q16_to_float(vdc), mag);
@@ -185,9 +185,10 @@ TEST_CASE("q16 limit_voltage: exceeds limit is scaled", "[espFoC][q16][stability
 TEST_CASE("PID q16: sustained zero-error stays zero", "[espFoC][q16][stability]")
 {
     esp_foc_pid_controller_t pid = {0};
-    esp_foc_pid_init_from_float(&pid, 1.0f, 10.0f, 0.0f, 0.0f, 0.001f, -10.0f, 10.0f, 5.0f);
+    esp_foc_pid_init_from_float(&pid, 1.0f, 10.0f, 0.0f, 1.0f, 0.001f, -10.0f, 10.0f, 5.0f);
     for (int i = 0; i < 10000; i++) {
-        q16_t out = esp_foc_pid_update(&pid, q16_from_float(1.0f), q16_from_float(1.0f));
+        q16_t ref = q16_from_float(1.0f);
+        q16_t out = esp_foc_pid_update(&pid, ref, ref);
         TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, q16_to_float(out));
     }
 }
@@ -281,12 +282,12 @@ TEST_CASE("full pipeline q16: 10000 steps bounded and deterministic", "[espFoC][
         q16_t ud = esp_foc_pid_update(&pid_d, 0,
                                        esp_foc_biquad_q16_update(&filt_d, id));
 
-        q16_t ua, ub, vu, vv, vw;
-        esp_foc_modulate_dq_voltage(sq, cq, ud, uq, &ua, &ub, &vu, &vv, &vw, vmax);
+        q16_t ua, ub, da, db, dc;
+        esp_foc_modulate_dq_to_duties(sq, cq, ud, uq, &ua, &ub, &da, &db, &dc, vmax);
 
-        TEST_ASSERT_TRUE(fabsf(q16_to_float(vu)) < 2.0f);
-        TEST_ASSERT_TRUE(fabsf(q16_to_float(vv)) < 2.0f);
-        TEST_ASSERT_TRUE(fabsf(q16_to_float(vw)) < 2.0f);
+        TEST_ASSERT_TRUE(q16_to_float(da) >= 0.0f && q16_to_float(da) <= 1.0f);
+        TEST_ASSERT_TRUE(q16_to_float(db) >= 0.0f && q16_to_float(db) <= 1.0f);
+        TEST_ASSERT_TRUE(q16_to_float(dc) >= 0.0f && q16_to_float(dc) <= 1.0f);
     }
 }
 

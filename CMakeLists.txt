@@ -1,6 +1,5 @@
 set(srcs    "source/motor_control/esp_foc_core.c"
             "source/motor_control/control_strategy/esp_foc_control_current_mode_sensored.c"
-            "source/motor_control/esp_foc_angle_predictor.c"
             "source/motor_control/esp_foc_biquad_q16.c"
             "source/calibration/esp_foc_calibration_format.c"
             "source/calibration/esp_foc_calibration_nvs.c"
@@ -11,10 +10,6 @@ set(srcs    "source/motor_control/esp_foc_core.c"
             "source/gui_link/esp_foc_scope.c"
             "source/motor_control/esp_foc_iq31.c"
             "source/motor_control/esp_foc_q16.c"
-            "source/motor_control/observers/esp_foc_pll_observer.c"
-            "source/motor_control/observers/esp_foc_pmsm_model_observer.c"
-            "source/motor_control/observers/esp_foc_kf_observer.c"
-            "source/motor_control/observers/esp_foc_simu_observer.c"
             )
 
 set(includes "include" "source/motor_control")

@@ -50,7 +50,7 @@ esp_foc_err_t esp_foc_axis_retune_current_pi_q16(
         .motor_l_h    = motor_l_h,
         .loop_ts_us   = loop_ts_us,
         .bandwidth_hz = bandwidth_hz,
-        .v_max        = axis->max_voltage,
+        .v_max        = ESP_FOC_VPU_ONE_Q16,
     };
     esp_foc_pi_design_output_t out;
     esp_foc_design_status_t st = esp_foc_design_pi_current_mpz_q16(&in, &out);

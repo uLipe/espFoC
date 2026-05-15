@@ -27,16 +27,16 @@ static void mock_set_inverter_callback(esp_foc_inverter_t *self,
 static q16_t mock_get_dc_link_voltage(esp_foc_inverter_t *self)
 {
     mock_inverter_t *m = MOCK_INVERTER_FROM_SELF(self);
-    return q16_from_float(m->dc_link_pu);
+    return q16_from_float(m->dc_link_volts);
 }
 
-static void mock_set_voltages(esp_foc_inverter_t *self, q16_t v_u, q16_t v_v, q16_t v_w)
+static void mock_set_duties(esp_foc_inverter_t *self, q16_t duty_a, q16_t duty_b, q16_t duty_c)
 {
     mock_inverter_t *m = MOCK_INVERTER_FROM_SELF(self);
-    m->set_voltages_count++;
-    m->last_v_u = v_u;
-    m->last_v_v = v_v;
-    m->last_v_w = v_w;
+    m->set_duties_count++;
+    m->last_duty_a = duty_a;
+    m->last_duty_b = duty_b;
+    m->last_duty_c = duty_c;
 }
 
 static uint32_t mock_get_inverter_pwm_rate(esp_foc_inverter_t *self)
@@ -57,14 +57,14 @@ static void mock_disable(esp_foc_inverter_t *self)
     m->disable_count++;
 }
 
-void mock_inverter_init(mock_inverter_t *m, float dc_link_pu, float pwm_rate_hz)
+void mock_inverter_init(mock_inverter_t *m, float dc_link_volts, float pwm_rate_hz)
 {
     memset(m, 0, sizeof(*m));
-    m->dc_link_pu = dc_link_pu;
+    m->dc_link_volts = dc_link_volts;
     m->pwm_rate_hz = pwm_rate_hz;
     m->interface.set_inverter_callback = mock_set_inverter_callback;
     m->interface.get_dc_link_voltage = mock_get_dc_link_voltage;
-    m->interface.set_voltages = mock_set_voltages;
+    m->interface.set_duties = mock_set_duties;
     m->interface.get_inverter_pwm_rate = mock_get_inverter_pwm_rate;
     m->interface.enable = mock_enable;
     m->interface.disable = mock_disable;
@@ -103,13 +103,7 @@ static q16_t mock_rotor_read_counts(esp_foc_rotor_sensor_t *self)
     if (m->scripted_counts_idx < m->scripted_counts_count) {
         m->counts = m->scripted_counts_reads[m->scripted_counts_idx++];
     }
-    {
-        float c = fmodf(m->counts, m->counts_per_rev);
-        if (c < 0.0f) {
-            c += m->counts_per_rev;
-        }
-        m->last_angle_q16 = q16_from_float(c);
-    }
+    m->last_angle_q16 = q16_from_float(m->counts);
     return m->last_angle_q16;
 }
 

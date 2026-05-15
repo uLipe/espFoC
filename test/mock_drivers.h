@@ -14,10 +14,10 @@ extern "C" {
 
 typedef struct {
     esp_foc_inverter_t interface;
-    float dc_link_pu;
+    float dc_link_volts;
     float pwm_rate_hz;
-    int set_voltages_count;
-    q16_t last_v_u, last_v_v, last_v_w;
+    int set_duties_count;
+    q16_t last_duty_a, last_duty_b, last_duty_c;
     int enable_count;
     int disable_count;
     int set_callback_count;
@@ -25,7 +25,7 @@ typedef struct {
     void *saved_callback_arg;
 } mock_inverter_t;
 
-void mock_inverter_init(mock_inverter_t *m, float dc_link_pu, float pwm_rate_hz);
+void mock_inverter_init(mock_inverter_t *m, float dc_link_volts, float pwm_rate_hz);
 esp_foc_inverter_t *mock_inverter_interface(mock_inverter_t *m);
 void mock_inverter_trigger_callback(mock_inverter_t *m);
 
@@ -40,10 +40,6 @@ typedef struct {
     int set_simulation_count_count;
     q16_t last_angle_q16;
     int64_t last_accum_i64;
-    /* Optional scripted return queue for read_accumulated_counts_i64.
-     * Each call pops one entry; once exhausted the mock returns the
-     * natural accumulated value. Used by the alignment direction tests
-     * to simulate rotor motion between probe samples. */
     int64_t scripted_reads[8];
     int scripted_count;
     int scripted_idx;

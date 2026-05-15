@@ -9,11 +9,11 @@ struct esp_foc_inverter_s {
     void (*set_inverter_callback)(esp_foc_inverter_t *self,
                         esp_foc_inverter_callback_t callback,
                         void *argument);
-    /** Nominal DC bus [V] as Q16; axis init + driver SVPWM normalization. */
+    /** Nominal DC bus [V] as Q16; read once at axis init. */
     q16_t (*get_dc_link_voltage)(esp_foc_inverter_t *self);
-    /** Phase voltages v_u,v_v,v_w (Q16, volts); driver maps to PWM duty [0,1]. */
-    void (*set_voltages)(esp_foc_inverter_t *self,
-                        q16_t v_u, q16_t v_v, q16_t v_w);
+    /** PWM duties in Q16 per-unit [0, Q16_ONE]. */
+    void (*set_duties)(esp_foc_inverter_t *self,
+                       q16_t duty_a, q16_t duty_b, q16_t duty_c);
     uint32_t (*get_inverter_pwm_rate)(esp_foc_inverter_t *self);
     void (*enable)(esp_foc_inverter_t *self);
     void (*disable)(esp_foc_inverter_t *self);

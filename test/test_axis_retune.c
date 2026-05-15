@@ -90,7 +90,7 @@ TEST_CASE("axis_tuning: retune output matches direct MPZ design",
         .motor_l_h   = l,
         .loop_ts_us  = loop_ts_us,
         .bandwidth_hz = bw,
-        .v_max       = s_axis.max_voltage,
+        .v_max       = ESP_FOC_VPU_ONE_Q16,
     };
     esp_foc_pi_design_output_t expected;
     TEST_ASSERT_EQUAL_INT(ESP_FOC_DESIGN_OK,

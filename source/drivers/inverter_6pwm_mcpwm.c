@@ -26,7 +26,6 @@
 #include "sdkconfig.h"
 #include "espFoC/driver_q16_local.h"
 #include "espFoC/inverter_6pwm_mcpwm.h"
-#include "espFoC/utils/space_vector_modulator.h"
 #include "driver/mcpwm_prelude.h"
 #include "driver/gpio.h"
 #include "esp_err.h"
@@ -50,7 +49,6 @@ typedef struct {
 
     float dc_link_voltage_nominal;
     q16_t dc_link_q16;
-    q16_t inv_vbus_q16;
 
     esp_foc_inverter_callback_t notifier;
     void *arg;
@@ -127,21 +125,17 @@ static q16_t get_dc_link_voltage(esp_foc_inverter_t *self)
     return obj->dc_link_q16;
 }
 
-static void set_voltages(esp_foc_inverter_t *self, q16_t v_u, q16_t v_v, q16_t v_w)
+static void set_duties(esp_foc_inverter_t *self, q16_t duty_a, q16_t duty_b, q16_t duty_c)
 {
     esp_foc_mcpwm6_inverter_t *obj = __containerof(self, esp_foc_mcpwm6_inverter_t, interface);
-    q16_t du_q, dv_q, dw_q;
-    esp_foc_svm_phase_volts_to_duties(v_u, v_v, v_w, obj->inv_vbus_q16,
-                                      &du_q, &dv_q, &dw_q);
-
     uint32_t ph = (uint32_t)MCPWM_PERIOD_TOP_HALF;
-    uint32_t du = esp_foc_q16_duty_ticks(du_q, ph);
-    uint32_t dv = esp_foc_q16_duty_ticks(dv_q, ph);
-    uint32_t dw = esp_foc_q16_duty_ticks(dw_q, ph);
 
-    mcpwm_comparator_set_compare_value(obj->comparators[0], (uint16_t)du);
-    mcpwm_comparator_set_compare_value(obj->comparators[1], (uint16_t)dv);
-    mcpwm_comparator_set_compare_value(obj->comparators[2], (uint16_t)dw);
+    mcpwm_comparator_set_compare_value(
+        obj->comparators[0], (uint16_t)esp_foc_q16_duty_ticks(duty_a, ph));
+    mcpwm_comparator_set_compare_value(
+        obj->comparators[1], (uint16_t)esp_foc_q16_duty_ticks(duty_b, ph));
+    mcpwm_comparator_set_compare_value(
+        obj->comparators[2], (uint16_t)esp_foc_q16_duty_ticks(duty_c, ph));
 }
 
 static void set_inverter_callback(esp_foc_inverter_t *self,
@@ -205,10 +199,8 @@ esp_foc_inverter_t *inverter_6pwm_mpcwm_new(int gpio_u_high, int gpio_u_low,
     }
     obj->dc_link_voltage_nominal = dc_link_voltage;
     obj->dc_link_q16 = dc_link_q16_from_nominal(dc_link_voltage);
-    obj->inv_vbus_q16 = q16_reciprocal_positive(obj->dc_link_q16);
-
     obj->interface.get_dc_link_voltage = get_dc_link_voltage;
-    obj->interface.set_voltages = set_voltages;
+    obj->interface.set_duties = set_duties;
     obj->interface.set_inverter_callback = set_inverter_callback;
     obj->interface.get_inverter_pwm_rate = get_inverter_pwm_rate;
     obj->interface.enable = inverter_enable;

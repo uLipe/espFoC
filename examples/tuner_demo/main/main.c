@@ -27,19 +27,19 @@ static const char *TAG = "tuner-demo";
 
 typedef struct {
     esp_foc_inverter_t base;
-    float dc_link_pu;
+    float dc_link_volts;
     uint32_t pwm_hz;
 } stub_inverter_t;
 
 static q16_t stub_get_dc_link(esp_foc_inverter_t *self)
 {
-    return q16_from_float(((stub_inverter_t *)self)->dc_link_pu);
+    return q16_from_float(((stub_inverter_t *)self)->dc_link_volts);
 }
 static uint32_t stub_get_pwm(esp_foc_inverter_t *self)
 {
     return ((stub_inverter_t *)self)->pwm_hz;
 }
-static void stub_set_voltages(esp_foc_inverter_t *s, q16_t a, q16_t b, q16_t c)
+static void stub_set_duties(esp_foc_inverter_t *s, q16_t a, q16_t b, q16_t c)
 {
     (void)s; (void)a; (void)b; (void)c;
 }
@@ -54,12 +54,12 @@ static stub_inverter_t s_inv = {
     .base = {
         .set_inverter_callback = stub_set_cb,
         .get_dc_link_voltage   = stub_get_dc_link,
-        .set_voltages          = stub_set_voltages,
+        .set_duties            = stub_set_duties,
         .get_inverter_pwm_rate = stub_get_pwm,
         .enable                = stub_enable,
         .disable               = stub_disable,
     },
-    .dc_link_pu = 1.0f,
+    .dc_link_volts = 48.0f,
     .pwm_hz = 20000,
 };
 

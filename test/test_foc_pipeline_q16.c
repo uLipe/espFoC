@@ -46,9 +46,9 @@ static void run_q16_pipeline_step(float angle_turns,
                                    q16_from_float(id_ref),
                                    esp_foc_biquad_q16_update(filt_d, id_q));
 
-    esp_foc_modulate_dq_voltage(sq, cq, ud_q, uq_q,
-                                     &ua_q, &ub_q, du, dv, dw,
-                                     vmax);
+    esp_foc_modulate_dq_to_duties(sq, cq, ud_q, uq_q,
+                                  &ua_q, &ub_q, du, dv, dw,
+                                  vmax);
 }
 
 static void setup_pid_filters(esp_foc_pid_controller_t *pid_d,

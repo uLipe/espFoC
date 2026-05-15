@@ -40,10 +40,7 @@
  * enough that a stuck rotor will obviously fail to clear the bar. */
 #define ESP_FOC_DIR_PROBE_MIN_COUNTS 50
 
-/* Alignment voltages: scale with max_voltage in Q16 (volts) like the natural
- * direction probe. A smaller d-axis share limits stall (Id) while still
- * pulling the rotor; the direction probe uses a low Vq while stepping the
- * stator field angle. */
+/* Alignment: fractions of ESP_FOC_VPU_ONE_Q16 (linear SVPWM ceiling in pu). */
 #define ESP_FOC_ALIGN_PARK_VD_VMAX_FRAC      (0.15f)
 /* Open-loop sweep: needs enough torque to overcome friction; keep below
  * the single-shot probe levels that overheat idling. */
@@ -91,7 +88,7 @@ static void park_inverter_safe(esp_foc_axis_t *axis)
     if (axis->inverter_driver == NULL) {
         return;
     }
-    axis->inverter_driver->set_voltages(axis->inverter_driver, 0, 0, 0);
+    axis->inverter_driver->set_duties(axis->inverter_driver, 0, 0, 0);
     axis->inverter_driver->disable(axis->inverter_driver);
     if (axis->inverter_driver->set_inverter_callback != NULL) {
         esp_foc_critical_enter();
@@ -181,7 +178,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                       esp_foc_isensor_t *isensor,
                                       esp_foc_motor_control_settings_t settings)
 {
-    float vbus_pu;
     float pwm_rate_hz_f;
     float dt_f;
 
@@ -210,13 +206,10 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->isensor_driver = isensor;
     esp_foc_calibration_axis_init_store(axis, &settings);
 
-    axis->dc_link_voltage = axis->inverter_driver->get_dc_link_voltage(axis->inverter_driver);
-    vbus_pu = q16_to_float(axis->dc_link_voltage);
-    axis->dc_link_to_normalized = q16_from_float((vbus_pu > 1e-9f) ? (1.0f / vbus_pu) : 0.0f);
+    axis->vdc_q16 = axis->inverter_driver->get_dc_link_voltage(axis->inverter_driver);
+    axis->mod_index_limit_q16 = ESP_FOC_MOD_INDEX_LIMIT_Q16;
 
-    axis->max_voltage = q16_from_float(vbus_pu / 1.7320508075688772f);
-
-    axis->inverter_driver->set_voltages(axis->inverter_driver, 0, 0, 0);
+    axis->inverter_driver->set_duties(axis->inverter_driver, 0, 0, 0);
 
     pwm_rate_hz_f = (float)inverter->get_inverter_pwm_rate(inverter);
     dt_f = (pwm_rate_hz_f > 1e-9f) ? (1.0f / pwm_rate_hz_f) : 0.0f;
@@ -258,7 +251,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     for (int i = 0; i < 2; ++i) {
         axis->torque_controller[i].dt = loop_dt;
         axis->torque_controller[i].inv_dt = loop_inv_dt;
-        apply_autogen_gains(&axis->torque_controller[i], axis->max_voltage);
+        apply_autogen_gains(&axis->torque_controller[i], ESP_FOC_VPU_ONE_Q16);
     }
 
     /* Resolve the current-sensor low-pass cutoff. Precedence at boot:
@@ -329,7 +322,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 {
     q16_t e_sin, e_cos;
-    q16_t a, b, u, v, w;
+    q16_t alpha, beta;
+    q16_t da, db, dc;
     bool skip_dir_probe = false;
 
     if (axis == NULL) {
@@ -341,7 +335,7 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 
     axis->state = ESP_FOC_AXIS_STATE_ALIGNING;
     esp_foc_calibration_axis_align_apply_stored_hints(axis, &skip_dir_probe);
-    axis->inverter_driver->set_voltages(axis->inverter_driver, 0, 0, 0);
+    axis->inverter_driver->set_duties(axis->inverter_driver, 0, 0, 0);
 
     e_sin = q16_sin(0);
     e_cos = q16_cos(0);
@@ -349,15 +343,14 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
     axis->inverter_driver->enable(axis->inverter_driver);
     esp_foc_sleep_ms(500);
 
-    const q16_t park_vd = q16_from_float(
-        q16_to_float(axis->max_voltage) * ESP_FOC_ALIGN_PARK_VD_VMAX_FRAC);
+    const q16_t park_vd = q16_mul(ESP_FOC_VPU_ONE_Q16,
+                                  q16_from_float(ESP_FOC_ALIGN_PARK_VD_VMAX_FRAC));
 
     /* Step 1 — park the rotor at electrical angle 0 by driving Vd. */
-    esp_foc_modulate_dq_voltage(e_sin, e_cos,
-                                park_vd, 0,
-                                &a, &b, &u, &v, &w,
-                                axis->max_voltage);
-    axis->inverter_driver->set_voltages(axis->inverter_driver, u, v, w);
+    esp_foc_modulate_dq_to_duties(e_sin, e_cos, park_vd, 0,
+                                  &alpha, &beta, &da, &db, &dc,
+                                  axis->mod_index_limit_q16);
+    axis->inverter_driver->set_duties(axis->inverter_driver, da, db, dc);
     esp_foc_sleep_ms(500);
 
     /* Step 2 — zero the encoder. The current physical position is now
@@ -368,11 +361,12 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 
     /* Step 3 — Cog the rotor by applying small VQ and check direction change*/
     {
-        const q16_t uq = q16_from_float(q16_to_float(axis->max_voltage) * ESP_FOC_ALIGN_SWEEP_VQ_VMAX_FRAC);
-            esp_foc_modulate_dq_voltage(
-                e_sin, e_cos, 0, uq, &a, &b, &u, &v, &w, axis->max_voltage);
-            axis->inverter_driver->set_voltages(
-                axis->inverter_driver, u, v, w);
+        const q16_t uq = q16_mul(ESP_FOC_VPU_ONE_Q16,
+                                 q16_from_float(ESP_FOC_ALIGN_SWEEP_VQ_VMAX_FRAC));
+        esp_foc_modulate_dq_to_duties(e_sin, e_cos, 0, uq,
+                                      &alpha, &beta, &da, &db, &dc,
+                                      axis->mod_index_limit_q16);
+        axis->inverter_driver->set_duties(axis->inverter_driver, da, db, dc);
 
             esp_foc_sleep_ms(ESP_FOC_DIR_SWEEP_MS_PER_STEP);
 
@@ -412,7 +406,7 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
             (long long)delta);
     }
 
-    axis->inverter_driver->set_voltages(axis->inverter_driver, 0, 0, 0);
+    axis->inverter_driver->set_duties(axis->inverter_driver, 0, 0, 0);
     esp_foc_sleep_ms(500);
 
     axis->state = ESP_FOC_AXIS_STATE_ALIGNED;

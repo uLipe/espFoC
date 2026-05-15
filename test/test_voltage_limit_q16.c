@@ -1,12 +1,12 @@
 /*
- * esp_foc_limit_voltage_q16 — geometry vs float hypot + edge cases.
+ * esp_foc_limit_voltage_q16 — per-unit geometry vs float hypot.
  */
 #include <math.h>
 #include <unity.h>
 #include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/utils/foc_math_q16.h"
 
-static float mag_float(q16_t vd, q16_t vq)
+static float mag_pu(q16_t vd, q16_t vq)
 {
     double d = (double)q16_to_float(vd);
     double q = (double)q16_to_float(vq);
@@ -17,15 +17,15 @@ TEST_CASE("voltage_limit_q16: zero vector with dc>0 unchanged", "[espFoC][voltag
 {
     q16_t vd = 0;
     q16_t vq = 0;
-    esp_foc_limit_voltage_q16(&vd, &vq, q16_from_float(10.0f));
+    esp_foc_limit_voltage_q16(&vd, &vq, ESP_FOC_MOD_INDEX_LIMIT_Q16);
     TEST_ASSERT_EQUAL_INT32(0, vd);
     TEST_ASSERT_EQUAL_INT32(0, vq);
 }
 
 TEST_CASE("voltage_limit_q16: zero dc clamps output", "[espFoC][voltage_limit]")
 {
-    q16_t vd = q16_from_float(3.0f);
-    q16_t vq = q16_from_float(4.0f);
+    q16_t vd = q16_from_float(0.3f);
+    q16_t vq = q16_from_float(0.4f);
     esp_foc_limit_voltage_q16(&vd, &vq, 0);
     TEST_ASSERT_EQUAL_INT32(0, vd);
     TEST_ASSERT_EQUAL_INT32(0, vq);
@@ -44,47 +44,47 @@ TEST_CASE("voltage_limit_q16: inside circle unchanged", "[espFoC][voltage_limit]
 
 TEST_CASE("voltage_limit_q16: scaled to dc magnitude (axis-aligned)", "[espFoC][voltage_limit]")
 {
-    q16_t vdc = q16_from_float(5.0f);
-    q16_t vd = q16_from_float(10.0f);
+    q16_t vdc = q16_from_float(0.5f);
+    q16_t vd = q16_from_float(1.0f);
     q16_t vq = 0;
     esp_foc_limit_voltage_q16(&vd, &vq, vdc);
-    TEST_ASSERT_FLOAT_WITHIN(0.08f, 5.0f, mag_float(vd, vq));
-    TEST_ASSERT_FLOAT_WITHIN(0.02f, 5.0f, q16_to_float(vd));
+    TEST_ASSERT_FLOAT_WITHIN(0.02f, 0.5f, mag_pu(vd, vq));
+    TEST_ASSERT_FLOAT_WITHIN(0.02f, 0.5f, q16_to_float(vd));
     TEST_ASSERT_EQUAL_INT32(0, vq);
 }
 
 TEST_CASE("voltage_limit_q16: scaled to dc magnitude (diagonal)", "[espFoC][voltage_limit]")
 {
-    q16_t vdc = q16_from_float(5.0f);
-    q16_t vd = q16_from_float(40.0f);
-    q16_t vq = q16_from_float(40.0f);
+    q16_t vdc = q16_from_float(0.5f);
+    q16_t vd = q16_from_float(0.9f);
+    q16_t vq = q16_from_float(0.9f);
     esp_foc_limit_voltage_q16(&vd, &vq, vdc);
-    TEST_ASSERT_FLOAT_WITHIN(0.15f, 5.0f, mag_float(vd, vq));
+    TEST_ASSERT_FLOAT_WITHIN(0.03f, 0.5f, mag_pu(vd, vq));
 }
 
 TEST_CASE("voltage_limit_q16: negative dc uses absolute limit", "[espFoC][voltage_limit]")
 {
-    q16_t vdc = q16_from_float(-6.0f);
-    q16_t vd = q16_from_float(20.0f);
+    q16_t vdc = q16_from_float(-0.6f);
+    q16_t vd = q16_from_float(1.0f);
     q16_t vq = 0;
     esp_foc_limit_voltage_q16(&vd, &vq, vdc);
-    TEST_ASSERT_FLOAT_WITHIN(0.12f, 6.0f, mag_float(vd, vq));
+    TEST_ASSERT_FLOAT_WITHIN(0.03f, 0.6f, mag_pu(vd, vq));
 }
 
-TEST_CASE("voltage_limit_q16: large values stay bounded", "[espFoC][voltage_limit]")
+TEST_CASE("voltage_limit_q16: large pu vector stays bounded", "[espFoC][voltage_limit]")
 {
-    q16_t vdc = q16_from_float(12.0f);
-    q16_t vd = q16_from_float(8000.0f);
-    q16_t vq = q16_from_float(-6000.0f);
+    q16_t vdc = q16_from_float(0.8f);
+    q16_t vd = q16_from_float(2.0f);
+    q16_t vq = q16_from_float(-1.5f);
     esp_foc_limit_voltage_q16(&vd, &vq, vdc);
-    TEST_ASSERT_TRUE(mag_float(vd, vq) <= 13.0f);
+    TEST_ASSERT_TRUE(mag_pu(vd, vq) <= 0.82f);
 }
 
 TEST_CASE("voltage_limit_q16: tiny overflow still scales", "[espFoC][voltage_limit]")
 {
-    q16_t vdc = q16_from_float(1.0f);
-    q16_t vd = q16_from_float(1.05f);
+    q16_t vdc = q16_from_float(0.95f);
+    q16_t vd = q16_from_float(1.0f);
     q16_t vq = 0;
     esp_foc_limit_voltage_q16(&vd, &vq, vdc);
-    TEST_ASSERT_FLOAT_WITHIN(0.06f, 1.0f, mag_float(vd, vq));
+    TEST_ASSERT_FLOAT_WITHIN(0.03f, 0.95f, mag_pu(vd, vq));
 }

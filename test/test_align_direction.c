@@ -11,6 +11,7 @@
 #include <string.h>
 #include <unity.h>
 #include "espFoC/esp_foc.h"
+#include "espFoC/calibration/esp_foc_calibration.h"
 #include "espFoC/utils/esp_foc_q16.h"
 #include "mock_drivers.h"
 
@@ -22,6 +23,9 @@ static mock_isensor_t s_isensor;
 static void setup(esp_foc_motor_direction_t hint)
 {
     esp_foc_motor_control_settings_t s = {0};
+#if defined(CONFIG_ESP_FOC_CALIBRATION_NVS)
+    (void)esp_foc_calibration_erase();
+#endif
     memset(&s_axis, 0, sizeof(s_axis));
     mock_inverter_init(&s_inv, 1.0f, 20000.0f);
     mock_rotor_sensor_init(&s_rotor, 4096.0f);

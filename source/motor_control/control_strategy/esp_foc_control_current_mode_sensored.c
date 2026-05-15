@@ -46,9 +46,9 @@ static const char * tag = "ESP_FOC_CONTROL";
  *  next frame runs in parallel with the rest of this ISR. The outer
  *  task does not call sample_isensors.
  *
- *  set_voltages() takes phase volts; the MCPWM driver converts to duty then
+ *  set_duties() writes PWM duties [0,1]; SVPWM runs in the motor-control path.
  *  comparator writes — IRAM-attributed in IDF v5.5. Other helpers used here
- *  (q16_park, q16_sin/cos LUT, esp_foc_modulate_dq_voltage,
+ *  (q16_park, q16_sin/cos LUT, esp_foc_modulate_dq_to_duties,
  *  esp_foc_pid_update) are pure Q16 / IRAM-friendly arithmetic.
  *  Everything in this ISR has to either live in IRAM or be cache-
  *  warm; the IRAM_ATTR on the function itself plus the LUT pinning
@@ -105,31 +105,28 @@ static void foc_hot_isr(void *data)
         axis->u_d.raw = axis->target_u_q.raw;
     } else {
         axis->u_q.raw = esp_foc_pid_update(&axis->torque_controller[0],
-                                 axis->target_i_q.raw, i_q);
+                                           axis->target_i_q.raw, i_q);
         axis->u_d.raw = esp_foc_pid_update(&axis->torque_controller[1],
-                                 axis->target_i_d.raw, i_d);
-        /* User-provided feed-forward gets stacked on top of the PI
-         * output (matches the legacy semantics 1:1). */
+                                           axis->target_i_d.raw, i_d);
+        axis->u_q.raw = q16_mul(axis->u_q.raw, axis->mod_index_limit_q16);
+        axis->u_d.raw = q16_mul(axis->u_d.raw, axis->mod_index_limit_q16);
         axis->u_q.raw = q16_add(axis->u_q.raw, axis->target_u_q.raw);
         axis->u_d.raw = q16_add(axis->u_d.raw, axis->target_u_d.raw);
     }
 
+    /* 8) Inverse Park + SVPWM (Vdq/αβ in pu; duties to driver). */
+    esp_foc_modulate_dq_to_duties(e_sin, e_cos, axis->u_d.raw, axis->u_q.raw,
+                                  &axis->u_alpha.raw,
+                                  &axis->u_beta.raw,
+                                  &axis->u_u.raw,
+                                  &axis->u_v.raw,
+                                  &axis->u_w.raw,
+                                  axis->mod_index_limit_q16);
 
-    /* 8) Inverse Park + SVPWM (θ at output instant). */
-    esp_foc_modulate_dq_voltage(e_sin, e_cos, axis->u_d.raw, axis->u_q.raw,
-                                &axis->u_alpha.raw,
-                                &axis->u_beta.raw,
-                                &axis->u_u.raw,
-                                &axis->u_v.raw,
-                                &axis->u_w.raw,
-                                axis->max_voltage);
-
-    /* 9) Phase voltages [V] Q16 → driver applies SVPWM to duty. MCPWM
-     *    comparator writes are IRAM-safe in IDF v5.5. */
-    axis->inverter_driver->set_voltages(axis->inverter_driver,
-                                    axis->u_u.raw,
-                                    axis->u_v.raw,
-                                    axis->u_w.raw);
+    axis->inverter_driver->set_duties(axis->inverter_driver,
+                                      axis->u_u.raw,
+                                      axis->u_v.raw,
+                                      axis->u_w.raw);
 
     /* 10) Downsample counter. When it expires, wake the outer task
      *     so it reads the encoder, refreshes rotor_elec_angle and dispatches
