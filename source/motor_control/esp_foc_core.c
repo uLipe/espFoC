@@ -70,14 +70,28 @@ void esp_foc_axis_refresh_encoder_q16_scales(esp_foc_axis_t *axis)
         q16_from_float((float)(2.0 * M_PI * (double)pp) / (float)cpr);
 }
 
-static void reset_torque_targets_and_pis(esp_foc_axis_t *axis)
+static void apply_bypass_current_pid(esp_foc_pid_controller_t *pid,
+                                   q16_t out_max)
 {
-    axis->target_i_d.raw = 0;
-    axis->target_i_q.raw = 0;
-    axis->u_d.raw = 0;
-    axis->u_q.raw = 0;
+    pid->kp = 0;
+    pid->ki = 0;
+    pid->kd = 0;
+    pid->kff = Q16_ONE;
+    pid->integrator_limit = out_max;
+    pid->max_output_value = out_max;
+    pid->min_output_value = q16_from_float(-q16_to_float(out_max));
+    pid->ke = Q16_ONE;
+    esp_foc_pid_reset(pid);
+}
+
+void esp_foc_axis_apply_bypass_current_loop_gains(esp_foc_axis_t *axis)
+{
+    if (axis == NULL) {
+        return;
+    }
     for (int i = 0; i < 2; ++i) {
-        esp_foc_pid_reset(&axis->torque_controller[i]);
+        apply_bypass_current_pid(&axis->torque_controller[i],
+                                 ESP_FOC_VPU_ONE_Q16);
     }
 }
 
@@ -261,34 +275,10 @@ static void do_foc_outer_loop(void *arg)
         if (axis->regulator_cb == NULL) {
             continue;
         }
-#if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
-        if (axis->tuner_override.active) {
-            esp_foc_d_current_q16_t shadow_id;
-            esp_foc_q_current_q16_t shadow_iq;
-            axis->regulator_cb(axis, &shadow_id, &shadow_iq);
-            axis->target_i_d.raw = axis->tuner_override.target_id;
-            axis->target_i_q.raw = axis->tuner_override.target_iq;
-            continue;
-        }
-#endif
         axis->regulator_cb(axis, &axis->target_i_d, &axis->target_i_q);
     }
     axis->regulator_ev = NULL;
     esp_foc_runner_delete_self();
-}
-
-static void apply_default_bypass_current_pid(esp_foc_pid_controller_t *pid,
-                                            q16_t out_max)
-{
-    pid->kp = 0;
-    pid->ki = 0;
-    pid->kd = 0;
-    pid->kff = Q16_ONE;
-    pid->integrator_limit = out_max;
-    pid->max_output_value = out_max;
-    pid->min_output_value = q16_from_float(-q16_to_float(out_max));
-    pid->ke = Q16_ONE;
-    esp_foc_pid_reset(pid);
 }
 
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
@@ -307,9 +297,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 
 #if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
     axis->magic = ESP_FOC_AXIS_MAGIC;
-    axis->tuner_override.active = false;
-    axis->tuner_override.target_id = 0;
-    axis->tuner_override.target_iq = 0;
 #endif
 
     axis->state = ESP_FOC_AXIS_STATE_IDLE;
@@ -355,8 +342,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     for (int i = 0; i < 2; ++i) {
         axis->torque_controller[i].dt = loop_dt;
         axis->torque_controller[i].inv_dt = loop_inv_dt;
-        apply_default_bypass_current_pid(&axis->torque_controller[i],
-                                        ESP_FOC_VPU_ONE_Q16);
+        apply_bypass_current_pid(&axis->torque_controller[i],
+                                 ESP_FOC_VPU_ONE_Q16);
     }
 
     /* Resolve the current-sensor low-pass cutoff. Precedence at boot:
@@ -569,7 +556,6 @@ esp_foc_err_t esp_foc_stop(esp_foc_axis_t *axis)
     axis->state = ESP_FOC_AXIS_STATE_IDLE;
 
     park_inverter_safe(axis);
-    reset_torque_targets_and_pis(axis);
 
     if (was_running) {
         esp_foc_runner_wake(axis->runner_low_speed_hdl);

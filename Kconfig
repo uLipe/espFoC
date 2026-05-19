@@ -140,14 +140,6 @@ menu "espFoC Settings"
             help
                 Compiles the tuner; attach axes and handle requests from UART/USB.
 
-        config ESP_FOC_TUNER_ALWAYS_OVERRIDE_VOLTAGE_MODE
-            bool "Latch tuner override on after align (bring-up)"
-            depends on ESP_FOC_TUNER_ENABLE
-            default n
-            help
-                After a successful CMD_ALIGN_AXIS, tuner override turns on automatically;
-                CMD_OVERRIDE_OFF is ignored so host motion writes stay enabled.
-
         choice ESP_FOC_TUNER_BRIDGE
             prompt "Tuner / scope link"
             depends on ESP_FOC_TUNER_ENABLE

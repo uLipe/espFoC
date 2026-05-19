@@ -15,6 +15,7 @@
 #include "espFoC/esp_foc.h"
 #include "espFoC/gui_link/esp_foc_tuner.h"
 #include "espFoC/gui_link/esp_foc_link.h"
+#include "espFoC/gui_link/esp_foc_link_session.h"
 #include "espFoC/utils/esp_foc_q16.h"
 #include "mock_drivers.h"
 
@@ -58,6 +59,7 @@ static void setup_axis(void)
         mock_isensor_interface(&s_isensor),
         settings));
     TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_attach_axis(0, &s_axis));
+    esp_foc_link_session_force_connected(true);
     s_capture_len = 0;
     esp_foc_tuner_reactor_reset();
 }

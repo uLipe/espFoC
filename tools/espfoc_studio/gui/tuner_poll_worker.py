@@ -159,7 +159,7 @@ class TunerPollWorker(QObject):
             lim = self._client.read_int_lim()
             fc = self._client.read_current_filter_fc()
             st = self._client.read_axis_state()
-            override_active = bool(st & AxisStateFlag.TUNER_OVERRIDE)
+            override_active = bool(st & AxisStateFlag.RUNNING)
             self._prev_override_active = override_active
 
             if want_full:

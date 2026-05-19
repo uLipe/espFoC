@@ -45,9 +45,9 @@ extern "C" {
     (ESP_FOC_LINK_HEADER_BYTES + ESP_FOC_LINK_MAX_PAYLOAD + ESP_FOC_LINK_TRAILER_BYTES)
 
 typedef enum {
-    ESP_FOC_LINK_CH_TUNER  = 0x01,  /* tuner request / response */
-    ESP_FOC_LINK_CH_SCOPE  = 0x02,  /* scope: binary Q16, see SCOPE v1 in esp_foc_scope.c */
-    ESP_FOC_LINK_CH_LOG    = 0x03,  /* free-form log lines */
+    ESP_FOC_LINK_CH_TUNER     = 0x01,  /* tuner request / response */
+    ESP_FOC_LINK_CH_SCOPE     = 0x02,  /* scope: binary Q16, see SCOPE v1 in esp_foc_scope.c */
+    ESP_FOC_LINK_CH_HEARTBEAT = 0x04,  /* bidirectional liveness + axis snapshot */
 } esp_foc_link_channel_t;
 
 typedef enum {

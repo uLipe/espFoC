@@ -35,6 +35,16 @@
 
 const char *TAG = "ESP_FOC_SCOPE";
 
+__attribute__((weak)) void esp_foc_init_bus_callback(void)
+{
+}
+
+__attribute__((weak)) void esp_foc_send_buffer_callback(const uint8_t *buffer, int size)
+{
+    (void)buffer;
+    (void)size;
+}
+
 #if !defined(CONFIG_ESP_FOC_SCOPE_LEGACY_CSV) || !CONFIG_ESP_FOC_SCOPE_LEGACY_CSV
 /* Binary SCOPE v1: 0xFF 'S' 'C' 0x01, uint16le n, n × int32le (q16_t). */
 #define SCOPE_WIRE_V1 0x01U
@@ -71,6 +81,7 @@ static q16_t *scope_channels[CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS];
 static esp_foc_event_handle_t scope_ev;
 
 static bool scope_enable = false;
+static bool scope_stream = false;
 static struct scope_frame scope_buffer[2][CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE];
 static bool ping_pong_switch = false;
 static uint32_t rd_buff_index = 0;
@@ -113,7 +124,9 @@ static void esp_foc_scope_daemon_thread(void *arg)
             line_buf[idx++] = '\n';
             line_buf[idx]   = 0;
         }
-        esp_foc_send_buffer_callback((const uint8_t *)line_buf, (size_t)idx);
+        if (scope_stream) {
+            esp_foc_send_buffer_callback((const uint8_t *)line_buf, (size_t)idx);
+        }
     }
 #else
     {
@@ -133,17 +146,30 @@ static void esp_foc_scope_daemon_thread(void *arg)
             put_i32_le(wp, (int32_t) next_sample->data[i]);
             wp += 4;
         }
-        esp_foc_send_buffer_callback((const uint8_t *)out_buf, olen);
+        if (scope_stream) {
+            esp_foc_send_buffer_callback((const uint8_t *)out_buf, olen);
+        }
     }
 #endif
         rd_buff_index++;
     }
 }
 
+void esp_foc_scope_set_stream_enabled(bool enabled)
+{
+    scope_stream = enabled;
+}
+
+bool esp_foc_scope_stream_enabled(void)
+{
+    return scope_stream;
+}
+
 void esp_foc_scope_initalize(void)
 {
     if(!scope_enable) {
         scope_enable = true;
+        scope_stream = false;
         esp_foc_init_bus_callback();
         esp_foc_create_runner(esp_foc_scope_daemon_thread, NULL, -1, NULL);
         esp_foc_sleep_ms(10);

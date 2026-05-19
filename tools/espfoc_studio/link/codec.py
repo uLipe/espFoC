@@ -1,19 +1,4 @@
-"""Wire-level framing codec — mirror of source/motor_control/esp_foc_link.c.
-
-Frame layout (must stay byte-for-byte identical to the firmware):
-
-    offset  bytes  field
-    -----   -----  -----
-    0       1      sync = 0xA5
-    1       2      payload_len (LE)
-    3       1      channel
-    4       1      seq
-    5       N      payload
-    5+N     2      crc16 (LE, CRC-16/CCITT over channel..payload)
-
-The Python side stays sync-friendly (no asyncio) so the same code is
-reusable from a CLI, a Qt thread, or a pytest harness.
-"""
+"""Wire-level framing codec — mirror of source/gui_link/esp_foc_link.c."""
 
 from __future__ import annotations
 
@@ -23,16 +8,16 @@ from typing import Optional
 
 
 SYNC = 0xA5
-HEADER_BYTES = 5  # sync + len(2) + channel + seq
-TRAILER_BYTES = 2  # crc16
+HEADER_BYTES = 5
+TRAILER_BYTES = 2
 MAX_PAYLOAD = 256
 MAX_FRAME = HEADER_BYTES + MAX_PAYLOAD + TRAILER_BYTES
 
 
 class Channel(IntEnum):
     TUNER = 0x01
-    SCOPE = 0x02  # payload: SCOPE v1 (see link.scope_sample) or legacy CSV line
-    LOG = 0x03
+    SCOPE = 0x02
+    HEARTBEAT = 0x04
 
 
 class Status(IntEnum):
@@ -49,10 +34,6 @@ class LinkError(Exception):
 
 
 def crc16_ccitt(data: bytes) -> int:
-    """CRC-16/CCITT (poly 0x1021, init 0xFFFF, no reflection, no xor-out).
-
-    Bit-by-bit implementation that matches esp_foc_link_crc16() byte-for-byte.
-    """
     crc = 0xFFFF
     for b in data:
         crc ^= b << 8
@@ -65,7 +46,6 @@ def crc16_ccitt(data: bytes) -> int:
 
 
 def encode(channel: int, seq: int, payload: bytes = b"") -> bytes:
-    """Encode a single frame and return the wire bytes."""
     if not isinstance(payload, (bytes, bytearray)):
         raise LinkError("payload must be bytes-like")
     if len(payload) > MAX_PAYLOAD:
@@ -99,8 +79,6 @@ _DEC_DONE = 8
 
 @dataclass
 class Decoder:
-    """Streaming frame decoder. Mirrors esp_foc_link_decoder_t state."""
-
     state: int = _DEC_WAIT_SYNC
     channel: int = 0
     seq: int = 0
@@ -129,7 +107,6 @@ class Decoder:
         return crc
 
     def push(self, byte: int) -> Status:
-        """Feed one byte. Returns OK when a complete frame has been parsed."""
         if not 0 <= byte <= 0xFF:
             raise LinkError("byte must be 0..255")
         if self.state == _DEC_DONE:
@@ -183,8 +160,6 @@ class Decoder:
         return Status.BAD_SYNC
 
     def feed(self, data: bytes) -> Optional["Decoder"]:
-        """Convenience helper: feed many bytes, return self when a frame
-        completes, or None when more bytes are needed."""
         for b in data:
             st = self.push(b)
             if st == Status.OK:

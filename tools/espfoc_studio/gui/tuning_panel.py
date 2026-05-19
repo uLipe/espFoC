@@ -220,9 +220,8 @@ class TuningPanel(QWidget):
         self._cal_label.setStyleSheet("font-family: monospace; color: #9aa0a6;")
         align_layout.addWidget(self._cal_label)
         cal_btns = QHBoxLayout()
-        for label, slot in (("Save to NVS", self._on_persist),
-                            ("Load NVS",    self._on_load),
-                            ("Erase",       self._on_erase)):
+        for label, slot in (("Store NVS", self._on_persist),
+                            ("Erase",     self._on_erase)):
             b = QPushButton(label)
             b.clicked.connect(slot)
             cal_btns.addWidget(b)
@@ -327,9 +326,9 @@ class TuningPanel(QWidget):
     def _on_override_toggled(self, checked: bool) -> None:
         try:
             if checked:
-                self._client.override_on()
+                self._client.run_axis()
             else:
-                self._client.override_off()
+                self._client.stop_axis()
         except TunerError as e:
             self._status.setText(str(e))
             self._override_box.blockSignals(True)
@@ -398,19 +397,11 @@ class TuningPanel(QWidget):
 
     def _on_persist(self) -> None:
         try:
-            self._client.persist_calibration()
+            self._client.store_calibration()
         except TunerError as e:
             self._status.setText(str(e))
             return
         self._status.setText("")
-        self.poll_refresh_requested.emit(True)
-
-    def _on_load(self) -> None:
-        try:
-            self._client.load_calibration()
-        except TunerError as e:
-            self._status.setText(str(e))
-            return
         self.poll_refresh_requested.emit(True)
 
     def _on_erase(self) -> None:
@@ -489,14 +480,7 @@ class TuningPanel(QWidget):
 
     @staticmethod
     def _badge_key_for_state(s: AxisStateFlag) -> str:
-        """Pick the dominant flag and map it to a badge palette key.
-        Order matters: an aligned axis with override active is shown
-        as OVERRIDE, not RUNNING — that is the most actionable state
-        for the operator. Bits checked top-down.
-        (ALIGNING is a GUI-only key set only during a host-triggered
-        align; it is not in this bitmask.)"""
-        if s & AxisStateFlag.TUNER_OVERRIDE:
-            return "OVERRIDE"
+        """Pick the dominant flag and map it to a badge palette key."""
         if s & AxisStateFlag.RUNNING:
             return "RUNNING"
         if s & AxisStateFlag.ALIGNED:

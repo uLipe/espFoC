@@ -36,20 +36,11 @@ typedef struct {
     int motor_unit;
 } esp_foc_motor_control_settings_t;
 
-#if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
-typedef struct {
-    bool active;
-    q16_t target_id;
-    q16_t target_iq;
-} esp_foc_tuner_override_t;
-#endif
-
 struct esp_foc_axis_s {
 #if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
     /* Validates this struct came from esp_foc_initialize_axis() before any
      * tuner-driven mutation. Defends against stale or wild axis pointers. */
     uint32_t magic;
-    esp_foc_tuner_override_t tuner_override;
 #endif
 
     q16_t i_u;

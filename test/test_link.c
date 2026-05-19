@@ -50,7 +50,7 @@ TEST_CASE("link: encode/decode round-trip on tiny payload",
 TEST_CASE("link: encode/decode round-trip on empty payload",
           "[espFoC][link]")
 {
-    encode_decode_roundtrip(ESP_FOC_LINK_CH_LOG, 0x00, NULL, 0);
+    encode_decode_roundtrip(ESP_FOC_LINK_CH_HEARTBEAT, 0x00, NULL, 0);
 }
 
 TEST_CASE("link: encode/decode round-trip on max payload",

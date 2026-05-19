@@ -14,6 +14,7 @@
 #include "tinyusb_cdc_acm.h"
 #include "espFoC/gui_link/esp_foc_link.h"
 #include "espFoC/gui_link/esp_foc_tuner.h"
+#include "espFoC/gui_link/esp_foc_link_session.h"
 #include "espFoC/drivers/gui_link/esp_foc_bridge_usbcdc.h"
 
 static const char *TAG = "ESPFOC_BRIDGE_USB";
@@ -58,6 +59,7 @@ void esp_foc_tuner_init_bus_callback(void)
 
     esp_foc_tuner_reactor_reset();
     s_bus_ready = true;
+    esp_foc_link_session_start();
     ESP_LOGI(TAG, "tuner USB-CDC bridge ready");
 }
 
@@ -101,6 +103,12 @@ void esp_foc_init_bus_callback(void)
 void esp_foc_send_buffer_callback(const uint8_t *buffer, int size)
 {
     if (buffer == NULL || size <= 0) {
+        return;
+    }
+    if (!esp_foc_link_session_scope_streaming()) {
+        return;
+    }
+    if (!esp_foc_link_try_acquire_tx_low_prio()) {
         return;
     }
     if ((size_t)size > ESP_FOC_LINK_MAX_PAYLOAD) {

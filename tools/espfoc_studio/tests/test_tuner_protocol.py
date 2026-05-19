@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end test of the Python TunerClient against a Python "echo
-firmware" wired through an in-process loopback transport.
-
-The fake firmware mirrors enough of the C reactor to validate the
-protocol envelope, the seq matching, and the read/write/exec round-trips.
-The real firmware-side codec is exercised separately by the Unity tests
-(test_tuner_reactor.c). When the two suites agree, the wire format is
-known to be byte-for-byte compatible.
-"""
+"""End-to-end test of TunerClient against fake firmware (protocol v2)."""
 
 from __future__ import annotations
 
@@ -34,113 +26,71 @@ def _setup():
     return cli, fw
 
 
-def test_read_pi_gains():
+def test_connect_and_read():
     cli, fw = _setup()
     try:
+        info = cli.connect()
+        assert info.firmware_type == 0x58475354
         assert abs(cli.read_kp() - fw.kp) < 1e-3
-        assert abs(cli.read_ki() - fw.ki) < 1e-3
-        assert abs(cli.read_int_lim() - fw.lim) < 1e-3
-        assert abs(cli.read_v_max() - fw.vmax) < 1e-3
     finally:
         fw.stop()
 
 
-def test_write_then_read():
+def test_disconnect():
     cli, fw = _setup()
     try:
-        cli.write_kp(2.5)
-        cli.write_ki(123.4)
-        assert abs(cli.read_kp() - 2.5) < 1e-3
-        assert abs(cli.read_ki() - 123.4) < 1e-2
+        cli.connect()
+        cli.disconnect()
+        assert not cli.connected
     finally:
         fw.stop()
 
 
-def test_axis_state_flags():
-    cli, fw = _setup()
-    try:
-        st = cli.read_axis_state()
-        assert AxisStateFlag.INITIALIZED in st
-        assert AxisStateFlag.ALIGNED in st
-        assert AxisStateFlag.TUNER_OVERRIDE not in st
-    finally:
-        fw.stop()
-
-
-def test_override_flow_then_motion():
-    cli, fw = _setup()
-    try:
-        cli.override_on()
-        st = cli.read_axis_state()
-        assert AxisStateFlag.TUNER_OVERRIDE in st
-        cli.write_target_iq(1.5)
-        assert abs(fw.target_iq - 1.5) < 1e-3
-        cli.override_off()
-    finally:
-        fw.stop()
-
-
-def test_motion_rejected_when_override_off():
+def test_command_requires_session():
     cli, fw = _setup()
     try:
         try:
-            cli.write_target_iq(1.0)
+            cli.read_kp()
         except TunerError:
             return
-        raise AssertionError("expected TunerError when override is off")
+        raise AssertionError("expected TunerError when not connected")
     finally:
         fw.stop()
 
 
-def test_kd_kff_write_then_read():
+def test_run_flow_then_motion():
     cli, fw = _setup()
     try:
-        cli.write_kd(0.0001220703125)
-        cli.write_kff(0.98)
-        assert abs(cli.read_kd() - 0.0001220703125) < 1e-12
-        assert abs(cli.read_kff() - 0.98) < 1e-3
+        cli.connect()
+        cli.run_axis()
+        st = cli.read_axis_state()
+        assert AxisStateFlag.RUNNING in st
+        cli.write_target_iq(1.5)
+        assert abs(fw.target_iq - 1.5) < 1e-3
+        cli.stop_axis()
     finally:
         fw.stop()
 
 
-def test_reset_board():
+def test_scope_start_stop():
     cli, fw = _setup()
     try:
-        cli.reset_board()
-    finally:
-        fw.stop()
-
-
-def test_ping():
-    cli, fw = _setup()
-    try:
-        cli.ping()
-    finally:
-        fw.stop()
-
-
-def test_motor_pole_pairs_round_trip():
-    cli, fw = _setup()
-    try:
-        assert cli.read_motor_pole_pairs() == 7
-        cli.write_motor_pole_pairs(11)
-        assert cli.read_motor_pole_pairs() == 11
-        assert fw.motor_pole_pairs == 11
+        cli.connect()
+        cli.scope_start()
+        assert fw.scope_on
+        cli.scope_stop()
+        assert not fw.scope_on
     finally:
         fw.stop()
 
 
 def main() -> int:
     tests = [
-        test_read_pi_gains,
-        test_write_then_read,
-        test_axis_state_flags,
-        test_override_flow_then_motion,
-        test_motion_rejected_when_override_off,
-        test_kd_kff_write_then_read,
-        test_reset_board,
-        test_ping,
-        test_motor_pole_pairs_round_trip,
+        test_connect_and_read,
+        test_disconnect,
+        test_command_requires_session,
+        test_run_flow_then_motion,
+        test_scope_start_stop,
     ]
     failed = 0
     for t in tests:

@@ -13,6 +13,7 @@
 #include "espFoC/osal/os_interface.h"
 #include "espFoC/gui_link/esp_foc_link.h"
 #include "espFoC/gui_link/esp_foc_tuner.h"
+#include "espFoC/gui_link/esp_foc_link_session.h"
 #include "espFoC/drivers/gui_link/esp_foc_bridge_uart.h"
 
 static const char *TAG = "ESPFOC_BRIDGE_UART";
@@ -66,6 +67,7 @@ void esp_foc_tuner_init_bus_callback(void)
         ESP_LOGE(TAG, "failed to spawn UART reader task");
     }
     s_bus_ready = true;
+    esp_foc_link_session_start();
     ESP_LOGI(TAG, "tuner UART bridge ready (UART%d, %d bps, TX=%d, RX=%d)",
              (int)UART_NUM, UART_BAUD, UART_TX_PIN, UART_RX_PIN);
 }
@@ -102,6 +104,12 @@ void esp_foc_init_bus_callback(void)
 void esp_foc_send_buffer_callback(const uint8_t *buffer, int size)
 {
     if (buffer == NULL || size <= 0) {
+        return;
+    }
+    if (!esp_foc_link_session_scope_streaming()) {
+        return;
+    }
+    if (!esp_foc_link_try_acquire_tx_low_prio()) {
         return;
     }
     if ((size_t)size > ESP_FOC_LINK_MAX_PAYLOAD) {

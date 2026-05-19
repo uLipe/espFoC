@@ -46,7 +46,7 @@ set(EXTRA_COMPONENT_DIRS "path/to/espFoC")
 Then pick an example as a starting point:
 
 ```bash
-cd examples/axis_simple
+cd examples/axis_tuning
 idf.py set-target esp32s3
 idf.py build flash monitor
 ```
@@ -86,8 +86,7 @@ single window you get:
 
 - live axis state and gain readout with in-place editing;
 - one-click rotor alignment with auto-detected natural direction;
-- save / load / erase calibration to NVS so the next boot comes up
-  already tuned;
+- align / run / stop lifecycle and store / erase calibration to NVS;
 - predicted step response, Bode, pole-zero and root-locus plots;
 - firmware scope stream with per-channel colour, toggle and cursor;
 - SVPWM hexagon with the three phase projections and the resultant
@@ -102,23 +101,24 @@ PYTHONPATH=tools python3 -m espfoc_studio.gui --port /dev/ttyACM0
 
 ### Talk to a real target
 
-Two paths:
+**`axis_tuning`** is the reference bring-up firmware: it boots, auto-loads
+NVS calibration when present, attaches the tuner, and waits for the host
+(`align` → `run` → tune → `store` → `stop`). It advertises `TSGX` for host
+identification.
 
-1. **`tuner_studio_target` (recommended for bring-up).** A dedicated
-   service-mode firmware that boots, parks the motor, and waits for
-   the GUI. Advertises `TSGX` as its firmware-type for host identification.
+```bash
+cd examples/axis_tuning
+idf.py set-target esp32s3    # UART bridge (see sdkconfig.defaults.esp32s3)
+idf.py menuconfig            # pin map + AS5600 vs rotor_sensor_simu
+idf.py build flash monitor
+```
 
-   ```bash
-   cd examples/tuner_studio_target
-   idf.py set-target esp32s3        # USB-CDC default
-   idf.py menuconfig                # adjust the pin map
-   idf.py build flash monitor
-   ```
+On ESP32-P4, `idf.py set-target esp32p4` picks USB-CDC via
+`sdkconfig.defaults.esp32p4`.
 
-2. **Your own firmware.** Enable a transport bridge in `menuconfig`
-   (`CONFIG_ESP_FOC_BRIDGE_UART` for plain ESP32,
-   `CONFIG_ESP_FOC_BRIDGE_USBCDC` for S2/S3/P4) and set
-   `CONFIG_ESP_FOC_TUNER_ENABLE=y`.
+For your own firmware, enable a transport bridge in `menuconfig`
+(`CONFIG_ESP_FOC_BRIDGE_UART` or `CONFIG_ESP_FOC_BRIDGE_USBCDC`) and set
+`CONFIG_ESP_FOC_TUNER_ENABLE=y`.
 
 Then:
 
@@ -128,24 +128,22 @@ PYTHONPATH=tools python3 -m espfoc_studio.gui --port /dev/ttyACM0
 
 ### Scripted tuning
 
-A companion CLI (`tunerctl`) lets you drive the same protocol from
-scripts and CI jobs. Build-time autotuning from motor profiles, the
-runtime C API, the wire-level protocol and the CLI commands are
-covered in [`doc/TUNING.md`](doc/TUNING.md).
+A companion CLI (`tunerctl`) drives align, run, stop, gain writes,
+target id/iq, store, and erase from scripts. Details in
+[`doc/TUNING.md`](doc/TUNING.md).
 
 ---
 
 ## Minimal example
 
 Encoder-based current mode with a 6-PWM MCPWM inverter, an AS5600 encoder
-and an ADC shunt. PI gains come from the build-time autotuner for the
-motor profile selected via `CONFIG_ESP_FOC_MOTOR_PROFILE`; the runtime
-tuner / TunerStudio can rewrite them later.
+and an ADC shunt. PI gains default to bypass at init; NVS or the runtime
+tuner can supply tuned values.
 
 The snippet below is **illustrative** (placeholders for pins and ADC
 config will not compile until you fill them in). For a **complete,
 buildable** wiring and init sequence, use
-[`examples/axis_simple/main/axis_simple.c`](examples/axis_simple/main/axis_simple.c).
+[`examples/axis_tuning/main/main.c`](examples/axis_tuning/main/main.c).
 
 ```c
 #include "esp_log.h"
@@ -192,11 +190,8 @@ averages (same *Control loop* menu as downsampling).
 
 ## Examples
 
-- `examples/axis_simple` — reference bring-up (encoder + current-mode FOC).
-- `examples/tuner_studio_target` — service-mode firmware for live tuning
-  with TunerStudio (`--port`).
-- `examples/tuner_demo` — runs in QEMU, exercises autogen gains,
-  runtime retune and the tuner protocol.
+- `examples/axis_tuning` — reference firmware for live tuning (tuner +
+  scope + NVS; AS5600 or `rotor_sensor_simu`).
 - `examples/unit_test_runner` — Unity suite for CI / QEMU.
 - `examples/test_drivers` — inverter / encoder / shunt bring-up.
 
@@ -219,11 +214,9 @@ espFoC/
 ├── doc/
 │   ├── images/         # architecture, TunerStudio screenshot, demo gif
 │   └── TUNING.md       # deep dive: autogen, runtime API, protocol, CLI
-├── examples/           # axis_simple / tuner_studio_target /
-│                       # tuner_demo / unit_test_runner / ...
+├── examples/           # axis_tuning / unit_test_runner / test_drivers
 ├── include/espFoC/     # public API
 ├── scripts/
-│   ├── gen_pi_gains.py # build-time MPZ autotuner
 │   └── motors/*.json   # motor profiles consumed by the autotuner
 ├── source/
 │   ├── calibration/    # NVS calibration format and axis helpers

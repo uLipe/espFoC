@@ -5,9 +5,9 @@
  */
 
 #include <string.h>
-#include <stdio.h>
 #include "esp_system.h"
 #include "espFoC/gui_link/esp_foc_tuner.h"
+#include "espFoC/gui_link/esp_foc_link_session.h"
 #include "espFoC/esp_foc.h"
 #include "espFoC/gui_link/esp_foc_link.h"
 #include "espFoC/calibration/esp_foc_calibration.h"
@@ -55,9 +55,6 @@ static uint8_t compute_axis_state(const esp_foc_axis_t *axis)
     if (axis->state == ESP_FOC_AXIS_STATE_RUNNING) {
         s |= ESP_FOC_AXIS_STATE_RUNNING;
     }
-    if (axis->tuner_override.active) {
-        s |= ESP_FOC_AXIS_STATE_TUNER_OVERRIDE;
-    }
     return s;
 }
 
@@ -80,8 +77,6 @@ static q16_t read_q16(const void *src)
                  ((uint32_t)b[3] << 24);
     return (q16_t)u;
 }
-
-static void tuner_log(const char *msg);
 
 static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
                                  esp_foc_tuner_id_t id,
@@ -183,12 +178,6 @@ static esp_foc_err_t handle_write(esp_foc_axis_t *axis,
         }
         axis->motor_pole_pairs = (int)pp;
         esp_foc_axis_refresh_encoder_q16_scales(axis);
-        {
-            char msg[56];
-            (void)snprintf(msg, sizeof(msg),
-                "motor: pole pairs = %d", (int)axis->motor_pole_pairs);
-            tuner_log(msg);
-        }
         return ESP_FOC_OK;
     }
     q16_t v = read_q16(payload);
@@ -221,49 +210,25 @@ static esp_foc_err_t handle_write(esp_foc_axis_t *axis,
         axis->isensor_driver->set_filter_cutoff(axis->isensor_driver,
                                                 fc_hz, fs_hz);
         axis->current_filter_fc_hz_q16 = v;
-        char msg[48];
-        snprintf(msg, sizeof(msg), "current filter: fc = %.1f Hz", (double)fc_hz);
-        tuner_log(msg);
         return ESP_FOC_OK;
     }
 
     if (id == ESP_FOC_TUNER_WRITE_TARGET_ID_Q16 ||
         id == ESP_FOC_TUNER_WRITE_TARGET_IQ_Q16) {
-        if (!axis->tuner_override.active) {
+        if (axis->state != ESP_FOC_AXIS_STATE_RUNNING) {
             return ESP_FOC_ERR_AXIS_INVALID_STATE;
         }
         esp_foc_critical_enter();
         if (id == ESP_FOC_TUNER_WRITE_TARGET_ID_Q16) {
-            axis->tuner_override.target_id = v;
+            axis->target_i_d.raw = v;
         } else {
-            axis->tuner_override.target_iq = v;
+            axis->target_i_q.raw = v;
         }
         esp_foc_critical_leave();
         return ESP_FOC_OK;
     }
 
     return ESP_FOC_ERR_INVALID_ARG;
-}
-
-static void tuner_log(const char *msg)
-{
-    if (msg == NULL) {
-        return;
-    }
-    size_t len = strlen(msg);
-    if (len == 0) {
-        return;
-    }
-    if (len > ESP_FOC_LINK_MAX_PAYLOAD) {
-        len = ESP_FOC_LINK_MAX_PAYLOAD;
-    }
-    uint8_t frame[ESP_FOC_LINK_MAX_FRAME];
-    size_t flen = 0;
-    if (esp_foc_link_encode(ESP_FOC_LINK_CH_LOG, 0,
-                            (const uint8_t *)msg, len,
-                            frame, sizeof(frame), &flen) == ESP_FOC_LINK_OK) {
-        esp_foc_tuner_send_callback(frame, flen);
-    }
 }
 
 static void board_reset_task(void *arg)
@@ -273,111 +238,124 @@ static void board_reset_task(void *arg)
     esp_restart();
 }
 
+static esp_foc_err_t handle_exec_session(esp_foc_tuner_id_t id,
+                                         const void *payload,
+                                         size_t payload_len,
+                                         void *response,
+                                         size_t *response_len)
+{
+    if (id == ESP_FOC_TUNER_CMD_CONNECT) {
+        if (payload == NULL || payload_len < 3) {
+            return ESP_FOC_ERR_INVALID_ARG;
+        }
+        const uint8_t *p = (const uint8_t *)payload;
+        if (p[0] != ESP_FOC_LINK_PROTO_VER) {
+            return ESP_FOC_ERR_INVALID_ARG;
+        }
+        (void)(p[1] | ((uint16_t)p[2] << 8));
+        esp_foc_link_session_on_connect();
+        if (response == NULL || response_len == NULL || *response_len < 10) {
+            return ESP_FOC_ERR_INVALID_ARG;
+        }
+        uint8_t *b = (uint8_t *)response;
+        b[0] = ESP_FOC_LINK_PROTO_VER;
+        uint32_t ft = esp_foc_tuner_firmware_type();
+        b[1] = (uint8_t)(ft & 0xFFu);
+        b[2] = (uint8_t)((ft >> 8) & 0xFFu);
+        b[3] = (uint8_t)((ft >> 16) & 0xFFu);
+        b[4] = (uint8_t)((ft >> 24) & 0xFFu);
+        b[5] = 1u;
+#if defined(CONFIG_ESP_FOC_SCOPE)
+        b[6] = (uint8_t)CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS;
+#else
+        b[6] = 0u;
+#endif
+        b[7] = (uint8_t)(ESP_FOC_LINK_HEARTBEAT_PERIOD_MS & 0xFFu);
+        b[8] = (uint8_t)((ESP_FOC_LINK_HEARTBEAT_PERIOD_MS >> 8) & 0xFFu);
+        *response_len = 9;
+        return ESP_FOC_OK;
+    }
+    if (id == ESP_FOC_TUNER_CMD_DISCONNECT) {
+        esp_foc_link_session_on_disconnect();
+        if (response_len != NULL) {
+            *response_len = 0;
+        }
+        return ESP_FOC_OK;
+    }
+    if (id == ESP_FOC_TUNER_CMD_SCOPE_START) {
+#if defined(CONFIG_ESP_FOC_SCOPE)
+        esp_foc_link_session_on_scope_start();
+        if (response_len != NULL) {
+            *response_len = 0;
+        }
+        return ESP_FOC_OK;
+#else
+        return ESP_FOC_ERR_INVALID_ARG;
+#endif
+    }
+    if (id == ESP_FOC_TUNER_CMD_SCOPE_STOP) {
+        esp_foc_link_session_on_scope_stop();
+        if (response_len != NULL) {
+            *response_len = 0;
+        }
+        return ESP_FOC_OK;
+    }
+    return ESP_FOC_ERR_INVALID_ARG;
+}
+
 static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
                                  esp_foc_tuner_id_t id,
-                                 const void *payload, size_t payload_len)
+                                 const void *payload, size_t payload_len,
+                                 void *response, size_t *response_len)
 {
     (void)payload;
     (void)payload_len;
 
-    if (id == ESP_FOC_TUNER_CMD_OVERRIDE_ON) {
-        if (axis->state != ESP_FOC_AXIS_STATE_ALIGNED &&
-            axis->state != ESP_FOC_AXIS_STATE_RUNNING) {
-            return ESP_FOC_ERR_NOT_ALIGNED;
-        }
-        esp_foc_critical_enter();
-        axis->tuner_override.target_id = 0;
-        axis->tuner_override.target_iq = 0;
-        axis->tuner_override.active = true;
-        esp_foc_critical_leave();
-        return ESP_FOC_OK;
-    }
-
-    if (id == ESP_FOC_TUNER_CMD_OVERRIDE_OFF) {
-#if defined(CONFIG_ESP_FOC_TUNER_ALWAYS_OVERRIDE_VOLTAGE_MODE)
-        (void)axis;
-        return ESP_FOC_OK;
-#else
-        esp_foc_critical_enter();
-        axis->tuner_override.active = false;
-        esp_foc_critical_leave();
-        return ESP_FOC_OK;
-#endif
+    if (id == ESP_FOC_TUNER_CMD_CONNECT ||
+        id == ESP_FOC_TUNER_CMD_DISCONNECT ||
+        id == ESP_FOC_TUNER_CMD_SCOPE_START ||
+        id == ESP_FOC_TUNER_CMD_SCOPE_STOP) {
+        return handle_exec_session(id, payload, payload_len,
+                                   response, response_len);
     }
 
     if (id == ESP_FOC_TUNER_CMD_STOP_AXIS) {
-        esp_foc_err_t err = esp_foc_stop(axis);
-        tuner_log(err == ESP_FOC_OK ? "axis: stopped" : "axis: stop refused");
-        return err;
+        return esp_foc_stop(axis);
     }
 
     if (id == ESP_FOC_TUNER_CMD_ALIGN_AXIS) {
-        tuner_log("alignment: started");
-        esp_foc_err_t err = esp_foc_align_axis(axis);
-        if (err == ESP_FOC_OK) {
-            tuner_log(axis->natural_direction == Q16_ONE
-                      ? "alignment: complete (direction = CW)"
-                      : "alignment: complete (direction = CCW)");
-#if defined(CONFIG_ESP_FOC_TUNER_ALWAYS_OVERRIDE_VOLTAGE_MODE)
-            esp_foc_critical_enter();
-            axis->tuner_override.target_id = 0;
-            axis->tuner_override.target_iq = 0;
-            axis->tuner_override.active = true;
-            esp_foc_critical_leave();
-#endif
-        } else {
-            tuner_log("alignment: failed");
-        }
-        return err;
+        return esp_foc_align_axis(axis);
     }
 
-    if (id == ESP_FOC_TUNER_CMD_PERSIST_NVS) {
-        esp_foc_err_t err = esp_foc_calibration_axis_tuner_persist(axis);
-        if (err == ESP_FOC_OK) {
-            char msg[72];
-            (void)snprintf(
-                msg, sizeof(msg),
-                "calibration: saved to NVS (pole pairs=%d)",
-                axis->motor_pole_pairs);
-            tuner_log(msg);
-        } else {
-            tuner_log("calibration: save failed");
+    if (id == ESP_FOC_TUNER_CMD_RUN_AXIS) {
+        if (axis->state != ESP_FOC_AXIS_STATE_ALIGNED) {
+            return ESP_FOC_ERR_NOT_ALIGNED;
         }
-        return err;
+        return esp_foc_run(axis);
     }
 
-    if (id == ESP_FOC_TUNER_CMD_LOAD_NVS) {
-        esp_foc_err_t err = esp_foc_calibration_axis_tuner_load_apply(axis);
-        if (err != ESP_FOC_OK) {
-            tuner_log("calibration: nothing to load");
-            return err;
-        }
-        char tmsg[80];
-        (void)snprintf(
-            tmsg, sizeof(tmsg),
-            "calibration: NVS applied (pole pairs=%d)",
-            axis->motor_pole_pairs);
-        tuner_log(tmsg);
-        return err;
+    if (id == ESP_FOC_TUNER_CMD_STORE_NVS) {
+        return esp_foc_calibration_axis_tuner_store(axis);
     }
 
     if (id == ESP_FOC_TUNER_CMD_ERASE_NVS) {
+        if (axis->state == ESP_FOC_AXIS_STATE_RUNNING ||
+            axis->state == ESP_FOC_AXIS_STATE_ALIGNED) {
+            (void)esp_foc_stop(axis);
+        }
+        esp_foc_critical_enter();
+        axis->target_i_d.raw = 0;
+        axis->target_i_q.raw = 0;
+        esp_foc_critical_leave();
+        esp_foc_axis_apply_bypass_current_loop_gains(axis);
         esp_foc_err_t err = esp_foc_calibration_erase();
         if (err == ESP_FOC_OK) {
             esp_foc_calibration_axis_tuner_clear_cache(axis);
         }
-        tuner_log(err == ESP_FOC_OK
-                  ? "calibration: NVS namespace erased"
-                  : "calibration: erase failed");
         return err;
     }
 
-    if (id == ESP_FOC_TUNER_CMD_PING) {
-        return ESP_FOC_OK;
-    }
-
     if (id == ESP_FOC_TUNER_CMD_RESET_BOARD) {
-        tuner_log("board: host requested reset (rebooting)");
         if (esp_foc_task_spawn(board_reset_task, NULL, 3072, 1, NULL) != 0) {
             esp_restart();
         }
@@ -396,6 +374,15 @@ esp_foc_err_t esp_foc_tuner_handle_request(
     void *response,
     size_t *response_len)
 {
+    if (op == ESP_FOC_TUNER_OP_EXEC &&
+        (id == ESP_FOC_TUNER_CMD_CONNECT ||
+         id == ESP_FOC_TUNER_CMD_DISCONNECT ||
+         id == ESP_FOC_TUNER_CMD_SCOPE_START ||
+         id == ESP_FOC_TUNER_CMD_SCOPE_STOP)) {
+        return handle_exec_session(id, payload, payload_len,
+                                 response, response_len);
+    }
+
     esp_foc_axis_t *axis = get_axis(axis_id);
     if (axis == NULL) {
         return ESP_FOC_ERR_INVALID_ARG;
@@ -416,19 +403,11 @@ esp_foc_err_t esp_foc_tuner_handle_request(
     case ESP_FOC_TUNER_OP_WRITE:
         return handle_write(axis, id, payload, payload_len);
     case ESP_FOC_TUNER_OP_EXEC:
-        return handle_exec(axis, id, payload, payload_len);
+        return handle_exec(axis, id, payload, payload_len,
+                           response, response_len);
     default:
         return ESP_FOC_ERR_INVALID_ARG;
     }
-}
-
-static esp_foc_link_decoder_t s_dec;
-static bool s_dec_initialized = false;
-
-void esp_foc_tuner_reactor_reset(void)
-{
-    esp_foc_link_decoder_reset(&s_dec);
-    s_dec_initialized = true;
 }
 
 static void send_response_frame(uint8_t seq,
@@ -437,6 +416,9 @@ static void send_response_frame(uint8_t seq,
                                 size_t resp_len)
 {
     uint8_t app[2 + ESP_FOC_LINK_MAX_PAYLOAD];
+    uint8_t frame[ESP_FOC_LINK_MAX_FRAME];
+    size_t frame_len = 0;
+
     if (resp_len > sizeof(app) - 2) {
         resp_len = sizeof(app) - 2;
     }
@@ -445,56 +427,57 @@ static void send_response_frame(uint8_t seq,
     if (resp_len > 0 && resp_payload != NULL) {
         memcpy(&app[2], resp_payload, resp_len);
     }
-
-    uint8_t frame[ESP_FOC_LINK_MAX_FRAME];
-    size_t frame_len = 0;
     if (esp_foc_link_encode(ESP_FOC_LINK_CH_TUNER, seq, app, 2 + resp_len,
-                            frame, sizeof(frame), &frame_len) != ESP_FOC_LINK_OK) {
-        return;
+                            frame, sizeof(frame), &frame_len) == ESP_FOC_LINK_OK) {
+        esp_foc_tuner_send_callback(frame, frame_len);
     }
-    esp_foc_tuner_send_callback(frame, frame_len);
 }
 
-static void dispatch_frame(uint8_t seq,
-                           const uint8_t *payload,
-                           size_t payload_len)
+void esp_foc_tuner_dispatch_link_frame(uint8_t seq,
+                                       const uint8_t *payload,
+                                       size_t payload_len)
 {
+    bool silent = false;
+    esp_foc_tuner_op_t op;
+    esp_foc_tuner_id_t id;
+
     if (payload_len < 4) {
         send_response_frame(seq, (int8_t)ESP_FOC_ERR_INVALID_ARG, NULL, 0);
         return;
     }
-    esp_foc_tuner_op_t op = (esp_foc_tuner_op_t)payload[0];
-    esp_foc_tuner_id_t id = (esp_foc_tuner_id_t)(payload[1] | ((uint16_t)payload[2] << 8));
-    uint8_t axis_id = payload[3];
-    const uint8_t *cmd_payload = payload + 4;
-    size_t cmd_len = payload_len - 4;
+    op = (esp_foc_tuner_op_t)payload[0];
+    id = (esp_foc_tuner_id_t)(payload[1] | ((uint16_t)payload[2] << 8));
 
-    uint8_t resp_buf[8];
-    size_t  resp_len = sizeof(resp_buf);
-    esp_foc_err_t err = esp_foc_tuner_handle_request(axis_id, op, id,
-                                                     cmd_payload, cmd_len,
-                                                     resp_buf, &resp_len);
-    if (err != ESP_FOC_OK) {
-        resp_len = 0;
+    if (!esp_foc_link_session_tuner_may_dispatch(op, id, &silent)) {
+        if (!silent) {
+            send_response_frame(seq, (int8_t)ESP_FOC_ERR_INVALID_ARG, NULL, 0);
+        }
+        return;
     }
-    send_response_frame(seq, (int8_t)err, resp_buf, resp_len);
+
+    {
+        uint8_t axis_id = payload[3];
+        const uint8_t *cmd_payload = payload + 4;
+        size_t cmd_len = payload_len - 4;
+        uint8_t resp_buf[16];
+        size_t resp_len = sizeof(resp_buf);
+        esp_foc_err_t err = esp_foc_tuner_handle_request(
+            axis_id, op, id, cmd_payload, cmd_len, resp_buf, &resp_len);
+        if (err != ESP_FOC_OK) {
+            resp_len = 0;
+        }
+        send_response_frame(seq, (int8_t)err, resp_buf, resp_len);
+    }
 }
 
 void esp_foc_tuner_process_byte(uint8_t byte)
 {
-    if (!s_dec_initialized) {
-        esp_foc_tuner_reactor_reset();
-    }
-    esp_foc_link_status_t st = esp_foc_link_decoder_push(&s_dec, byte);
-    if (st != ESP_FOC_LINK_OK) {
-        return;
-    }
-    if (esp_foc_link_decoder_channel(&s_dec) == ESP_FOC_LINK_CH_TUNER) {
-        dispatch_frame(esp_foc_link_decoder_seq(&s_dec),
-                       esp_foc_link_decoder_payload(&s_dec),
-                       esp_foc_link_decoder_payload_len(&s_dec));
-    }
-    esp_foc_link_decoder_reset(&s_dec);
+    esp_foc_link_process_byte(byte);
+}
+
+void esp_foc_tuner_reactor_reset(void)
+{
+    esp_foc_link_reactor_reset();
 }
 
 __attribute__((weak)) void esp_foc_tuner_init_bus_callback(void)

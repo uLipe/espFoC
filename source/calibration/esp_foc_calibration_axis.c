@@ -220,66 +220,49 @@ void esp_foc_calibration_axis_align_persist_snapshot(esp_foc_axis_t *axis)
     }
 }
 
-esp_foc_err_t esp_foc_calibration_axis_tuner_persist(esp_foc_axis_t *axis)
+static bool tuner_tuning_fields_equal(const esp_foc_calibration_data_t *a,
+                                      const esp_foc_calibration_data_t *b)
 {
+    return a->kp == b->kp && a->ki == b->ki && a->kd == b->kd &&
+           a->kff == b->kff && a->integrator_limit == b->integrator_limit &&
+           a->current_filter_fc_hz == b->current_filter_fc_hz &&
+           esp_foc_calibration_get_pole_pairs(a) ==
+           esp_foc_calibration_get_pole_pairs(b);
+}
+
+static void tuner_live_tuning_snapshot(esp_foc_axis_t *axis,
+                                       esp_foc_calibration_data_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    esp_foc_axis_get_current_loop_gains_q16(
+        axis, &out->kp, &out->ki, &out->kd, &out->kff, &out->integrator_limit);
+    out->current_filter_fc_hz = axis->current_filter_fc_hz_q16;
+    esp_foc_calibration_pack_pole_pairs(
+        out, (int32_t)axis->motor_pole_pairs);
+}
+
+esp_foc_err_t esp_foc_calibration_axis_tuner_store(esp_foc_axis_t *axis)
+{
+    esp_foc_calibration_data_t live;
+    tuner_live_tuning_snapshot(axis, &live);
+
     esp_foc_calibration_data_t data;
-    if (esp_foc_calibration_load(axis->cal.axis_id, &data) != ESP_FOC_OK) {
+    if (esp_foc_calibration_load(axis->cal.axis_id, &data) == ESP_FOC_OK) {
+        if (tuner_tuning_fields_equal(&live, &data)) {
+            return ESP_FOC_OK;
+        }
+    } else {
         memset(&data, 0, sizeof(data));
     }
-    esp_foc_axis_get_current_loop_gains_q16(axis, &data.kp, &data.ki, &data.kd,
-                                            &data.kff, &data.integrator_limit);
-    data.current_filter_fc_hz = axis->current_filter_fc_hz_q16;
+    data.kp = live.kp;
+    data.ki = live.ki;
+    data.kd = live.kd;
+    data.kff = live.kff;
+    data.integrator_limit = live.integrator_limit;
+    data.current_filter_fc_hz = live.current_filter_fc_hz;
     esp_foc_calibration_pack_pole_pairs(
         &data, (int32_t)axis->motor_pole_pairs);
     return esp_foc_calibration_save(axis->cal.axis_id, &data);
-}
-
-esp_foc_err_t esp_foc_calibration_axis_tuner_load_apply(esp_foc_axis_t *axis)
-{
-    esp_foc_calibration_data_t data;
-    esp_foc_err_t err = esp_foc_calibration_load(axis->cal.axis_id, &data);
-    if (err != ESP_FOC_OK) {
-        return err;
-    }
-    err = esp_foc_axis_set_current_loop_gains_q16(
-        axis, data.kp, data.ki, data.kd, data.kff, data.integrator_limit);
-    if (err == ESP_FOC_OK && data.current_filter_fc_hz > 0 &&
-        axis->isensor_driver != NULL &&
-        axis->isensor_driver->set_filter_cutoff != NULL) {
-        float fc = q16_to_float(data.current_filter_fc_hz);
-        float fs = q16_to_float(axis->current_filter_fs_hz_q16);
-        axis->isensor_driver->set_filter_cutoff(axis->isensor_driver,
-                                                fc, fs);
-        axis->current_filter_fc_hz_q16 = data.current_filter_fc_hz;
-    }
-    if (err == ESP_FOC_OK) {
-        {
-            int32_t ppn = esp_foc_calibration_get_pole_pairs(&data);
-            if (ppn >= 1 && ppn <= 64) {
-                axis->motor_pole_pairs = (int)ppn;
-                esp_foc_axis_refresh_encoder_q16_scales(axis);
-            }
-        }
-        {
-            uint8_t af;
-            uint16_t eraw;
-            q16_t nstore;
-            esp_foc_calibration_get_align(&data, &af, &eraw, &nstore);
-            const char *cw = (nstore == Q16_ONE)   ? "CW" :
-                (nstore == Q16_MINUS_ONE)         ? "CCW" : "?";
-            ESP_LOGD(
-                TAG,
-                "LOAD axis %u: pp=%d Kff=%.4f align off=%d enc=%u dir=%d %s",
-                (unsigned)axis->cal.axis_id,
-                axis->motor_pole_pairs,
-                (double)q16_to_float(data.kff),
-                (int)((af & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) ? 1 : 0),
-                (unsigned)eraw,
-                (int)((af & ESP_FOC_CAL_ALIGN_FLAG_DIR) ? 1 : 0),
-                (af & ESP_FOC_CAL_ALIGN_FLAG_DIR) ? cw : "—");
-        }
-    }
-    return err;
 }
 
 #else /* !CONFIG_ESP_FOC_CALIBRATION_NVS */
@@ -299,13 +282,7 @@ void esp_foc_calibration_axis_align_persist_snapshot(esp_foc_axis_t *axis)
     (void)axis;
 }
 
-esp_foc_err_t esp_foc_calibration_axis_tuner_persist(esp_foc_axis_t *axis)
-{
-    (void)axis;
-    return ESP_FOC_ERR_AXIS_INVALID_STATE;
-}
-
-esp_foc_err_t esp_foc_calibration_axis_tuner_load_apply(esp_foc_axis_t *axis)
+esp_foc_err_t esp_foc_calibration_axis_tuner_store(esp_foc_axis_t *axis)
 {
     (void)axis;
     return ESP_FOC_ERR_AXIS_INVALID_STATE;

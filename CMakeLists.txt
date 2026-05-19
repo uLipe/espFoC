@@ -35,7 +35,8 @@ list(APPEND srcs    "source/drivers/inverter_3pwm_mcpwm.c"
                     "source/osal/os_interface_idf.c")
 
 if(CONFIG_ESP_FOC_TUNER_ENABLE)
-    list(APPEND srcs "source/gui_link/esp_foc_tuner.c")
+    list(APPEND srcs "source/gui_link/esp_foc_tuner.c"
+                     "source/gui_link/esp_foc_link_session.c")
 endif()
 if(CONFIG_ESP_FOC_BRIDGE_UART)
     list(APPEND srcs "source/drivers/gui_link/esp_foc_bridge_uart.c")

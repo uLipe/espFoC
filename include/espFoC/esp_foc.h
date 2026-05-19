@@ -30,6 +30,9 @@ esp_foc_err_t esp_foc_stop(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_set_regulation_callback(esp_foc_axis_t *axis,
                                               esp_foc_motor_regulation_callback_t callback);
 
+/** Reset both current-loop PIDs to bypass (Kp=Ki=Kd=0, Kff=1). */
+void esp_foc_axis_apply_bypass_current_loop_gains(esp_foc_axis_t *axis);
+
 esp_foc_err_t esp_foc_axis_set_current_loop_gains_q16(
     esp_foc_axis_t *axis,
     q16_t kp,

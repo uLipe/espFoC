@@ -2,6 +2,10 @@
 
 from .tuner import (
     AxisStateFlag,
+    ConnectInfo,
+    HB_MSG_ACK,
+    HB_MSG_FW,
+    LINK_PROTO_VER,
     Op,
     ParamId,
     TunerError,
@@ -10,6 +14,10 @@ from .tuner import (
 
 __all__ = [
     "AxisStateFlag",
+    "ConnectInfo",
+    "HB_MSG_ACK",
+    "HB_MSG_FW",
+    "LINK_PROTO_VER",
     "Op",
     "ParamId",
     "TunerError",

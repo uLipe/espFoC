@@ -69,17 +69,20 @@ class ParamId(IntEnum):
     WRITE_KFF       = 0x0026
     WRITE_TARGET_ID = 0x0060
     WRITE_TARGET_IQ = 0x0061
-    CMD_OVERRIDE_ON     = 0x00A0
-    CMD_OVERRIDE_OFF    = 0x00A1
+    CMD_CONNECT         = 0x00A0
+    CMD_DISCONNECT      = 0x00A1
     CMD_ALIGN_AXIS      = 0x00A2
     CMD_STOP_AXIS       = 0x00A3
-    CMD_PERSIST_NVS     = 0x00B0
-    CMD_LOAD_NVS        = 0x00B1
+    CMD_RUN_AXIS        = 0x00A4
+    CMD_STORE_NVS       = 0x00B0
     CMD_ERASE_NVS       = 0x00B2
     CMD_RESET_BOARD     = 0x00B3
-    CMD_PING            = 0x00B4
+    CMD_SCOPE_START     = 0x00C0
+    CMD_SCOPE_STOP      = 0x00C1
 
-# 'TSGX' little-endian sentinel returned by tuner_studio_target.
+LINK_PROTO_VER = 2
+HB_MSG_FW = 0x01
+HB_MSG_ACK = 0x02
 TUNER_FIRMWARE_TYPE_TSGX = 0x58475354
 
 
@@ -87,7 +90,7 @@ class AxisStateFlag(IntFlag):
     INITIALIZED    = 1 << 0
     ALIGNED        = 1 << 1
     RUNNING        = 1 << 2
-    TUNER_OVERRIDE = 1 << 3
+    ALIGNING       = 1 << 4
 
 
 # Mirror of esp_foc_err_t. Negative values indicate failure.
@@ -128,6 +131,14 @@ class TunerResponse:
     payload: bytes
 
 
+@dataclass
+class ConnectInfo:
+    firmware_type: int
+    num_axes: int
+    scope_channels: int
+    heartbeat_period_ms: int
+
+
 def q16_from_float(x: float) -> int:
     v = round(x * 65536.0)
     if v > 0x7FFFFFFF:
@@ -164,6 +175,10 @@ class TunerClient:
                  axis: int = 0) -> None:
         self._axis = axis
         self._seq = 0
+        self._connected = False
+        self._connect_info: Optional[ConnectInfo] = None
+        self._hb_state = 0
+        self._hb_last_err = 0
         self._bus_lock = threading.Lock()
         if isinstance(transport_or_reader, LinkReader):
             self._reader = transport_or_reader
@@ -172,6 +187,8 @@ class TunerClient:
             self._reader = LinkReader(transport_or_reader)
             self._reader.start()
             self._owns_reader = True
+        self._reader.register_heartbeat_callback(self._on_heartbeat)
+        self._reader.register_link_lost_callback(self._on_link_lost)
 
     @property
     def reader(self) -> LinkReader:
@@ -186,8 +203,40 @@ class TunerClient:
             raise ValueError("replace_reader: reader is None")
         self._reader = new_reader
         self._seq = 0
+        self._connected = False
+        self._reader.register_heartbeat_callback(self._on_heartbeat)
+        self._reader.register_link_lost_callback(self._on_link_lost)
+
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
+    @property
+    def connect_info(self) -> Optional[ConnectInfo]:
+        return self._connect_info
+
+    @property
+    def heartbeat_state(self) -> int:
+        return self._hb_state
+
+    @property
+    def heartbeat_last_err(self) -> int:
+        return self._hb_last_err
+
+    def _on_heartbeat(self, _counter: int, state: int, last_err: int) -> None:
+        self._hb_state = state
+        self._hb_last_err = last_err
+
+    def _on_link_lost(self) -> None:
+        self._connected = False
+        self._reader.set_heartbeat_watch(False)
 
     def close(self) -> None:
+        if self._connected:
+            try:
+                self.disconnect()
+            except TunerError:
+                pass
         if self._owns_reader:
             self._reader.stop()
 
@@ -197,7 +246,10 @@ class TunerClient:
 
     def _round_trip(self, op: Op, id_: ParamId,
                     cmd_payload: bytes = b"",
-                    timeout: Optional[float] = None) -> TunerResponse:
+                    timeout: Optional[float] = None,
+                    require_session: bool = True) -> TunerResponse:
+        if require_session and not self._connected:
+            raise TunerError("not connected — run connect first")
         with self._bus_lock:
             seq = self._next_seq()
             app = bytes([
@@ -247,10 +299,43 @@ class TunerClient:
                 f"write {id_.name}={value_float} failed: {_err_name(r.status)}")
 
     def _exec(self, id_: ParamId, payload: bytes = b"",
-              timeout: Optional[float] = None) -> None:
-        r = self._round_trip(Op.EXEC, id_, payload, timeout=timeout)
+              timeout: Optional[float] = None,
+              require_session: bool = True) -> TunerResponse:
+        r = self._round_trip(Op.EXEC, id_, payload, timeout=timeout,
+                             require_session=require_session)
         if r.status != ESP_FOC_OK:
             raise TunerError(f"exec {id_.name} failed: {_err_name(r.status)}")
+        return r
+
+    def connect(self) -> ConnectInfo:
+        payload = struct.pack("<BH", LINK_PROTO_VER, 0)
+        r = self._round_trip(
+            Op.EXEC, ParamId.CMD_CONNECT, payload, require_session=False)
+        if r.status != ESP_FOC_OK:
+            raise TunerError(f"connect failed: {_err_name(r.status)}")
+        if len(r.payload) < 9:
+            raise TunerError(f"connect_ack too short ({len(r.payload)} bytes)")
+        proto = r.payload[0]
+        if proto != LINK_PROTO_VER:
+            raise TunerError(f"unsupported proto_ver {proto}")
+        fw = struct.unpack("<I", r.payload[1:5])[0]
+        info = ConnectInfo(
+            firmware_type=fw,
+            num_axes=r.payload[5],
+            scope_channels=r.payload[6],
+            heartbeat_period_ms=struct.unpack("<H", r.payload[7:9])[0],
+        )
+        self._connect_info = info
+        self._connected = True
+        self._reader.set_heartbeat_watch(True)
+        return info
+
+    def disconnect(self) -> None:
+        try:
+            self._exec(ParamId.CMD_DISCONNECT, require_session=True)
+        finally:
+            self._connected = False
+            self._reader.set_heartbeat_watch(False)
 
     # Public API ------------------------------------------------------------
 
@@ -343,12 +428,6 @@ class TunerClient:
     def write_target_iq(self, iq_amps: float) -> None:
         self._write_q16(ParamId.WRITE_TARGET_IQ, iq_amps)
 
-    def override_on(self) -> None:
-        self._exec(ParamId.CMD_OVERRIDE_ON)
-
-    def override_off(self) -> None:
-        self._exec(ParamId.CMD_OVERRIDE_OFF)
-
     def read_firmware_type(self) -> int:
         r = self._round_trip(Op.READ, ParamId.FIRMWARE_TYPE)
         if r.status != ESP_FOC_OK:
@@ -374,19 +453,22 @@ class TunerClient:
     def stop_axis(self) -> None:
         self._exec(ParamId.CMD_STOP_AXIS)
 
-    def persist_calibration(self) -> None:
-        """Saves current axis gains to NVS."""
-        self._exec(ParamId.CMD_PERSIST_NVS, b"")
+    def run_axis(self) -> None:
+        """Start the FOC loop after alignment."""
+        self._exec(ParamId.CMD_RUN_AXIS)
 
-    def load_calibration(self) -> None:
-        self._exec(ParamId.CMD_LOAD_NVS)
+    def store_calibration(self) -> None:
+        """Write live tuning fields to NVS when they differ from stored."""
+        self._exec(ParamId.CMD_STORE_NVS, b"")
 
     def erase_calibration(self) -> None:
         self._exec(ParamId.CMD_ERASE_NVS)
 
-    def ping(self, timeout: float = 0.35) -> None:
-        """Minimal EXEC for host link liveness — independent of tuner polls."""
-        self._exec(ParamId.CMD_PING, timeout=timeout)
+    def scope_start(self) -> None:
+        self._exec(ParamId.CMD_SCOPE_START)
+
+    def scope_stop(self) -> None:
+        self._exec(ParamId.CMD_SCOPE_STOP)
 
     def reset_board(self, timeout: float = 1.2) -> None:
         """Ask firmware to `esp_restart()`. The link usually drops before

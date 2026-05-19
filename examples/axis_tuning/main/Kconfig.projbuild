@@ -1,0 +1,32 @@
+orsource "../../kconfig/hw_axis_tuning.kconfig"
+
+choice AXIS_TUNING_ROTOR_SENSOR
+    prompt "Rotor position sensor"
+    default AXIS_TUNING_ROTOR_AS5600
+
+    config AXIS_TUNING_ROTOR_AS5600
+        bool "AS5600 (I2C magnetic encoder)"
+
+    config AXIS_TUNING_ROTOR_SIMU
+        bool "rotor_sensor_simu (open-loop, no hardware encoder)"
+endchoice
+
+menu "Simulated motor electrical model"
+    depends on AXIS_TUNING_ROTOR_SIMU
+
+    config AXIS_TUNING_SIMU_R_MILLIOHM
+        int "Phase resistance R (milli-ohm)"
+        range 1 1000000
+        default 1000
+        help
+            Per-phase resistance used by rotor_sensor_simu (dq model).
+            Default 1000 -> 1.0 ohm.
+
+    config AXIS_TUNING_SIMU_L_MICROHENRY
+        int "Phase inductance L (micro-henry)"
+        range 1 1000000
+        default 2000
+        help
+            Per-phase inductance. Default 2000 -> 2 mH (0.002 H).
+
+endmenu

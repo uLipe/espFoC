@@ -71,23 +71,34 @@ typedef enum {
     ESP_FOC_TUNER_WRITE_TARGET_ID_Q16   = 0x0060,
     ESP_FOC_TUNER_WRITE_TARGET_IQ_Q16   = 0x0061,
 
-    ESP_FOC_TUNER_CMD_OVERRIDE_ON       = 0x00A0,
-    ESP_FOC_TUNER_CMD_OVERRIDE_OFF      = 0x00A1,
+    ESP_FOC_TUNER_CMD_CONNECT           = 0x00A0,
+    ESP_FOC_TUNER_CMD_DISCONNECT        = 0x00A1,
+
     ESP_FOC_TUNER_CMD_ALIGN_AXIS        = 0x00A2,
     ESP_FOC_TUNER_CMD_STOP_AXIS         = 0x00A3,
+    ESP_FOC_TUNER_CMD_RUN_AXIS          = 0x00A4,
 
-    ESP_FOC_TUNER_CMD_PERSIST_NVS       = 0x00B0,
-    ESP_FOC_TUNER_CMD_LOAD_NVS          = 0x00B1,
+    ESP_FOC_TUNER_CMD_STORE_NVS         = 0x00B0,
     ESP_FOC_TUNER_CMD_ERASE_NVS         = 0x00B2,
-    ESP_FOC_TUNER_CMD_RESET_BOARD      = 0x00B3,
-    ESP_FOC_TUNER_CMD_PING             = 0x00B4,
+    ESP_FOC_TUNER_CMD_RESET_BOARD       = 0x00B3,
+
+    ESP_FOC_TUNER_CMD_SCOPE_START       = 0x00C0,
+    ESP_FOC_TUNER_CMD_SCOPE_STOP        = 0x00C1,
 } esp_foc_tuner_id_t;
+
+/** CONNECT_ACK payload (binary, little-endian). */
+typedef struct {
+    uint8_t proto_ver;
+    uint32_t firmware_type;
+    uint8_t num_axes;
+    uint8_t scope_channels;
+    uint16_t heartbeat_period_ms;
+} esp_foc_tuner_connect_ack_t;
 
 /* Bitmap returned by ESP_FOC_TUNER_PARAM_AXIS_STATE. */
 #define ESP_FOC_AXIS_STATE_INITIALIZED    (1u << 0)
 #define ESP_FOC_AXIS_STATE_ALIGNED        (1u << 1)
 #define ESP_FOC_AXIS_STATE_RUNNING        (1u << 2)
-#define ESP_FOC_AXIS_STATE_TUNER_OVERRIDE (1u << 3)
 #define ESP_FOC_AXIS_STATE_ALIGNING       (1u << 4)
 
 /**
@@ -142,12 +153,14 @@ esp_foc_err_t esp_foc_tuner_handle_request(
  * The seq byte is echoed from the request frame's header so the host can
  * match responses to outstanding requests.
  */
+void esp_foc_tuner_dispatch_link_frame(uint8_t seq,
+                                       const uint8_t *payload,
+                                       size_t payload_len);
+
+/** @deprecated Use esp_foc_link_process_byte(). */
 void esp_foc_tuner_process_byte(uint8_t byte);
 
-/**
- * @brief Reset the reactor's link decoder. Useful after a transport
- * disconnect / reconnect so a half-parsed frame does not leak across.
- */
+/** @deprecated Use esp_foc_link_reactor_reset(). */
 void esp_foc_tuner_reactor_reset(void);
 
 /* Optional weak hooks for the user-defined transport layer.
@@ -159,7 +172,7 @@ void esp_foc_tuner_send_callback(const uint8_t *buf, size_t len);
 
 /**
  * @brief Identifier the host uses to recognise a specific firmware
- *        variant (e.g. tuner_studio_target advertises ``TSGX``).
+ *        variant (e.g. axis_tuning advertises ``TSGX``).
  *
  * Default returns 0; override with a strong definition in your
  * application to expose a different value.
