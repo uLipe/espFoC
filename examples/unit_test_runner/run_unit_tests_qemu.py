@@ -27,6 +27,8 @@ except ImportError:
 RESULT_RE = re.compile(r"(\d+) Tests (\d+) Failures")
 MENU_PROMPT = "Enter test for running"
 BOOT_PROMPT = "Press ENTER to see the list of tests."
+# Run only espFoC-tagged cases (same as typing [espFoC] in the Unity menu).
+TEST_FILTER = "[espFoC]"
 
 
 def _spawn_idf_qemu(cwd: str) -> pexpect.spawn:
@@ -111,7 +113,7 @@ def main() -> int:
             print("Unity menu prompt never appeared")
             return 1
 
-        child.sendline("*")
+        child.sendline(TEST_FILTER)
 
         try:
             child.expect(RESULT_RE, timeout=600)
@@ -124,6 +126,8 @@ def main() -> int:
 
         total = int(child.match.group(1))
         failures = int(child.match.group(2))
+        if total == 0:
+            print("Warning: Unity ran 0 tests — rebuild with: idf.py -D TEST_COMPONENTS=espFoC build")
         if failures == 0:
             print(f"All unit tests passed ({total} tests).")
             exit_code = 0

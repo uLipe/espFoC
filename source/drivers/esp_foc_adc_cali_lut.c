@@ -6,8 +6,10 @@
 
 #include <stdint.h>
 #include "esp_log.h"
+#include "sdkconfig.h"
 #include "espFoC/esp_foc_adc_cali_lut.h"
 #include "cali/esp_foc_adc_cali.h"
+#include "cali/esp_foc_adc_range_extend.h"
 
 static const char *TAG = "esp_foc_adc_cali_lut";
 
@@ -19,12 +21,16 @@ static bool raw_to_mv(adc_unit_t unit,
                       int raw,
                       int *mv_out)
 {
-#if (CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S2)
-    return esp_foc_adc_cali_line_raw_to_mv(unit, channel, atten, raw, mv_out);
+    bool ok = false;
+#if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32C2
+    ok = esp_foc_adc_cali_line_raw_to_mv(unit, channel, atten, raw, mv_out);
 #else
-    (void)unit;
-    return esp_foc_adc_cali_curve_raw_to_mv(unit, channel, atten, raw, mv_out);
+    ok = esp_foc_adc_cali_curve_raw_to_mv(unit, channel, atten, raw, mv_out);
 #endif
+    if (ok && mv_out != NULL && esp_foc_adc_range_extend_supported()) {
+        *mv_out = esp_foc_adc_range_extend_mv(atten, *mv_out);
+    }
+    return ok;
 }
 
 bool esp_foc_adc_cali_lut_build(adc_unit_t unit,
