@@ -37,8 +37,11 @@ list(APPEND srcs    "source/drivers/inverter_3pwm_mcpwm.c"
                     "source/drivers/cali/esp_foc_adc_cali_curve.c"
                     "source/drivers/cali/esp_foc_adc_cali_line.c"
                     "source/drivers/cali/esp_foc_cali_curve_coeff.c"
-                    "source/drivers/current_sensor_adc_one_shot.c"
                     "source/osal/os_interface_idf.c")
+
+if(CONFIG_SOC_ETM_SUPPORTED)
+    list(APPEND srcs "source/drivers/isensor_adc_etm.c")
+endif()
 
 if(target STREQUAL "esp32")
     list(APPEND srcs "source/drivers/isensor_adc_dma_esp32.c")

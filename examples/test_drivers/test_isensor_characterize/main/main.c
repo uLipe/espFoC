@@ -27,6 +27,7 @@
 #include "espFoC/gui_link/esp_foc_link_session.h"
 #include "espFoC/inverter_6pwm_mcpwm.h"
 #include "espFoC/current_sensor_adc.h"
+#include "soc/soc_caps.h"
 #include "espFoC/utils/esp_foc_q16.h"
 
 static const char *TAG = "isensor_char";
@@ -120,6 +121,14 @@ void app_main(void)
         ESP_LOGE(TAG, "current sensor init failed");
         return;
     }
+#if SOC_ETM_SUPPORTED
+    esp_foc_isensor_adc_etm_config_t etm_cfg = {
+        .mcpwm_timer = 0,
+        .event = ESP_FOC_ISENSOR_ADC_MCPWM_EVT_TIMER_TEZ,
+    };
+    esp_foc_isensor_adc_set_etm_source(s_shunts, &etm_cfg);
+    esp_foc_isensor_adc_set_trigger(s_shunts, ESP_FOC_ISENSOR_ADC_TRIG_ETM);
+#endif
 
     esp_foc_axis_bench_config_t bench_cfg = {
         .motor = {

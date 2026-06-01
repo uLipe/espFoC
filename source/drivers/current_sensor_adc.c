@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <math.h>
+#include <inttypes.h>
 #include "sdkconfig.h"
 #include "esp_log.h"
 #include "esp_check.h"
@@ -78,6 +79,9 @@ typedef struct {
     isensor_callback_t callback;
     void *user_data;
     bool started;
+#if SOC_ETM_SUPPORTED
+    esp_foc_isensor_adc_etm_config_t etm_cfg;
+#endif
 } isensor_adc_t;
 
 DRAM_ATTR static isensor_adc_t s_isensor;
@@ -108,6 +112,88 @@ static void isensor_adc_digi_apply_convert_limit(void)
     adc_ll_digi_set_convert_limit_num(ISENSOR_ADC_CONVERT_LIMIT);
     adc_ll_digi_convert_limit_enable(true);
 }
+
+static void isensor_adc_apply_max_clock(isensor_adc_t *isensor)
+{
+#if CONFIG_IDF_TARGET_ESP32
+    adc_ll_set_sample_cycle(ADC_LL_SAMPLE_CYCLE_DEFAULT);
+    adc_ll_digi_set_clk_div(2);
+#elif CONFIG_IDF_TARGET_ESP32S2
+    ESP_ERROR_CHECK(esp_clk_tree_enable_src(SOC_MOD_CLK_APLL, true));
+    uint32_t clk_hz = 0;
+    ESP_ERROR_CHECK(esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_APLL, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &clk_hz));
+    isensor->hal_cfg.clk_src = ADC_DIGI_CLK_SRC_APLL;
+    isensor->hal_cfg.clk_src_freq_hz = clk_hz;
+    adc_ll_digi_clk_sel(ADC_DIGI_CLK_SRC_APLL);
+    adc_ll_digi_controller_clk_div(0, 1, 0);
+    adc_ll_digi_set_clk_div(1);
+    adc_ll_set_sample_cycle(ADC_LL_SAMPLE_CYCLE_DEFAULT);
+#elif CONFIG_IDF_TARGET_ESP32S3
+    ESP_ERROR_CHECK(esp_clk_tree_enable_src(SOC_MOD_CLK_PLL_D2, true));
+    uint32_t clk_hz = 0;
+    ESP_ERROR_CHECK(esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_PLL_D2, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &clk_hz));
+    isensor->hal_cfg.clk_src = ADC_DIGI_CLK_SRC_PLL_F240M;
+    isensor->hal_cfg.clk_src_freq_hz = clk_hz;
+    adc_ll_digi_clk_sel(ADC_DIGI_CLK_SRC_PLL_F240M);
+    adc_ll_digi_controller_clk_div(0, 1, 0);
+    adc_ll_digi_set_clk_div(1);
+    adc_ll_set_sample_cycle(ADC_LL_SAMPLE_CYCLE_DEFAULT);
+#else
+    const soc_module_clk_t fast_src = SOC_MOD_CLK_PLL_F80M;
+    ESP_ERROR_CHECK(esp_clk_tree_enable_src(fast_src, true));
+    uint32_t clk_hz = 0;
+    ESP_ERROR_CHECK(esp_clk_tree_src_get_freq_hz(fast_src, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &clk_hz));
+    isensor->hal_cfg.clk_src = ADC_DIGI_CLK_SRC_PLL_F80M;
+    isensor->hal_cfg.clk_src_freq_hz = clk_hz;
+    adc_ll_digi_clk_sel(ADC_DIGI_CLK_SRC_PLL_F80M);
+    adc_ll_digi_controller_clk_div(0, 1, 0);
+    adc_ll_digi_set_clk_div(1);
+    adc_ll_set_sample_cycle(ADC_LL_SAMPLE_CYCLE_DEFAULT);
+#endif
+    ESP_LOGI(TAG, "ADC fast clock: src=%d freq=%" PRIu32 " Hz",
+             (int)isensor->hal_cfg.clk_src, isensor->hal_cfg.clk_src_freq_hz);
+}
+
+static void isensor_adc_rearm(isensor_adc_t *isensor)
+{
+    isensor_adc_dma_reset(&isensor->dma_ctx);
+    adc_hal_digi_reset();
+    adc_hal_digi_dma_link(&isensor->hal, isensor->rx_buf);
+#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+    esp_cache_msync(isensor->hal.rx_desc, isensor->rx_desc_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+#endif
+    isensor_adc_dma_start(&isensor->dma_ctx, isensor->hal.rx_desc);
+    adc_hal_digi_connect(true);
+    if (isensor->trigger == ESP_FOC_ISENSOR_ADC_TRIG_SOFTWARE) {
+        adc_hal_digi_enable(true);
+    } else {
+        adc_hal_digi_enable(false);
+    }
+    isensor->state = ESP_FOC_ISENSOR_ADC_STATE_BUSY;
+}
+
+#if SOC_ETM_SUPPORTED
+static esp_foc_err_t isensor_adc_apply_trigger_mode(isensor_adc_t *obj)
+{
+    if (obj->trigger == ESP_FOC_ISENSOR_ADC_TRIG_ETM) {
+        esp_err_t err = isensor_adc_etm_connect(&obj->etm_cfg);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "ETM connect failed: %d", err);
+            return ESP_FOC_ERR_UNKNOWN;
+        }
+        err = isensor_adc_etm_enable(true);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "ETM enable failed: %d", err);
+            return ESP_FOC_ERR_UNKNOWN;
+        }
+        adc_hal_digi_enable(false);
+    } else {
+        isensor_adc_etm_enable(false);
+        isensor_adc_etm_disconnect();
+    }
+    return ESP_FOC_OK;
+}
+#endif
 
 static esp_err_t isensor_adc_gpio_init(adc_unit_t unit, uint32_t chan_mask)
 {
@@ -196,9 +282,13 @@ static void IRAM_ATTR isensor_adc_dma_done(void *arg)
                     ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
 #endif
 
-    adc_hal_digi_enable(false);
-    adc_hal_digi_connect(false);
-    isensor->state = ESP_FOC_ISENSOR_ADC_STATE_IDLE;
+    if (isensor->trigger == ESP_FOC_ISENSOR_ADC_TRIG_ETM) {
+        isensor_adc_rearm(isensor);
+    } else {
+        adc_hal_digi_enable(false);
+        adc_hal_digi_connect(false);
+        isensor->state = ESP_FOC_ISENSOR_ADC_STATE_IDLE;
+    }
 }
 
 static esp_err_t isensor_adc_hw_start(isensor_adc_t *isensor)
@@ -225,23 +315,12 @@ static esp_err_t isensor_adc_hw_start(isensor_adc_t *isensor)
 
     adc_hal_digi_init(&isensor->hal);
     adc_hal_digi_controller_config(&isensor->hal, &isensor->hal_cfg);
+    isensor_adc_apply_max_clock(isensor);
     isensor_adc_digi_apply_convert_limit();
-    adc_hal_digi_enable(false);
-    adc_hal_digi_connect(false);
 
     isensor_adc_dma_stop(&isensor->dma_ctx);
-    adc_hal_digi_reset();
-    adc_hal_digi_dma_link(&isensor->hal, isensor->rx_buf);
-
-#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
-    esp_cache_msync(isensor->hal.rx_desc, isensor->rx_desc_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
-#endif
-
-    isensor_adc_dma_start(&isensor->dma_ctx, isensor->hal.rx_desc);
-    adc_hal_digi_connect(true);
-    adc_hal_digi_enable(true);
-    isensor->state = ESP_FOC_ISENSOR_ADC_STATE_BUSY;
     isensor->started = true;
+    isensor_adc_rearm(isensor);
     return ESP_OK;
 }
 
@@ -341,25 +420,24 @@ static void sample_isensors(esp_foc_isensor_t *self)
         return;
     }
 
-    isensor_adc_dma_reset(&obj->dma_ctx);
-    adc_hal_digi_reset();
-    adc_hal_digi_dma_link(&obj->hal, obj->rx_buf);
-#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
-    esp_cache_msync(obj->hal.rx_desc, obj->rx_desc_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
-#endif
-    isensor_adc_dma_start(&obj->dma_ctx, obj->hal.rx_desc);
-    adc_hal_digi_connect(true);
-    adc_hal_digi_enable(true);
-    obj->state = ESP_FOC_ISENSOR_ADC_STATE_BUSY;
+    isensor_adc_rearm(obj);
 }
 
 static void calibrate_isensors(esp_foc_isensor_t *self, int calibration_rounds)
 {
     isensor_adc_t *obj = __containerof(self, isensor_adc_t, interface);
 
+#if SOC_ETM_SUPPORTED
+    const bool was_etm = (obj->trigger == ESP_FOC_ISENSOR_ADC_TRIG_ETM);
+    if (was_etm) {
+        isensor_adc_etm_enable(false);
+        obj->trigger = ESP_FOC_ISENSOR_ADC_TRIG_SOFTWARE;
+    }
+#else
     if (obj->trigger != ESP_FOC_ISENSOR_ADC_TRIG_SOFTWARE) {
         return;
     }
+#endif
 
     isensor_values_t val;
     esp_foc_sleep_ms(100);
@@ -392,6 +470,15 @@ static void calibrate_isensors(esp_foc_isensor_t *self, int calibration_rounds)
     self->fetch_isensors(self, &val);
     ESP_LOGI(TAG, "No-current test: iu=%f iv=%f iw=%f",
              q16_to_float(val.iu_axis_0), q16_to_float(val.iv_axis_0), q16_to_float(val.iw_axis_0));
+
+#if SOC_ETM_SUPPORTED
+    if (was_etm) {
+        obj->trigger = ESP_FOC_ISENSOR_ADC_TRIG_ETM;
+        if (isensor_adc_apply_trigger_mode(obj) == ESP_FOC_OK) {
+            isensor_adc_rearm(obj);
+        }
+    }
+#endif
 }
 
 static void set_callback(esp_foc_isensor_t *self, isensor_callback_t cb, void *arg)
@@ -434,13 +521,44 @@ esp_foc_err_t esp_foc_isensor_adc_set_trigger(esp_foc_isensor_t *isensor,
     if (isensor == NULL) {
         return ESP_FOC_ERR_INVALID_ARG;
     }
+#if !SOC_ETM_SUPPORTED
     if (mode == ESP_FOC_ISENSOR_ADC_TRIG_ETM) {
         return ESP_FOC_ERR_NOT_SUPPORTED;
     }
+#endif
     isensor_adc_t *obj = __containerof(isensor, isensor_adc_t, interface);
     obj->trigger = mode;
+#if SOC_ETM_SUPPORTED
+    esp_foc_err_t err = isensor_adc_apply_trigger_mode(obj);
+    if (err != ESP_FOC_OK) {
+        obj->trigger = ESP_FOC_ISENSOR_ADC_TRIG_SOFTWARE;
+        return err;
+    }
+    if (obj->started && obj->state != ESP_FOC_ISENSOR_ADC_STATE_BUSY) {
+        isensor_adc_rearm(obj);
+    }
+#endif
     return ESP_FOC_OK;
 }
+
+#if SOC_ETM_SUPPORTED
+esp_foc_err_t esp_foc_isensor_adc_set_etm_source(esp_foc_isensor_t *isensor,
+                                                 const esp_foc_isensor_adc_etm_config_t *cfg)
+{
+    if (isensor == NULL || cfg == NULL) {
+        return ESP_FOC_ERR_INVALID_ARG;
+    }
+    if (cfg->mcpwm_timer >= SOC_MCPWM_TIMERS_PER_GROUP) {
+        return ESP_FOC_ERR_INVALID_ARG;
+    }
+    isensor_adc_t *obj = __containerof(isensor, isensor_adc_t, interface);
+    obj->etm_cfg = *cfg;
+    if (obj->trigger == ESP_FOC_ISENSOR_ADC_TRIG_ETM) {
+        return isensor_adc_apply_trigger_mode(obj);
+    }
+    return ESP_FOC_OK;
+}
+#endif
 
 esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
 {
@@ -467,6 +585,10 @@ esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
     s_isensor.channels[1] = config->channels[1];
     s_isensor.trigger = ESP_FOC_ISENSOR_ADC_TRIG_SOFTWARE;
     s_isensor.state = ESP_FOC_ISENSOR_ADC_STATE_IDLE;
+#if SOC_ETM_SUPPORTED
+    s_isensor.etm_cfg.mcpwm_timer = 0;
+    s_isensor.etm_cfg.event = ESP_FOC_ISENSOR_ADC_MCPWM_EVT_TIMER_TEZ;
+#endif
 
     s_isensor.adc_to_current_scale = adc_to_volts * (1.0f / (config->amp_gain * config->shunt_resistance));
     s_isensor.adc_to_current_scale_q16 = q16_from_float(2048.0f * s_isensor.adc_to_current_scale);

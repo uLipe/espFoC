@@ -11,6 +11,7 @@
 #include "esp_intr_alloc.h"
 #include "esp_attr.h"
 #include "hal/i2s_ll.h"
+#include "hal/adc_hal.h"
 #include "soc/i2s_periph.h"
 #include "esp_private/i2s_platform.h"
 #include "isensor_adc_internal.h"

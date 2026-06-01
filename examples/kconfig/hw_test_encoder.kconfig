@@ -1,33 +1,55 @@
-menu "test_encoder — hardware (SPI AS5048)"
+menu "test_encoder — hardware"
 
-    config FOC_ENCODER_SDA_PIN
-        int "I2C SDA (if used; often unused in SPI test)"
+    choice TEST_ENCODER_SENSOR
+        prompt "Rotor sensor"
+        default TEST_ENCODER_AS5600
+
+        config TEST_ENCODER_AS5600
+            bool "AS5600 (I2C)"
+
+        config TEST_ENCODER_AS5048
+            bool "AS5048 (SPI)"
+    endchoice
+
+    config TEST_ENCODER_POLE_PAIRS
+        int "Motor pole pairs (for electrical angle scale only)"
+        range 1 64
+        default 7
+
+    config TEST_ENCODER_ENC_SDA
+        int "AS5600 I2C SDA"
         range 0 54
-        default 8
+        default 25
+        depends on TEST_ENCODER_AS5600
 
-    config FOC_ENCODER_SCL_PIN
-        int "I2C SCL (if used)"
+    config TEST_ENCODER_ENC_SCL
+        int "AS5600 I2C SCL"
         range 0 54
-        default 9
+        default 24
+        depends on TEST_ENCODER_AS5600
 
-    config FOC_ENCODER_MISO_PIN
-        int "SPI MISO"
+    config TEST_ENCODER_MISO_PIN
+        int "AS5048 SPI MISO"
         range 0 54
         default 4
+        depends on TEST_ENCODER_AS5048
 
-    config FOC_ENCODER_MOSI_PIN
-        int "SPI MOSI"
+    config TEST_ENCODER_MOSI_PIN
+        int "AS5048 SPI MOSI"
         range 0 54
         default 5
+        depends on TEST_ENCODER_AS5048
 
-    config FOC_ENCODER_SCK_PIN
-        int "SPI SCK"
+    config TEST_ENCODER_SCK_PIN
+        int "AS5048 SPI SCK"
         range 0 54
         default 6
+        depends on TEST_ENCODER_AS5048
 
-    config FOC_ENCODER_CS_PIN
-        int "SPI CS"
+    config TEST_ENCODER_CS_PIN
+        int "AS5048 SPI CS"
         range 0 54
         default 7
+        depends on TEST_ENCODER_AS5048
 
 endmenu
