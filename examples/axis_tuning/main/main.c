@@ -11,11 +11,14 @@
 
 #include "esp_log.h"
 #include "esp_err.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 
 #include "espFoC/esp_foc.h"
 #include "espFoC/gui_link/esp_foc_tuner.h"
+#include "espFoC/utils/esp_foc_q16.h"
+
+#if defined(CONFIG_ESP_FOC_FITL) && CONFIG_ESP_FOC_FITL
+#include "espFoC/esp_foc_in_the_loop.h"
+#else
 #include "espFoC/inverter_6pwm_mcpwm.h"
 #if defined(CONFIG_AXIS_TUNING_ROTOR_AS5600)
 #include "espFoC/rotor_sensor_as5600.h"
@@ -23,8 +26,8 @@
 #include "espFoC/rotor_sensor_simu.h"
 #endif
 #include "espFoC/current_sensor_adc.h"
-#include "espFoC/utils/esp_foc_q16.h"
 #include "soc/soc_caps.h"
+#endif
 
 static const char *TAG = "axis_tuning";
 
@@ -83,6 +86,7 @@ static void pump_scope_idle(void)
 }
 #endif
 
+#if !defined(CONFIG_ESP_FOC_FITL) || !CONFIG_ESP_FOC_FITL
 static int pwm_enable_gpio(void)
 {
     if (CONFIG_AXIS_TUNING_PWM_EN_PIN < 0) {
@@ -95,11 +99,27 @@ static int pwm_enable_gpio(void)
 #endif
     return CONFIG_AXIS_TUNING_PWM_EN_PIN;
 }
+#endif
 
 void app_main(void)
 {
     ESP_LOGI(TAG, "boot — axis_tuning");
 
+#if defined(CONFIG_ESP_FOC_FITL) && CONFIG_ESP_FOC_FITL
+    esp_foc_in_the_loop_config_t fitl_cfg = {
+        .pole_pairs = CONFIG_AXIS_TUNING_POLE_PAIRS,
+        .vdc_q16 = q16_from_float((float)CONFIG_AXIS_TUNING_DC_LINK_V),
+        .pwm_hz = 0,
+    };
+    esp_foc_in_the_loop_handles_t fitl = {0};
+    if (esp_foc_in_the_loop_create(&fitl_cfg, &fitl) != ESP_FOC_OK) {
+        ESP_LOGE(TAG, "FITL init failed");
+        return;
+    }
+    s_inverter = fitl.inverter;
+    s_rotor = fitl.rotor;
+    s_shunts = fitl.isensor;
+#else
     s_inverter = inverter_6pwm_mpcwm_new(
         CONFIG_AXIS_TUNING_PWM_U_HI,
         CONFIG_AXIS_TUNING_PWM_U_LO,
@@ -156,6 +176,7 @@ void app_main(void)
         ESP_LOGE(TAG, "current sensor init failed");
         return;
     }
+#endif
 
     esp_foc_motor_control_settings_t settings = {
         .motor_pole_pairs  = CONFIG_AXIS_TUNING_POLE_PAIRS,
@@ -170,7 +191,7 @@ void app_main(void)
         return;
     }
 
-#if defined(CONFIG_AXIS_TUNING_ROTOR_SIMU)
+#if defined(CONFIG_AXIS_TUNING_ROTOR_SIMU) && (!defined(CONFIG_ESP_FOC_FITL) || !CONFIG_ESP_FOC_FITL)
     rotor_sensor_simu_wire_ud_uq(s_rotor, &s_axis.u_d.raw, &s_axis.u_q.raw);
 #endif
 
@@ -190,6 +211,6 @@ void app_main(void)
             pump_scope_idle();
         }
 #endif
-        vTaskDelay(pdMS_TO_TICKS(200));
+        esp_foc_sleep_ms(200);
     }
 }

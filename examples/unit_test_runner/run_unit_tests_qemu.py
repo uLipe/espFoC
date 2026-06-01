@@ -116,7 +116,7 @@ def main() -> int:
         child.sendline(TEST_FILTER)
 
         try:
-            child.expect(RESULT_RE, timeout=600)
+            child.expect(RESULT_RE, timeout=120)
         except pexpect.TIMEOUT:
             print("Timeout waiting for Unity summary (tests still running or hung).")
             return 1
