@@ -22,6 +22,22 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                         esp_foc_rotor_sensor_t *rotor,
                                         esp_foc_isensor_t *isensor,
                                         esp_foc_motor_control_settings_t settings);
+
+typedef struct {
+    esp_foc_motor_control_settings_t motor;
+    bool calibrate_isensor_at_init;
+    q16_t bench_theta_e;
+} esp_foc_axis_bench_config_t;
+
+/** Bench axis: inverter + isensor only (no rotor, no FOC loops). For link/scope characterization. */
+esp_foc_err_t esp_foc_initialize_axis_bench(esp_foc_axis_t *axis,
+                                            esp_foc_inverter_t *inverter,
+                                            esp_foc_isensor_t *isensor,
+                                            const esp_foc_axis_bench_config_t *config);
+
+esp_foc_err_t esp_foc_bench_arm(esp_foc_axis_t *axis);
+esp_foc_err_t esp_foc_bench_disarm(esp_foc_axis_t *axis);
+esp_foc_err_t esp_foc_bench_step(esp_foc_axis_t *axis);
 /** Recompute encoder_inv_cpr_q16 after pole pairs or CPR change. */
 void esp_foc_axis_refresh_encoder_q16_scales(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis);

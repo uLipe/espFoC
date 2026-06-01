@@ -28,4 +28,10 @@ typedef enum {
     ESP_FOC_AXIS_STATE_ALIGNING = 1,
     ESP_FOC_AXIS_STATE_ALIGNED = 2,
     ESP_FOC_AXIS_STATE_RUNNING = 3,
+    ESP_FOC_AXIS_STATE_BENCH = 4,
 } esp_foc_axis_state_t;
+
+typedef enum {
+    ESP_FOC_AXIS_MODE_FOC = 0,
+    ESP_FOC_AXIS_MODE_BENCH,
+} esp_foc_axis_mode_t;

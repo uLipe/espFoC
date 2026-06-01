@@ -295,6 +295,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
 #endif
 
     axis->state = ESP_FOC_AXIS_STATE_IDLE;
+    axis->mode = ESP_FOC_AXIS_MODE_FOC;
+    axis->bench_theta_e = 0;
     axis->runner_shutdown = false;
     axis->runner_low_speed_hdl = NULL;
     axis->runner_outer_hdl = NULL;

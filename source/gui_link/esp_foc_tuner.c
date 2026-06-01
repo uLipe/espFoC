@@ -55,6 +55,10 @@ static uint8_t compute_axis_state(const esp_foc_axis_t *axis)
     if (axis->state == ESP_FOC_AXIS_STATE_RUNNING) {
         s |= ESP_FOC_AXIS_STATE_RUNNING;
     }
+    if (axis->mode == ESP_FOC_AXIS_MODE_BENCH &&
+        axis->state == ESP_FOC_AXIS_STATE_BENCH) {
+        s |= ESP_FOC_AXIS_STATE_ALIGNED;
+    }
     return s;
 }
 
@@ -149,6 +153,12 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
     case ESP_FOC_TUNER_PARAM_LOOP_FS_HZ_Q16:  value = axis->current_filter_fs_hz_q16; break;
     case ESP_FOC_TUNER_PARAM_KD_Q16:          value = kd;  break;
     case ESP_FOC_TUNER_PARAM_KFF_Q16:         value = kff; break;
+    case ESP_FOC_TUNER_PARAM_UQ_Q16:          value = axis->u_q.raw; break;
+    case ESP_FOC_TUNER_PARAM_UD_Q16:          value = axis->u_d.raw; break;
+    case ESP_FOC_TUNER_PARAM_IU_Q16:          value = axis->i_u; break;
+    case ESP_FOC_TUNER_PARAM_IV_Q16:          value = axis->i_v; break;
+    case ESP_FOC_TUNER_PARAM_IQ_MEAS_Q16:     value = axis->i_q.raw; break;
+    case ESP_FOC_TUNER_PARAM_BENCH_THETA_Q16: value = axis->bench_theta_e; break;
     default:
         return ESP_FOC_ERR_INVALID_ARG;
     }
@@ -210,6 +220,22 @@ static esp_foc_err_t handle_write(esp_foc_axis_t *axis,
         axis->isensor_driver->set_filter_cutoff(axis->isensor_driver,
                                                 fc_hz, fs_hz);
         axis->current_filter_fc_hz_q16 = v;
+        return ESP_FOC_OK;
+    }
+
+    if (axis->mode == ESP_FOC_AXIS_MODE_BENCH) {
+        esp_foc_critical_enter();
+        if (id == ESP_FOC_TUNER_WRITE_UQ_Q16) {
+            axis->u_q.raw = v;
+        } else if (id == ESP_FOC_TUNER_WRITE_UD_Q16) {
+            axis->u_d.raw = v;
+        } else if (id == ESP_FOC_TUNER_WRITE_BENCH_THETA_Q16) {
+            axis->bench_theta_e = q16_normalize_angle(v);
+        } else {
+            esp_foc_critical_leave();
+            return ESP_FOC_ERR_INVALID_ARG;
+        }
+        esp_foc_critical_leave();
         return ESP_FOC_OK;
     }
 
@@ -320,18 +346,36 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
     }
 
     if (id == ESP_FOC_TUNER_CMD_STOP_AXIS) {
+        if (axis->mode == ESP_FOC_AXIS_MODE_BENCH) {
+            return esp_foc_bench_disarm(axis);
+        }
         return esp_foc_stop(axis);
     }
 
     if (id == ESP_FOC_TUNER_CMD_ALIGN_AXIS) {
+        if (axis->mode == ESP_FOC_AXIS_MODE_BENCH) {
+            return ESP_FOC_ERR_NOT_SUPPORTED;
+        }
         return esp_foc_align_axis(axis);
     }
 
     if (id == ESP_FOC_TUNER_CMD_RUN_AXIS) {
+        if (axis->mode == ESP_FOC_AXIS_MODE_BENCH) {
+            return esp_foc_bench_arm(axis);
+        }
         if (axis->state != ESP_FOC_AXIS_STATE_ALIGNED) {
             return ESP_FOC_ERR_NOT_ALIGNED;
         }
         return esp_foc_run(axis);
+    }
+
+    if (id == ESP_FOC_TUNER_CMD_CALISENSOR) {
+        if (axis->isensor_driver == NULL) {
+            return ESP_FOC_ERR_AXIS_INVALID_STATE;
+        }
+        axis->isensor_driver->calibrate_isensors(
+            axis->isensor_driver, CONFIG_ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
+        return ESP_FOC_OK;
     }
 
     if (id == ESP_FOC_TUNER_CMD_STORE_NVS) {
