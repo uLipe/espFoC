@@ -1,0 +1,3 @@
+# axis_tuning on ESP32-C6 — UART bridge (no native USB-CDC TinyUSB stack).
+CONFIG_ESP_FOC_BRIDGE_USBCDC=n
+CONFIG_ESP_FOC_BRIDGE_UART=y

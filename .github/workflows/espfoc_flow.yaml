@@ -54,7 +54,7 @@ jobs:
         idf.py set-target esp32s3
         idf.py build
         rm -rf build sdkconfig
-        idf.py set-target esp32p4
+        idf.py set-target esp32c6
         idf.py build
         rm -rf build sdkconfig
         popd
@@ -157,6 +157,13 @@ jobs:
         pip install pexpect
         cd examples/unit_test_runner
         python run_unit_tests_qemu.py
+
+    - name: Build unit test runner (esp32c6 compile check)
+      run: |
+        . ./idf/export.sh
+        cd examples/unit_test_runner
+        idf.py set-target esp32c6
+        idf.py -D TEST_COMPONENTS=espFoC build
 
     # Optional: run on real device on self-hosted runner (ESPPORT set).
     - name: Run unit tests on device

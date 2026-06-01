@@ -12,6 +12,10 @@
 extern "C" {
 #endif
 
+#if defined(CONFIG_ESP_FOC_SCOPE)
+extern q16_t esp_foc_debug_scope_hot_path_dt_us_q16;
+#endif
+
 void esp_foc_scope_initalize(void);
 
 /** When false, captured samples are not transmitted (saves bandwidth). */

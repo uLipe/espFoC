@@ -53,16 +53,26 @@ static void regulation_stub(esp_foc_axis_t *axis,
 static void wire_scope_channels(void)
 {
 #if defined(CONFIG_ESP_FOC_SCOPE)
+    /* Group 0–3: current / torque */
     esp_foc_scope_add_channel(&s_axis.target_i_d.raw, 0);
     esp_foc_scope_add_channel(&s_axis.i_d.raw, 1);
     esp_foc_scope_add_channel(&s_axis.target_i_q.raw, 2);
     esp_foc_scope_add_channel(&s_axis.i_q.raw, 3);
+    /* Group 4–5: dq voltage */
     esp_foc_scope_add_channel(&s_axis.u_d.raw, 4);
     esp_foc_scope_add_channel(&s_axis.u_q.raw, 5);
+    /* Group 6–9: encoder PLL */
     esp_foc_scope_add_channel(
-        (const q16_t *)(const volatile void *)&s_axis.rotor_elec_angle, 6);
-    esp_foc_scope_add_channel(&s_axis.u_alpha.raw, 7);
-    esp_foc_scope_add_channel(&s_axis.u_beta.raw, 8);
+        (const q16_t *)(const volatile void *)&s_axis.rotor_estimator.theta_meas_mech, 6);
+    esp_foc_scope_add_channel(&s_axis.rotor_estimator.theta_est_mech, 7);
+    esp_foc_scope_add_channel(&s_axis.rotor_estimator.omega_est_mech, 8);
+    esp_foc_scope_add_channel(&s_axis.rotor_estimator.pll_err, 9);
+    /* Group 10–12: phase / Clarke */
+    esp_foc_scope_add_channel(&s_axis.i_u, 10);
+    esp_foc_scope_add_channel(&s_axis.i_v, 11);
+    esp_foc_scope_add_channel(&s_axis.i_alpha.raw, 12);
+    /* Group 13: ISR hot-path timing */
+    esp_foc_scope_add_channel(&esp_foc_debug_scope_hot_path_dt_us_q16, 13);
     esp_foc_scope_initalize();
 #endif
 }

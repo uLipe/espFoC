@@ -15,6 +15,21 @@ This file is used to generate GitHub releases. All versions from 2.0.0 onward ar
 
 ### Added
 
+- **Encoder PLL estimator** (`esp_foc_estimator_q16.c`) — mechanical angle/speed tracked at PWM rate; slow loop publishes encoder samples only. Extensible API for future sensorless observers.
+- **`examples/axis_tuning` on ESP32-C6** — reference CI/build target for fixed-point sizing.
+
+### Removed
+
+- **Encoder velocity biquad** (`CONFIG_ESP_FOC_VELOCITY_FILTER_CUTOFF_HZ`, `velocity_filter`, Δcounts speed path).
+- **Legacy SCOPE CSV mode** (`CONFIG_ESP_FOC_SCOPE_LEGACY_CSV`).
+
+### Changed
+
+- **`rotor_elec_angle` is ISR-write-only**; `current_speed` is PLL mechanical rev/s from the estimator.
+- **Scope default 14 channels** grouped by torque / PLL / phase / ISR timing.
+
+### Added
+
 - **Link protocol v2 (breaking):** `CH_HEARTBEAT` (500 ms, host ack), session `CONNECT`/`DISCONNECT`, scope `SCOPE_START`/`SCOPE_STOP`; no `CH_LOG`; `tunerctl` interactive REPL.
 - **`examples/axis_tuning`** — single reference firmware (tuner + scope + NVS; AS5600 or `rotor_sensor_simu`).
 - **`CMD_RUN_AXIS` (0x00A4)** — start FOC after alignment; **`CMD_STORE_NVS`** replaces persist (skips write when blob unchanged).

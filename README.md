@@ -16,7 +16,9 @@ math. Gains can be synthesised at build time, retuned live from the
 firmware API, persisted to NVS, or dialled in interactively through
 the bundled TunerStudio GUI.
 
-Targets: ESP32, ESP32-S3, ESP32-P4 (ESP-IDF v5+).
+Targets: ESP32, **ESP32-C6**, ESP32-S3, ESP32-P4 (ESP-IDF v5+). The
+reference bring-up target is **ESP32-C6** (fixed-point hot path sized for
+smaller MCUs).
 
 > **3.0 is a breaking release.** The legacy continuous-time PI
 > formula and the `motor_resistance / motor_inductance / motor_inertia`
@@ -47,9 +49,11 @@ Then pick an example as a starting point:
 
 ```bash
 cd examples/axis_tuning
-idf.py set-target esp32s3
+idf.py set-target esp32c6    # reference target (UART bridge)
 idf.py build flash monitor
 ```
+
+Also supported: `esp32s3` (UART), `esp32p4` (USB-CDC via TinyUSB).
 
 ---
 
@@ -62,8 +66,11 @@ current sensor. You implement a **regulation callback** that updates
 `id_ref` / `iq_ref` each outer-loop tick; espFoC runs Clarke/Park, the
 current PIs, inverse Park, SVPWM and PWM updates. The inner current loop
 and modulation run in the **PWM ISR** at carrier frequency; a dedicated
-task reads the encoder and invokes your callback at roughly **PWM rate
-÷ `CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING`** (see *espFoC Settings → Control
+task reads the encoder (~2 kHz by default) and feeds an **encoder PLL**
+(`esp_foc_estimator_q16`) that integrates mechanical angle at **PWM rate**
+(20 kHz). Only the PWM ISR writes `rotor_elec_angle`; your regulation
+callback runs on the slow task at roughly **PWM rate ÷
+`CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING`** (see *espFoC Settings → Control
 loop* in `menuconfig`). Platform primitives (tasks, critical sections,
 timers) go through **`include/espFoC/osal/os_interface.h`** so motor code
 does not depend on FreeRTOS headers.
@@ -108,12 +115,12 @@ identification.
 
 ```bash
 cd examples/axis_tuning
-idf.py set-target esp32s3    # UART bridge (see sdkconfig.defaults.esp32s3)
+idf.py set-target esp32c6    # reference target (UART; sdkconfig.defaults.esp32c6)
 idf.py menuconfig            # pin map + AS5600 vs rotor_sensor_simu
 idf.py build flash monitor
 ```
 
-On ESP32-P4, `idf.py set-target esp32p4` picks USB-CDC via
+On ESP32-S3, use `idf.py set-target esp32s3`. On ESP32-P4, USB-CDC via
 `sdkconfig.defaults.esp32p4`.
 
 For your own firmware, enable a transport bridge in `menuconfig`

@@ -1,6 +1,6 @@
 # espFoC unit test runner
 
-Minimal app that runs the Unity test menu for espFoC unit tests. Default target for automated runs is **QEMU** (no hardware); you can also run on a real device.
+Minimal app that runs the Unity test menu for espFoC unit tests. Default target for automated runs is **QEMU** on esp32 (no hardware); **esp32c6** is the reference build target for examples.
 
 ## Build
 
