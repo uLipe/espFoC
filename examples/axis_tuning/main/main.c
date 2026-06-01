@@ -151,13 +151,11 @@ void app_main(void)
     s_shunts = isensor_adc_oneshot_new(&shunt_cfg, NULL);
 #else
     esp_foc_isensor_adc_config_t shunt_cfg = {
-        .axis_channels = {(adc_channel_t)CONFIG_AXIS_TUNING_ISENSE_CH_U,
-                          (adc_channel_t)CONFIG_AXIS_TUNING_ISENSE_CH_V},
-        .units         = {(adc_unit_t)(CONFIG_AXIS_TUNING_ISENSE_ADC_UNIT - 1),
-                          (adc_unit_t)(CONFIG_AXIS_TUNING_ISENSE_ADC_UNIT - 1)},
-        .amp_gain      = (float)CONFIG_AXIS_TUNING_ISENSE_AMP_GAIN_X100 / 100.0f,
+        .channels = {(adc_channel_t)CONFIG_AXIS_TUNING_ISENSE_CH_U,
+                      (adc_channel_t)CONFIG_AXIS_TUNING_ISENSE_CH_V},
+        .unit = ADC_UNIT_1,
+        .amp_gain = (float)CONFIG_AXIS_TUNING_ISENSE_AMP_GAIN_X100 / 100.0f,
         .shunt_resistance = (float)CONFIG_AXIS_TUNING_ISENSE_SHUNT_MOHM / 1000.0f,
-        .number_of_channels = 2,
     };
     s_shunts = isensor_adc_new(&shunt_cfg);
 #endif

@@ -17,11 +17,10 @@ static esp_foc_isensor_t  *shunts;
 static void initialize_foc_drivers(void)
 {
     esp_foc_isensor_adc_config_t shunt_cfg = {
-        .axis_channels = {ADC_CHANNEL_1, ADC_CHANNEL_5},
-        .units = {ADC_UNIT_1, ADC_UNIT_1},
+        .channels = {ADC_CHANNEL_1, ADC_CHANNEL_5},
+        .unit = ADC_UNIT_1,
         .amp_gain = 50.0f,
         .shunt_resistance = 0.01f,
-        .number_of_channels = 2,
     };
 
     shunts = isensor_adc_new(&shunt_cfg);

@@ -16,7 +16,7 @@ if(ESP_PLATFORM)
 
 idf_build_get_property(target IDF_TARGET)
 
-set(requires esp_driver_uart esp_driver_pcnt esp_driver_gpio esp_driver_mcpwm esp_adc driver freertos esp_system esp_timer nvs_flash)
+set(requires esp_driver_uart esp_driver_pcnt esp_driver_gpio esp_driver_mcpwm driver freertos esp_system esp_timer nvs_flash esp_hw_support efuse)
 # esp_tinyusb is fetched conditionally for USB-capable targets via
 # idf_component.yml; declare the priv require eagerly here so the bridge
 # source file finds tinyusb.h on those targets even when the user has not
@@ -32,8 +32,23 @@ list(APPEND srcs    "source/drivers/inverter_3pwm_mcpwm.c"
                     "source/drivers/rotor_sensor_pcnt.c"
                     "source/drivers/rotor_sensor_simu.c"
                     "source/drivers/current_sensor_adc.c"
+                    "source/drivers/esp_foc_adc_cali_lut.c"
+                    "source/drivers/cali/esp_foc_adc_cali_curve.c"
+                    "source/drivers/cali/esp_foc_adc_cali_line.c"
+                    "source/drivers/cali/esp_foc_cali_curve_coeff.c"
                     "source/drivers/current_sensor_adc_one_shot.c"
                     "source/osal/os_interface_idf.c")
+
+if(target STREQUAL "esp32")
+    list(APPEND srcs "source/drivers/isensor_adc_dma_esp32.c")
+    list(APPEND requires esp_driver_i2s)
+elseif(target STREQUAL "esp32s2")
+    list(APPEND srcs "source/drivers/isensor_adc_dma_esp32s2.c")
+    list(APPEND requires esp_driver_spi)
+else()
+    list(APPEND srcs "source/drivers/isensor_adc_dma_gdma.c")
+    list(APPEND requires esp_mm)
+endif()
 
 if(CONFIG_ESP_FOC_TUNER_ENABLE)
     list(APPEND srcs "source/gui_link/esp_foc_tuner.c"

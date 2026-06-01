@@ -14,6 +14,7 @@ typedef enum {
     ESP_FOC_ERR_TIMESTEP_TOO_SMALL = -5,
     ESP_FOC_ERR_ROTOR_STARTUP = -6,
     ESP_FOC_ERR_ROTOR_STARTUP_PI = -7,
+    ESP_FOC_ERR_NOT_SUPPORTED = -8,
     ESP_FOC_ERR_UNKNOWN = -128
 } esp_foc_err_t;
 
