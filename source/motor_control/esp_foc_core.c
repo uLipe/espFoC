@@ -479,10 +479,17 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
                 "alignment: natural direction = CCW (delta from sweep=%lld)",
                 (long long)delta);
         } else if (delta == 0) {
+#ifdef CONFIG_ESP_FOC_FITL
+            axis->natural_direction = Q16_ONE;
+            ESP_LOGW(
+                tag,
+                "alignment: delta=0; assuming CW (FITL simulated plant)");
+#else
             ESP_LOGE(
                 tag,
                 "alignment: error! failed to find the direction of the motor, aborting!");
             abort();
+#endif
         } else {
             ESP_LOGI(
                 tag,

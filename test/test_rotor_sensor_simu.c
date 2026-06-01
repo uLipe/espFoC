@@ -1,6 +1,9 @@
 /*
  * Unit tests for rotor_sensor_simu (open-loop motor + encoder mimic).
  */
+#include "sdkconfig.h"
+#if !CONFIG_ESP_FOC_FITL
+
 #include <unity.h>
 #include <math.h>
 #include "espFoC/utils/esp_foc_q16.h"
@@ -82,3 +85,5 @@ TEST_CASE("rotor_sensor_simu: accumulated tracks unwrap", "[espFoC][rotor_simu]"
     int64_t a1 = s->read_accumulated_counts_i64(s);
     TEST_ASSERT_TRUE(a1 > a0);
 }
+
+#endif /* !CONFIG_ESP_FOC_FITL */

@@ -1,6 +1,9 @@
 /*
  * Unit tests for isensor ADC cali LUT (no hardware).
  */
+#include "sdkconfig.h"
+#if !CONFIG_ESP_FOC_FITL
+
 #include <unity.h>
 #include "espFoC/esp_foc_adc_cali_lut.h"
 #include "espFoC/current_sensor_adc.h"
@@ -59,3 +62,5 @@ TEST_CASE("isensor etm source NULL returns invalid arg", "[espFoC][isensor_adc]"
     TEST_ASSERT_EQUAL(ESP_FOC_ERR_INVALID_ARG, err);
 }
 #endif
+
+#endif /* !CONFIG_ESP_FOC_FITL */

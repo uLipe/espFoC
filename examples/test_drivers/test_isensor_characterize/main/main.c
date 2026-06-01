@@ -19,8 +19,6 @@
 
 #include "esp_log.h"
 #include "esp_err.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 
 #include "espFoC/esp_foc.h"
 #include "espFoC/gui_link/esp_foc_tuner.h"
@@ -81,12 +79,11 @@ static void pump_scope_idle(void)
 static void bench_task(void *arg)
 {
     (void)arg;
-    const TickType_t period = pdMS_TO_TICKS(1);
     while (1) {
         if (s_axis.state == ESP_FOC_AXIS_STATE_BENCH) {
             esp_foc_bench_step(&s_axis);
         }
-        vTaskDelay(period);
+        esp_foc_sleep_ms(1);
     }
 }
 
@@ -168,6 +165,6 @@ void app_main(void)
             pump_scope_idle();
         }
 #endif
-        vTaskDelay(pdMS_TO_TICKS(200));
+        esp_foc_sleep_ms(200);
     }
 }

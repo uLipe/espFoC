@@ -3,8 +3,6 @@
  */
 #include <string.h>
 #include <unity.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "espFoC/esp_foc.h"
 #include "espFoC/utils/esp_foc_q16.h"
 #include "mock_drivers.h"
@@ -147,9 +145,9 @@ TEST_CASE("axis run: regulator runs and set_duties receives FOC output", "[espFo
 
     for (int i = 0; i < 40; i++) {
         mock_inverter_trigger_callback(&mock_inv);
-        vTaskDelay(pdMS_TO_TICKS(10));
+        esp_foc_sleep_ms(10);
     }
-    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_foc_sleep_ms(200);
 
     TEST_ASSERT_TRUE(mock_inv.set_duties_count >= 1);
     TEST_ASSERT_TRUE(axis_run_regulator_called_count >= 1);
@@ -167,7 +165,7 @@ TEST_CASE("axis stop: returns to idle and allows re-align", "[espFoC][axis_flow]
 
     for (int i = 0; i < 5; i++) {
         mock_inverter_trigger_callback(&mock_inv);
-        vTaskDelay(pdMS_TO_TICKS(10));
+        esp_foc_sleep_ms(10);
     }
 
     TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_stop(&axis));

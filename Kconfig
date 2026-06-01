@@ -186,4 +186,77 @@ menu "espFoC Settings"
             default y
     endmenu
 
+    menu "FOC-in-the-loop (simulated plant)"
+        config ESP_FOC_FITL
+            bool "FOC-in-the-loop: simulated motor plant (exclusive with HW drivers)"
+            default n
+            help
+                When enabled, espFoC builds the in-the-loop plant factory instead
+                of MCPWM inverter, ADC shunt, and hardware rotor drivers.
+
+        if ESP_FOC_FITL
+
+            config FOC_ITL_PWM_10KHZ
+                bool "Use 10 kHz PWM tick (default 20 kHz)"
+                default n
+
+            config FOC_ITL_USE_RK2
+                bool "Plant integrator: RK2 instead of RK4"
+                default n
+
+            config FOC_ITL_MOTOR_DELTA
+                bool "Motor windings: delta (D1 star-equivalent conversion)"
+                default n
+
+            choice FOC_ITL_TICK_SOURCE
+                prompt "PWM tick backend"
+                default FOC_ITL_TICK_MCPWM if SOC_MCPWM_SUPPORTED
+                default FOC_ITL_TICK_GPTIMER
+
+                config FOC_ITL_TICK_MCPWM
+                    bool "MCPWM timer (device)"
+                    depends on SOC_MCPWM_SUPPORTED
+
+                config FOC_ITL_TICK_GPTIMER
+                    bool "GPTimer (QEMU / generic)"
+            endchoice
+
+            config FOC_ITL_DEFAULT_R_MILLIOHM
+                int "Default phase R [milli-ohm]"
+                range 1 1000000
+                default 1000
+
+            config FOC_ITL_DEFAULT_L_UH
+                int "Default phase L [micro-henry]"
+                range 1 1000000
+                default 2000
+
+            config FOC_ITL_DEFAULT_J_X1E7
+                int "Default inertia J * 1e7 [kg·m²]"
+                range 1 1000000
+                default 500
+
+            config FOC_ITL_DEFAULT_B_X1E7
+                int "Default viscous B * 1e7 [N·m·s/rad]"
+                range 0 1000000
+                default 100
+
+            config FOC_ITL_DEFAULT_KT_X1E7
+                int "Default torque constant Kt * 1e7 [N·m/A]"
+                range 1 1000000
+                default 1000
+
+            config FOC_ITL_DEFAULT_POLE_PAIRS
+                int "Default pole pairs"
+                range 1 64
+                default 13
+
+            config FOC_ITL_DEFAULT_I_MAX_MA
+                int "Default phase current limit [mA]"
+                range 100 100000
+                default 10000
+
+        endif
+    endmenu
+
 endmenu
