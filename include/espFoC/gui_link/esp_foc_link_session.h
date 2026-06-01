@@ -63,6 +63,13 @@ void esp_foc_link_session_on_disconnect(void);
 void esp_foc_link_session_on_scope_start(void);
 void esp_foc_link_session_on_scope_stop(void);
 
+/** Register an axis for tuner/scope/heartbeat (alias of esp_foc_tuner_attach_axis). */
+static inline esp_foc_err_t esp_foc_link_attach_axis(uint8_t axis_id,
+                                                       esp_foc_axis_t *axis)
+{
+    return esp_foc_tuner_attach_axis(axis_id, axis);
+}
+
 #ifdef __cplusplus
 }
 #endif

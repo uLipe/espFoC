@@ -282,6 +282,49 @@ TEST_CASE("tuner: motion writes update axis targets while running",
     TEST_ASSERT_EQUAL_INT32(targets[1], s_axis.target_i_q.raw);
 }
 
+TEST_CASE("tuner: bench mode UQ write and arm without align", "[espFoC][tuner]")
+{
+    esp_foc_axis_t axis;
+    esp_foc_motor_control_settings_t settings;
+    mock_inverter_init(&s_inv, 1.0f, 20000.0f);
+    mock_isensor_init(&s_isensor);
+    settings.natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW;
+    settings.motor_pole_pairs = 7;
+    settings.motor_unit = 0;
+
+    esp_foc_axis_bench_config_t bench_cfg = {
+        .motor = settings,
+        .calibrate_isensor_at_init = false,
+        .bench_theta_e = 0,
+    };
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_initialize_axis_bench(
+        &axis, mock_inverter_interface(&s_inv),
+        mock_isensor_interface(&s_isensor), &bench_cfg));
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_attach_axis(0, &axis));
+    esp_foc_link_session_force_connected(true);
+
+    q16_t uq = q16_from_float(0.1f);
+    uint8_t pl[4];
+    serialize_q16_le(pl, uq);
+    size_t resp_len = 0;
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(
+        0, ESP_FOC_TUNER_OP_WRITE, ESP_FOC_TUNER_WRITE_UQ_Q16,
+        pl, sizeof(pl), NULL, &resp_len));
+    TEST_ASSERT_EQUAL_INT32(uq, axis.u_q.raw);
+
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(
+        0, ESP_FOC_TUNER_OP_EXEC, ESP_FOC_TUNER_CMD_RUN_AXIS,
+        NULL, 0, NULL, &resp_len));
+    TEST_ASSERT_EQUAL(ESP_FOC_AXIS_STATE_BENCH, axis.state);
+
+    resp_len = 4;
+    uint8_t state_buf = 0;
+    TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_tuner_handle_request(
+        0, ESP_FOC_TUNER_OP_READ, ESP_FOC_TUNER_PARAM_AXIS_STATE,
+        NULL, 0, &state_buf, &resp_len));
+    TEST_ASSERT_TRUE(state_buf & ESP_FOC_AXIS_STATE_ALIGNED);
+}
+
 #else
 
 /* Tuner disabled: keep this TU non-empty so the test build stays consistent. */

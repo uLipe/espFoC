@@ -90,6 +90,8 @@ struct esp_foc_axis_s {
     q16_t natural_direction;
 
     esp_foc_axis_state_t state;
+    esp_foc_axis_mode_t mode;
+    q16_t bench_theta_e;
     volatile bool runner_shutdown;
     void *runner_low_speed_hdl;
     void *runner_outer_hdl;

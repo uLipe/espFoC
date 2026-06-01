@@ -58,6 +58,12 @@ typedef enum {
     ESP_FOC_TUNER_PARAM_AXIS_LAST_ERR   = 0x0041,
     ESP_FOC_TUNER_PARAM_NVS_PRESENT     = 0x0042,
     ESP_FOC_TUNER_PARAM_FIRMWARE_TYPE   = 0x0050,
+    ESP_FOC_TUNER_PARAM_UQ_Q16          = 0x0051,
+    ESP_FOC_TUNER_PARAM_UD_Q16          = 0x0052,
+    ESP_FOC_TUNER_PARAM_IU_Q16          = 0x0053,
+    ESP_FOC_TUNER_PARAM_IV_Q16          = 0x0054,
+    ESP_FOC_TUNER_PARAM_IQ_MEAS_Q16     = 0x0055,
+    ESP_FOC_TUNER_PARAM_BENCH_THETA_Q16 = 0x0056,
 
     /* Write: gain swap (atomic) */
     ESP_FOC_TUNER_WRITE_KP_Q16          = 0x0020,
@@ -70,6 +76,9 @@ typedef enum {
 
     ESP_FOC_TUNER_WRITE_TARGET_ID_Q16   = 0x0060,
     ESP_FOC_TUNER_WRITE_TARGET_IQ_Q16   = 0x0061,
+    ESP_FOC_TUNER_WRITE_UQ_Q16          = 0x0062,
+    ESP_FOC_TUNER_WRITE_UD_Q16          = 0x0063,
+    ESP_FOC_TUNER_WRITE_BENCH_THETA_Q16 = 0x0064,
 
     ESP_FOC_TUNER_CMD_CONNECT           = 0x00A0,
     ESP_FOC_TUNER_CMD_DISCONNECT        = 0x00A1,
@@ -77,6 +86,7 @@ typedef enum {
     ESP_FOC_TUNER_CMD_ALIGN_AXIS        = 0x00A2,
     ESP_FOC_TUNER_CMD_STOP_AXIS         = 0x00A3,
     ESP_FOC_TUNER_CMD_RUN_AXIS          = 0x00A4,
+    ESP_FOC_TUNER_CMD_CALISENSOR        = 0x00A5,
 
     ESP_FOC_TUNER_CMD_STORE_NVS         = 0x00B0,
     ESP_FOC_TUNER_CMD_ERASE_NVS         = 0x00B2,
@@ -181,6 +191,7 @@ uint32_t esp_foc_tuner_firmware_type(void);
 
 #define ESP_FOC_TUNER_FIRMWARE_TYPE_GENERIC     0u
 #define ESP_FOC_TUNER_FIRMWARE_TYPE_TSGX        0x58475354u  /* 'TSGX' LE */
+#define ESP_FOC_TUNER_FIRMWARE_TYPE_ISCHAR      0x52484349u  /* 'ICHR' LE — isensor characterization */
 
 #ifdef __cplusplus
 }
