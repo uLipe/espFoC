@@ -78,12 +78,12 @@ static uint32_t fitl_pwm_hz_from_config(uint32_t cfg_hz)
 #endif
 }
 
-static void snapshot_duties(esp_foc_itl_ctx_t *ctx, float *du, float *dv, float *dw)
+static void snapshot_duties(esp_foc_itl_ctx_t *ctx, q16_t *du, q16_t *dv, q16_t *dw)
 {
     esp_foc_critical_enter();
-    *du = q16_to_float(ctx->duty_u);
-    *dv = q16_to_float(ctx->duty_v);
-    *dw = q16_to_float(ctx->duty_w);
+    *du = ctx->duty_u;
+    *dv = ctx->duty_v;
+    *dw = ctx->duty_w;
     esp_foc_critical_leave();
 }
 
@@ -111,26 +111,23 @@ static void publish_currents(esp_foc_itl_ctx_t *ctx, q16_t iu, q16_t iv)
 static void plant_task_fn(void *arg)
 {
     esp_foc_itl_ctx_t *ctx = (esp_foc_itl_ctx_t *)arg;
-    const float dt = 1.0f / (float)ctx->pwm_hz;
 
     while (ctx->alive) {
         esp_foc_wait_notifier();
 
-        float du;
-        float dv;
-        float dw;
+        q16_t du;
+        q16_t dv;
+        q16_t dw;
         snapshot_duties(ctx, &du, &dv, &dw);
 
-        float vu;
-        float vv;
-        float vw;
+        q16_t vu;
+        q16_t vv;
+        q16_t vw;
         esp_foc_itl_plant_duties_to_phase_volts(du, dv, dw, &ctx->plant, &vu, &vv, &vw);
-        esp_foc_itl_plant_step(&ctx->plant, vu, vv, vw, dt);
+        esp_foc_itl_plant_step(&ctx->plant, vu, vv, vw);
 
-        const q16_t iu = esp_foc_biquad_q16_update(&ctx->bq_u,
-                                                   q16_from_float(ctx->plant.iu_a));
-        const q16_t iv = esp_foc_biquad_q16_update(&ctx->bq_v,
-                                                   q16_from_float(ctx->plant.iv_a));
+        const q16_t iu = esp_foc_biquad_q16_update(&ctx->bq_u, ctx->plant.iu_q16);
+        const q16_t iv = esp_foc_biquad_q16_update(&ctx->bq_v, ctx->plant.iv_q16);
         publish_currents(ctx, iu, iv);
 
         const int32_t ticks = esp_foc_itl_plant_encoder_ticks(&ctx->plant);
@@ -388,6 +385,7 @@ esp_foc_err_t esp_foc_in_the_loop_create(const esp_foc_in_the_loop_config_t *cfg
 
     const esp_foc_itl_plant_params_t plant_params = params_from_config(cfg);
     esp_foc_itl_plant_init(&s_ctx.plant, &plant_params);
+    esp_foc_itl_plant_set_dt(&s_ctx.plant, s_ctx.pwm_hz);
     wire_vtables(&s_ctx);
 
     const float fc = (float)CONFIG_ESP_FOC_CURRENT_FILTER_CUTOFF_HZ;
