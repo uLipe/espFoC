@@ -8,7 +8,7 @@
 #include "espFoC/esp_foc_err.h"
 #include "espFoC/esp_foc_units_q16.h"
 #include "espFoC/utils/pid_controller.h"
-#include "espFoC/utils/biquad_q16.h"
+#include "espFoC/esp_foc_estimator_q16.h"
 #include "espFoC/drivers/inverter_interface.h"
 #include "espFoC/drivers/current_sensor_interface.h"
 #include "espFoC/drivers/rotor_sensor_interface.h"
@@ -67,19 +67,17 @@ struct esp_foc_axis_s {
     q16_t dt;
     q16_t inv_dt;
 
-    /* Encoder: counts/s (Q16) from Δcounts × outer-loop sample rate. */
-    q16_t current_speed;
+    /* Mechanical speed from encoder PLL [rev/s Q16]; ISR writes, tasks read. */
+    volatile q16_t current_speed;
     /* Last `read_counts`: engineering counts in Q16 (e.g. 0..4095 for AS5600). */
     q16_t rotor_shaft_ticks;
     /* Encoder position × natural_direction, same count units as read_counts. */
     q16_t rotor_position;
-    q16_t rotor_position_prev;
     /* At init: q16_from_float(1/cpr); shaft_rev = q16_mul(counts_q16, this). */
     q16_t encoder_inv_cpr_q16;
-    /* At init: 2*pi*pp/cpr — ω_e from encoder counts/s (rad/s Q16). */
-    q16_t encoder_counts_speed_to_omega_e_q16;
-    /* θe_norm ∈ [0, Q16_ONE) ↔ [0, 2π) rad; outer loop writes, ISR reads. */
+    /* θe_norm ∈ [0, Q16_ONE) ↔ one electrical turn; ISR writes only. */
     volatile q16_t rotor_elec_angle;
+    esp_foc_estimator_q16_t rotor_estimator;
 
     int downsampling_low_speed;
 
@@ -97,12 +95,6 @@ struct esp_foc_axis_s {
     void *runner_outer_hdl;
 
     esp_foc_pid_controller_t torque_controller[2];
-    /* Velocity smoothing biquad. Cutoff dialled at init from
-     * CONFIG_ESP_FOC_VELOCITY_FILTER_CUTOFF_HZ. The current i_q / i_d
-     * filtering used to live here as well; it now sits inside the
-     * isensor driver (per-phase, on raw ADC counts), which is the
-     * only placement that survives the move into the PWM ISR. */
-    esp_foc_biquad_q16_t velocity_filter;
     /* Current-sense low-pass cutoff (Hz, q16) currently programmed in
      * the isensor driver. The driver owns the biquad coefficients;
      * this field is just so the tuner can read the value back without

@@ -22,7 +22,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                         esp_foc_rotor_sensor_t *rotor,
                                         esp_foc_isensor_t *isensor,
                                         esp_foc_motor_control_settings_t settings);
-/** Recompute encoder_inv_cpr_q16 and encoder_counts_speed_to_omega_e_q16 after pp/cpr. */
+/** Recompute encoder_inv_cpr_q16 after pole pairs or CPR change. */
 void esp_foc_axis_refresh_encoder_q16_scales(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis);
 esp_foc_err_t esp_foc_run(esp_foc_axis_t *axis);

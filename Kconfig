@@ -76,11 +76,6 @@ menu "espFoC Settings"
                 Cutoff of the 2nd-order Butterworth on raw ADC before gain scaling.
                 Overridable at runtime when NVS calibration is used.
 
-        config ESP_FOC_VELOCITY_FILTER_CUTOFF_HZ
-            int "Encoder velocity biquad cutoff [Hz]"
-            range 100 1000
-            default 200
-
         config ESP_FOC_LOW_SPEED_DOWNSAMPLING
             int "Outer loop downsample factor (PWM ticks per slow loop)"
             range 1 1000
@@ -88,6 +83,21 @@ menu "espFoC Settings"
             help
                 The PWM ISR counts down this many ticks before notifying the
                 slow encoder task once.
+
+        config ESP_FOC_ENCODER_PLL_BW_HZ
+            int "Encoder PLL bandwidth [Hz] (mechanical, zeta=1)"
+            range 10 200
+            default 50
+            help
+                Second-order encoder PLL tracking bandwidth. The estimator
+                integrates at PWM rate; this sets Kp/Ki from the ISR dt.
+
+        config ESP_FOC_ENCODER_PLL_OMEGA_MAX_REV_S
+            int "Encoder PLL omega integrator clamp [mech rev/s]"
+            range 1 1000
+            default 100
+            help
+                Hard limit on the PLL velocity integrator (mechanical rev/s).
 
         config ESP_FOC_ISENSOR_CALIBRATION_ROUNDS
             int "Current sensor calibration averaging rounds"
@@ -118,19 +128,11 @@ menu "espFoC Settings"
 
         config ESP_FOC_SCOPE_NUM_CHANNELS
             int "Max scope channels"
-            default 8
-
-        config ESP_FOC_SCOPE_LEGACY_CSV
-            bool "Use legacy SCOPE as CSV floats (sprintf)"
-            depends on ESP_FOC_SCOPE
-            default n
-            help
-                When n (default) the link sends SCOPE v1 binary (Q16 int32
-                per channel, see host scope_sample.py). When y, the old
-                comma-separated %f line is used for a matching host build.
+            default 14
 
         config ESP_FOC_SCOPE_BUFFER_SIZE
             int "Scope ring buffer (frames per half-buffer)"
+            default 512 if ESP_FOC_SCOPE_NUM_CHANNELS = 14
             default 4096 if ESP_FOC_SCOPE_NUM_CHANNELS = 8
             default 1024
 

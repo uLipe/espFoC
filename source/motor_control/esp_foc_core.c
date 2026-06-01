@@ -22,9 +22,9 @@
  * SOFTWARE.
  */
 
-#include <math.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "espFoC/esp_foc.h"
 
@@ -62,12 +62,8 @@ void esp_foc_axis_refresh_encoder_q16_scales(esp_foc_axis_t *axis)
         cpr = 1u;
     }
     axis->encoder_inv_cpr_q16 = q16_from_float(1.0f / (float)cpr);
-    int pp = axis->motor_pole_pairs;
-    if (pp < 1) {
-        pp = 1;
-    }
-    axis->encoder_counts_speed_to_omega_e_q16 =
-        q16_from_float((float)(2.0 * M_PI * (double)pp) / (float)cpr);
+    esp_foc_estimator_q16_set_pole_pairs(&axis->rotor_estimator,
+                                         axis->motor_pole_pairs);
 }
 
 static void apply_bypass_current_pid(esp_foc_pid_controller_t *pid,
@@ -120,7 +116,12 @@ static void wait_runner_dead(void *task_handle)
 /* -------------------------------------------------------------------------
  * PWM ISR hot path: read published Clarke currents, current PI, SVPWM.
  * ------------------------------------------------------------------------- */
-static void foc_hot_isr(void *data)
+static inline q16_t axis_theta_meas_mech(const esp_foc_axis_t *axis)
+{
+    return q16_normalize_angle(q16_mul(axis->rotor_position, axis->encoder_inv_cpr_q16));
+}
+
+static void IRAM_ATTR foc_hot_isr(void *data)
 {
     esp_foc_axis_t *axis = (esp_foc_axis_t *)data;
     if (axis == NULL || axis->state != ESP_FOC_AXIS_STATE_RUNNING) {
@@ -134,6 +135,11 @@ static void foc_hot_isr(void *data)
 #if defined(CONFIG_ESP_FOC_SCOPE)
     uint64_t hot_path_t0 = esp_foc_now_useconds();
 #endif
+
+    esp_foc_estimator_q16_step(&axis->rotor_estimator);
+    axis->rotor_elec_angle =
+        esp_foc_estimator_q16_theta_elec(&axis->rotor_estimator);
+    axis->current_speed = axis->rotor_estimator.omega_est_mech;
 
     q16_t i_alpha = axis->latest_i_alpha;
     q16_t i_beta = axis->latest_i_beta;
@@ -195,7 +201,7 @@ static void foc_hot_isr(void *data)
 }
 
 /* -------------------------------------------------------------------------
- * Slow loop: encoder, electrical angle, velocity filter, scope, regulator.
+ * Slow loop: encoder measurement, scope, regulator callback trigger.
  * ------------------------------------------------------------------------- */
 static void core_low_speed_loop(void *arg)
 {
@@ -215,11 +221,9 @@ static void core_low_speed_loop(void *arg)
 
     axis->rotor_shaft_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
     axis->rotor_position = q16_mul(axis->rotor_shaft_ticks, axis->natural_direction);
-    axis->rotor_position_prev = axis->rotor_position;
+    q16_t theta_meas = axis_theta_meas_mech(axis);
+    esp_foc_estimator_q16_snap(&axis->rotor_estimator, theta_meas);
     axis->current_speed = 0;
-    axis->rotor_elec_angle = q16_mul(q16_mul(axis->rotor_position,
-                                            axis->encoder_inv_cpr_q16),
-                                            q16_from_int(axis->motor_pole_pairs));
 
     axis->inverter_driver->set_inverter_callback(axis->inverter_driver,
                                                  foc_hot_isr,
@@ -236,17 +240,8 @@ static void core_low_speed_loop(void *arg)
 
         axis->rotor_shaft_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
         axis->rotor_position = q16_mul(axis->rotor_shaft_ticks, axis->natural_direction);
-
-        axis->rotor_elec_angle = q16_mul(q16_mul(axis->rotor_position, axis->encoder_inv_cpr_q16),
-                                 q16_from_int(axis->motor_pole_pairs));
-
-        q16_t dtheta = q16_sub(axis->rotor_position, axis->rotor_position_prev);
-        q16_t raw_speed = q16_mul(dtheta,
-                                   axis->inv_dt *
-                                       q16_from_int(CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING));
-        axis->current_speed = esp_foc_biquad_q16_update(
-                                  &axis->velocity_filter, raw_speed);
-        axis->rotor_position_prev = axis->rotor_position;
+        esp_foc_estimator_q16_set_meas(&axis->rotor_estimator,
+                                       axis_theta_meas_mech(axis));
 
 #if defined(CONFIG_ESP_FOC_SCOPE)
         esp_foc_scope_data_push();
@@ -382,12 +377,19 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
             &axis->i_v);
     }
 
-    esp_foc_biquad_butterworth_lpf_design_q16(
-        &axis->velocity_filter,
-        (float)CONFIG_ESP_FOC_VELOCITY_FILTER_CUTOFF_HZ,
-        loop_fs_hz);
-
     esp_foc_axis_refresh_encoder_q16_scales(axis);
+
+    {
+        esp_foc_estimator_q16_config_t est_cfg = {
+            .dt_isr = axis->dt,
+            .pll_bw_hz = (float)CONFIG_ESP_FOC_ENCODER_PLL_BW_HZ,
+            .omega_max_mech =
+                q16_from_float((float)CONFIG_ESP_FOC_ENCODER_PLL_OMEGA_MAX_REV_S),
+            .pole_pairs = axis->motor_pole_pairs,
+        };
+        esp_foc_estimator_q16_init(&axis->rotor_estimator, &est_cfg);
+    }
+
     axis->torque_controller[0].ke = Q16_ONE;
     axis->torque_controller[1].ke = Q16_ONE;
 
@@ -569,6 +571,9 @@ esp_foc_err_t esp_foc_stop(esp_foc_axis_t *axis)
     axis->runner_shutdown = false;
     axis->regulator_ev = NULL;
     axis->low_speed_ev = NULL;
+    esp_foc_estimator_q16_reset(&axis->rotor_estimator);
+    axis->rotor_elec_angle = 0;
+    axis->current_speed = 0;
     return ESP_FOC_OK;
 }
 
