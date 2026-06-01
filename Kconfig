@@ -147,7 +147,7 @@ menu "espFoC Settings"
             depends on ESP_FOC_TUNER_ENABLE
             default ESP_FOC_BRIDGE_NONE
             help
-                Physical bus for Tuner Studio or custom host tools.
+                Physical bus for espFoC Tool / espfocctl or custom host tools.
 
             config ESP_FOC_BRIDGE_NONE
                 bool "None (weak callbacks in application)"
