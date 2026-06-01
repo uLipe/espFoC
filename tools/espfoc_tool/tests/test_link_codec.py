@@ -56,7 +56,7 @@ def test_encode_roundtrip_small():
 
 
 def test_encode_roundtrip_empty():
-    frame = encode(Channel.LOG, 0)
+    frame = encode(Channel.TUNER, 0)
     dec = Decoder()
     for b in frame[:-1]:
         assert dec.push(b) == Status.NEED_MORE

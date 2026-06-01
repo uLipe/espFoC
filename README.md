@@ -92,12 +92,13 @@ It opens without a board connected (USB auto-scan) and exposes four views:
 
 | View | Purpose |
 |------|---------|
-| **Config** | Live gains, NVS store/erase, motor parameters |
-| **Current** | MPZ design plots (step, Bode, pole-zero, root locus) |
+| **Config** | Live gains, editor vs device diff, write dirty fields, NVS RMW store/erase |
+| **Current** | Motor R/L/bw + MPZ plots (step, Bode, pole-zero, root locus) |
 | **Control** | id/iq targets, align, E-stop, SVPWM hexagon |
-| **States** | Named scope channels (axis_tuning wire map) |
+| **States** | Named scope channels ([axis_tuning](examples/axis_tuning) wire map) |
 
 OpenGL plot rendering is enabled by default; set `ESPFOC_TOOL_NO_GL=1` to disable.
+Full workflow: [`doc/TUNING.md`](doc/TUNING.md).
 
 ### Launch espFoC Tool
 
@@ -142,6 +143,8 @@ and NVS store/erase from scripts:
 
 ```bash
 PYTHONPATH=tools python3 -m espfoc_tool.cli.espfocctl --port /dev/ttyACM0 -i
+# one-shot E-stop:
+PYTHONPATH=tools python3 -m espfoc_tool.cli.espfocctl --port /dev/ttyACM0 estop
 ```
 
 ---
@@ -224,12 +227,11 @@ loop contains no floating-point operations.
 ```
 espFoC/
 ├── doc/
-│   ├── images/         # architecture, espFoC Tool logo, demo gif
-│   └── TUNING.md       # deep dive: autogen, runtime API, protocol, CLI
+│   ├── images/         # architecture, espFoC Tool logo, demo gifs
+│   └── TUNING.md       # espFoC Tool + espfocctl workflow and scope map
 ├── examples/           # axis_tuning / unit_test_runner / test_drivers
 ├── include/espFoC/     # public API
-├── scripts/
-│   └── motors/*.json   # motor profiles consumed by the autotuner
+├── scripts/            # gen_iq31_sin_lut.py, build_samples.sh
 ├── source/
 │   ├── calibration/    # NVS calibration format and axis helpers
 │   ├── drivers/        # inverters, encoders, shunts, tuner bridges

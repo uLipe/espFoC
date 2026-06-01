@@ -6,6 +6,21 @@ This file is used to generate GitHub releases. All versions from 2.0.0 onward ar
 
 ## Unreleased
 
+### Added
+
+- **espFoC Tool** (`tools/espfoc_tool`) — PySide6 control GUI replacing TunerStudio: Config / Current / Control / States views, USB auto-scan, offline navigation, OpenGL plots by default.
+- **`espfocctl`** — CLI rename from `tunerctl`; adds `estop` (id/iq zero + stop).
+- **`doc/TUNING.md`** — host tuning reference (views, scope map, CLI, troubleshooting).
+
+### Removed
+
+- **TunerStudio** host app (`tools/espfoc_studio`), generic Scope tab, in-GUI demo/loopback mode, Generate App / Hardware tabs (never shipped in 3.x tree).
+
+### Changed
+
+- Host package **`espfoc_studio` → `espfoc_tool`**; launch with `python -m espfoc_tool.gui`.
+- CI **`python_tests`** job runs `tools/espfoc_tool/tests` (offscreen Qt, no GL).
+
 ### Removed
 
 - **Tuner override mode** (`CMD_OVERRIDE_ON/OFF`, `TUNER_OVERRIDE` state bit, `ESP_FOC_TUNER_ALWAYS_OVERRIDE_VOLTAGE_MODE`). Host writes `target_i_d` / `target_i_q` directly while the axis is `RUNNING`.

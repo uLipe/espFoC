@@ -75,9 +75,7 @@ jobs:
         idf.py build
         popd
 
-  # Temporarily disabled while tuner protocol / axis lifecycle catches up with Studio.
   python_tests:
-    if: false
     name: espFoC Tool host tests
     runs-on: ubuntu-latest
     steps:

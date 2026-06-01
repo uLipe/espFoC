@@ -28,6 +28,7 @@ def test_send_oserror_is_tuner_error() -> None:
     r.start()
     try:
         c = TunerClient(r, axis=0)
+        c._connected = True
         with pytest.raises(TunerError) as einfo:
             c.read_kp()
         assert "link I/O" in str(einfo.value)
@@ -55,6 +56,7 @@ def test_send_serial_exception_is_tuner_error() -> None:
     r.start()
     try:
         c = TunerClient(r, axis=0)
+        c._connected = True
         with pytest.raises(TunerError) as einfo:
             c.read_kp()
         assert "link I/O" in str(einfo.value)
