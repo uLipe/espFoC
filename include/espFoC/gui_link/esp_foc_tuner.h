@@ -64,6 +64,9 @@ typedef enum {
     ESP_FOC_TUNER_PARAM_IV_Q16          = 0x0054,
     ESP_FOC_TUNER_PARAM_IQ_MEAS_Q16     = 0x0055,
     ESP_FOC_TUNER_PARAM_BENCH_THETA_Q16 = 0x0056,
+    ESP_FOC_TUNER_PARAM_ENC_COUNTS_Q16    = 0x0057,
+    ESP_FOC_TUNER_PARAM_ENC_DEG_Q16       = 0x0058,
+    ESP_FOC_TUNER_PARAM_ENC_TURNS_Q16     = 0x0059,
 
     /* Write: gain swap (atomic) */
     ESP_FOC_TUNER_WRITE_KP_Q16          = 0x0020,
@@ -87,6 +90,7 @@ typedef enum {
     ESP_FOC_TUNER_CMD_STOP_AXIS         = 0x00A3,
     ESP_FOC_TUNER_CMD_RUN_AXIS          = 0x00A4,
     ESP_FOC_TUNER_CMD_CALISENSOR        = 0x00A5,
+    ESP_FOC_TUNER_CMD_ENC_SET_ZERO      = 0x00A6,
 
     ESP_FOC_TUNER_CMD_STORE_NVS         = 0x00B0,
     ESP_FOC_TUNER_CMD_ERASE_NVS         = 0x00B2,
@@ -192,6 +196,7 @@ uint32_t esp_foc_tuner_firmware_type(void);
 #define ESP_FOC_TUNER_FIRMWARE_TYPE_GENERIC     0u
 #define ESP_FOC_TUNER_FIRMWARE_TYPE_TSGX        0x58475354u  /* 'TSGX' LE */
 #define ESP_FOC_TUNER_FIRMWARE_TYPE_ISCHAR      0x52484349u  /* 'ICHR' LE — isensor characterization */
+#define ESP_FOC_TUNER_FIRMWARE_TYPE_ENCHAR      0x5248454Eu  /* 'ENHR' LE — encoder characterization */
 
 #ifdef __cplusplus
 }

@@ -22,12 +22,9 @@
 #elif defined(CONFIG_AXIS_TUNING_ROTOR_SIMU)
 #include "espFoC/rotor_sensor_simu.h"
 #endif
-#if defined(CONFIG_IDF_TARGET_ESP32P4)
-#include "espFoC/current_sensor_adc_one_shot.h"
-#else
 #include "espFoC/current_sensor_adc.h"
-#endif
 #include "espFoC/utils/esp_foc_q16.h"
+#include "soc/soc_caps.h"
 
 static const char *TAG = "axis_tuning";
 
@@ -137,19 +134,6 @@ void app_main(void)
         return;
     }
 
-#if defined(CONFIG_IDF_TARGET_ESP32P4)
-    esp_foc_isensor_adc_oneshot_config_t shunt_cfg = {
-        .axis_channels = {(adc_channel_t)CONFIG_AXIS_TUNING_ISENSE_CH_U,
-                          (adc_channel_t)CONFIG_AXIS_TUNING_ISENSE_CH_V},
-        .units         = {(adc_unit_t)(CONFIG_AXIS_TUNING_ISENSE_ADC_UNIT - 1),
-                          (adc_unit_t)(CONFIG_AXIS_TUNING_ISENSE_ADC_UNIT - 1)},
-        .amp_gain      = (float)CONFIG_AXIS_TUNING_ISENSE_AMP_GAIN_X100 / 100.0f,
-        .shunt_resistance = (float)CONFIG_AXIS_TUNING_ISENSE_SHUNT_MOHM / 1000.0f,
-        .number_of_channels = 2,
-        .enable_analog_encoder = false,
-    };
-    s_shunts = isensor_adc_oneshot_new(&shunt_cfg, NULL);
-#else
     esp_foc_isensor_adc_config_t shunt_cfg = {
         .channels = {(adc_channel_t)CONFIG_AXIS_TUNING_ISENSE_CH_U,
                       (adc_channel_t)CONFIG_AXIS_TUNING_ISENSE_CH_V},
@@ -158,7 +142,16 @@ void app_main(void)
         .shunt_resistance = (float)CONFIG_AXIS_TUNING_ISENSE_SHUNT_MOHM / 1000.0f,
     };
     s_shunts = isensor_adc_new(&shunt_cfg);
+    if (s_shunts != NULL) {
+#if SOC_ETM_SUPPORTED
+        esp_foc_isensor_adc_etm_config_t etm_cfg = {
+            .mcpwm_timer = 0,
+            .event = ESP_FOC_ISENSOR_ADC_MCPWM_EVT_TIMER_TEZ,
+        };
+        esp_foc_isensor_adc_set_etm_source(s_shunts, &etm_cfg);
+        esp_foc_isensor_adc_set_trigger(s_shunts, ESP_FOC_ISENSOR_ADC_TRIG_ETM);
 #endif
+    }
     if (s_shunts == NULL) {
         ESP_LOGE(TAG, "current sensor init failed");
         return;

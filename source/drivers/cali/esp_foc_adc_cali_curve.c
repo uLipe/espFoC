@@ -11,11 +11,11 @@
 #include <assert.h>
 #include "esp_err.h"
 #include "sdkconfig.h"
-#include "esp_efuse_rtc_calib.h"
 #include "esp_private/adc_share_hw_ctrl.h"
 #include "esp_foc_adc_cali.h"
 
 #if SOC_ADC_CALIB_SCHEME_CURVE_FITTING_SUPPORTED
+#include "esp_efuse_rtc_calib.h"
 
 static const int coeff_a_scaling = 65536;
 

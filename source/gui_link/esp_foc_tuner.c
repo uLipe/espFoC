@@ -159,6 +159,13 @@ static esp_foc_err_t handle_read(esp_foc_axis_t *axis,
     case ESP_FOC_TUNER_PARAM_IV_Q16:          value = axis->i_v; break;
     case ESP_FOC_TUNER_PARAM_IQ_MEAS_Q16:     value = axis->i_q.raw; break;
     case ESP_FOC_TUNER_PARAM_BENCH_THETA_Q16: value = axis->bench_theta_e; break;
+    case ESP_FOC_TUNER_PARAM_ENC_COUNTS_Q16:  value = axis->rotor_shaft_ticks; break;
+    case ESP_FOC_TUNER_PARAM_ENC_TURNS_Q16:
+        value = axis->rotor_estimator.theta_meas_mech;
+        break;
+    case ESP_FOC_TUNER_PARAM_ENC_DEG_Q16:
+        value = q16_mul(axis->rotor_estimator.theta_meas_mech, q16_from_float(360.0f));
+        break;
     default:
         return ESP_FOC_ERR_INVALID_ARG;
     }
@@ -375,6 +382,15 @@ static esp_foc_err_t handle_exec(esp_foc_axis_t *axis,
         }
         axis->isensor_driver->calibrate_isensors(
             axis->isensor_driver, CONFIG_ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
+        return ESP_FOC_OK;
+    }
+
+    if (id == ESP_FOC_TUNER_CMD_ENC_SET_ZERO) {
+        if (axis->rotor_sensor_driver == NULL ||
+            axis->rotor_sensor_driver->set_to_zero == NULL) {
+            return ESP_FOC_ERR_AXIS_INVALID_STATE;
+        }
+        axis->rotor_sensor_driver->set_to_zero(axis->rotor_sensor_driver);
         return ESP_FOC_OK;
     }
 
