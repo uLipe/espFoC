@@ -124,10 +124,7 @@ class AnalysisPanel(QWidget):
         btn_row = QHBoxLayout()
         self._apply_mpz_btn = QPushButton("Apply MPZ to RAM")
         self._apply_mpz_btn.clicked.connect(self._on_apply_mpz)
-        self._save_nvs_btn = QPushButton("Save to NVS")
-        self._save_nvs_btn.clicked.connect(self._on_save_nvs)
         btn_row.addWidget(self._apply_mpz_btn)
-        btn_row.addWidget(self._save_nvs_btn)
         btn_row.addStretch(1)
         root.addLayout(btn_row)
 
@@ -143,14 +140,6 @@ class AnalysisPanel(QWidget):
             self._client.write_ki(gains.ki)
             self._client.write_int_lim(gains.int_lim)
         except (TunerError, ValueError) as e:
-            return
-
-    def _on_save_nvs(self) -> None:
-        if self._client is None:
-            return
-        try:
-            self._client.store_calibration()
-        except TunerError:
             return
 
     def update_model(self, motor_r: float, motor_l: float, bw_hz: float,

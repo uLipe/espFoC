@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..link import LinkReader
+from ..link.transport_serial import SerialTransport
 from ..protocol import TunerClient, TunerError
 from .analysis_panel import AnalysisPanel
 from .connection_manager import ConnectionManager
@@ -30,6 +31,7 @@ from .svm_panel import SvmPanel
 from .theme import make_badge_qss, make_reset_board_button_qss
 from .tuning_panel import TuningPanel
 from .tuner_poll_worker import TunerPollSnapshot, TunerPollWorker
+from .views import ConfigView, CurrentView
 
 _LINK_DOWN_AFTER_CONSECUTIVE_PING_FAILS = 10
 
@@ -72,18 +74,20 @@ class MainWindow(QMainWindow):
         self._analysis_debounce.timeout.connect(self._run_pending_analysis)
         self._analysis_pending = None
 
-        self._tuning = TuningPanel(
-            client=None, on_params_changed=self._on_params)
+        self._tuning = TuningPanel(client=None)
+        self._config = ConfigView(self._tuning)
+        self._current = CurrentView(
+            self._analysis, on_params_changed=self._on_params)
         self._control = ControlRail(
             client=None, connected=self._device_connected)
         self._svm = SvmPanel(reader=None)
         self._states = StatesPanel(reader=None)
 
-        self._stack.addWidget(self._wrap_margin(self._tuning))
-        self._stack.addWidget(self._wrap_margin(self._analysis))
+        self._stack.addWidget(self._config)
+        self._stack.addWidget(self._current)
         ctrl = QWidget()
         cs = QHBoxLayout(ctrl)
-        cs.setContentsMargins(0, 0, 0, 0)
+        cs.setContentsMargins(8, 8, 8, 8)
         split = QSplitter(Qt.Horizontal)
         split.addWidget(self._control)
         split.addWidget(self._svm)
@@ -92,7 +96,11 @@ class MainWindow(QMainWindow):
         split.setSizes([320, 900])
         cs.addWidget(split)
         self._stack.addWidget(ctrl)
-        self._stack.addWidget(self._states)
+        states_wrap = QWidget()
+        sl = QHBoxLayout(states_wrap)
+        sl.setContentsMargins(8, 8, 8, 8)
+        sl.addWidget(self._states)
+        self._stack.addWidget(states_wrap)
 
         sb = self.statusBar()
         self._link_badge = QLabel()
@@ -121,23 +129,16 @@ class MainWindow(QMainWindow):
         self._on_conn_state(self._conn.state)
         self._conn.start()
 
-    @staticmethod
-    def _wrap_margin(child: QWidget) -> QWidget:
-        page = QWidget()
-        lay = QHBoxLayout(page)
-        lay.setContentsMargins(8, 8, 8, 8)
-        lay.addWidget(child)
-        return page
-
     def _device_connected(self) -> bool:
         return self._client is not None and self._conn.connected
 
     def _set_device_actions_enabled(self, on: bool) -> None:
         self._reset_btn.setEnabled(on)
         self._tuning.set_actions_enabled(on)
+        self._config.nvs.set_actions_enabled(on)
+        self._config.nvs.set_client(self._client if on else None)
         self._control.set_actions_enabled(on)
         self._analysis._apply_mpz_btn.setEnabled(on)
-        self._analysis._save_nvs_btn.setEnabled(on)
         self._analysis._motor_pole_pairs.setEnabled(on)
         if on:
             self._states.set_interactive(True)
@@ -161,9 +162,9 @@ class MainWindow(QMainWindow):
     def _on_client_ready(self, client: object) -> None:
         self._client = client  # type: ignore[assignment]
         assert isinstance(self._client, TunerClient)
-        if self._conn._fixed_port:
-            self._serial_config = (
-                self._conn._fixed_port, self._conn._baud, self._conn._axis)
+        port = self._conn.active_port or self._conn._fixed_port
+        if port:
+            self._serial_config = (port, self._conn._baud, self._conn._axis)
         self._tuning.set_client(self._client)
         self._control.set_client(self._client)
         self._analysis._client = self._client
@@ -176,6 +177,8 @@ class MainWindow(QMainWindow):
             self._client.scope_start()
         except TunerError:
             pass
+        self._link_ping_seen = False
+        self._ping_fail_streak = 0
         text, qss = make_badge_qss("LINK_WAIT")
         self._link_badge.setText(text)
         self._link_badge.setStyleSheet(qss)
@@ -183,6 +186,7 @@ class MainWindow(QMainWindow):
     def _on_client_lost(self) -> None:
         self._stop_poll_worker()
         self._client = None
+        self._serial_config = None
         self._tuning.set_client(None)
         self._control.set_client(None)
         self._analysis._client = None
@@ -252,17 +256,82 @@ class MainWindow(QMainWindow):
             self._ping_fail_streak += 1
         if self._client is None:
             return
-        if not self._link_ping_seen:
-            return
         if self._ping_fail_streak >= _LINK_DOWN_AFTER_CONSECUTIVE_PING_FAILS:
             self._set_link_badge("LINK_DOWN")
         else:
             self._set_link_badge("LINK_OK")
+        if (not ok
+                and self._serial_config is not None
+                and self._poll_error_implies_dead_transport(err)
+                and self._maybe_reconnect()):
+            QMetaObject.invokeMethod(
+                self._poll_worker, "ping_now", Qt.QueuedConnection)
 
     def _set_link_badge(self, key: str) -> None:
         text, qss = make_badge_qss(key)
         self._link_badge.setText(text)
         self._link_badge.setStyleSheet(qss)
+
+    @staticmethod
+    def _poll_error_implies_dead_transport(err: str) -> bool:
+        el = (err or "").lower()
+        if ("link not running" in el or "reader stopped" in el
+                or "link i/o:" in el):
+            return True
+        return any(s in el for s in (
+            "errno 5", "[errno 5]", "input/output error",
+            "bad file descriptor", "serial send failed",
+            "timeout waiting for response", "device disconnected",
+        ))
+
+    def _maybe_reconnect(self) -> bool:
+        if self._serial_config is None:
+            return False
+        now = time.monotonic()
+        if now - self._last_reconnect_mono < 1.0:
+            return False
+        self._last_reconnect_mono = now
+        return self._reconnect_serial()
+
+    def _reconnect_serial(self) -> bool:
+        assert self._serial_config is not None
+        self._tuning.last_poll_ok = False
+        self._link_ping_seen = False
+        self._ping_fail_streak = 0
+        if self._poll_worker is not None:
+            self._poll_worker.suspend_requested.emit(True)
+        time.sleep(0.15)
+        success = False
+        try:
+            self._tuning.detach_log_reader()
+            old = self._client.reader if self._client else None
+            if old is not None:
+                try:
+                    old.stop()
+                except Exception:
+                    pass
+            port, baud, _axis = self._serial_config
+            t = SerialTransport(port=port, baud=baud)
+            r = LinkReader(t)
+            r.start()
+            time.sleep(0.15)
+            if self._client is not None:
+                self._client.replace_reader(r)
+                self._svm.attach_reader(r)
+                self._states.attach_reader(r)
+                self._tuning.rebind_log_reader()
+                success = True
+        except Exception:
+            success = False
+        finally:
+            if self._poll_worker is not None:
+                QMetaObject.invokeMethod(
+                    self._poll_worker, "run_post_reconnect_reads",
+                    Qt.QueuedConnection)
+                QMetaObject.invokeMethod(
+                    self._poll_worker, "finish_reconnect",
+                    Qt.QueuedConnection)
+        return success
 
     def _on_poll_finished(
             self,
@@ -272,8 +341,17 @@ class MainWindow(QMainWindow):
         if ok and snap is not None:
             self._tuning.apply_poll_snapshot(snap)
             self._control.apply_override_state(snap.override_active)
+            self._config.nvs.update_live(
+                snap.kp, snap.ki, snap.lim, snap.fc)
+            self._config.nvs.set_calibration_present(snap.cal_present)
+            self._current.motor.set_kp_ki_hint(snap.kp, snap.ki)
         else:
             self._tuning.apply_poll_error(err or "poll failed")
+            if (self._serial_config is not None
+                    and not self._tuning.last_poll_ok
+                    and self._poll_error_implies_dead_transport(err)
+                    and self._maybe_reconnect()):
+                self._tuning.poll_refresh_requested.emit(True)
         if self._client is not None:
             self._states.set_interactive(self._client.reader.is_running)
 
@@ -289,9 +367,11 @@ class MainWindow(QMainWindow):
             t = shadows
             self._tuning.apply_nvs_shadow_floats(
                 t[0], t[1], t[2], t[3], t[4], t[5])
+            self._current.motor.apply_nvs_motor(t[0], t[1], t[2])
+            self._config.nvs.capture_nvs_reference(
+                t[3], t[4], self._tuning._lim_spin.value(), t[5])
         if pole is not None:
             self._analysis.set_motor_pole_pairs_silent(int(pole))
-        self._tuning._notify_params_changed()
 
     def _on_params(self, r: float, l: float, bw: float,
                    kp: float, ki: float) -> None:

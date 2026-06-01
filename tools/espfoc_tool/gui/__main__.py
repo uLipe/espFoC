@@ -6,7 +6,10 @@ import argparse
 import os
 import signal
 import sys
+from pathlib import Path
 from typing import Optional
+
+from PySide6.QtGui import QIcon
 
 from .app import create_application
 from .connection_manager import ConnectionManager
@@ -48,6 +51,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     from PySide6.QtCore import QTimer
 
     app = create_application()
+    for icon_name in ("espfoc_tool_logo.svg", "espfoc_tool_logo.png"):
+        icon_path = Path(__file__).resolve().parents[3] / "doc" / "images" / icon_name
+        if icon_path.is_file():
+            app.setWindowIcon(QIcon(str(icon_path)))
+            break
     conn = ConnectionManager(
         baud=args.baud, axis=args.axis, fixed_port=args.port)
     window = MainWindow(conn, title="espFoC Tool")

@@ -91,6 +91,11 @@ class ConnectionManager(QObject):
         self._scan_timer.setInterval(SCAN_INTERVAL_MS)
         self._scan_timer.timeout.connect(self._on_scan_tick)
         self._busy = False
+        self._active_port: Optional[str] = None
+
+    @property
+    def active_port(self) -> Optional[str]:
+        return self._active_port
 
     @property
     def client(self) -> Optional[TunerClient]:
@@ -138,6 +143,7 @@ class ConnectionManager(QObject):
         except Exception:
             pass
         self._client = None
+        self._active_port = None
         self.client_lost.emit()
         self._set_state(self.STATE_NO_DEVICE)
 
@@ -153,6 +159,7 @@ class ConnectionManager(QObject):
             if client is None:
                 return False
             self._client = client
+            self._active_port = port
             self._set_state(self.STATE_CONNECTED)
             self.port_descr_changed.emit(f"{port} @ {self._baud}")
             self.client_ready.emit(client)
