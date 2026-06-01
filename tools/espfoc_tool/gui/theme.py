@@ -165,9 +165,9 @@ def apply_dark_theme(app: QApplication, *, use_opengl_plots: bool = True) -> Non
         }}
         QGroupBox {{
             border: 1px solid {_BORDER};
-            border-radius: 6px;
-            margin-top: 12px;
-            padding: 6px;
+            border-radius: 12px;
+            margin-top: 14px;
+            padding: 10px 8px 8px 8px;
             background-color: {_BG_ALT};
         }}
         QGroupBox::title {{

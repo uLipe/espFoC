@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont
@@ -62,16 +62,10 @@ class TuningPanel(QWidget):
     long_operation = Signal(bool)
     poll_refresh_requested = Signal(bool)
 
-    def __init__(self, client: Optional[TunerClient] = None,
-                 on_params_changed: Optional[Callable[[float, float, float,
-                                                       float, float], None]] = None) -> None:
+    def __init__(self, client: Optional[TunerClient] = None) -> None:
         super().__init__()
         self._client = client
         self.last_poll_ok: bool = False
-        self._on_params_changed = on_params_changed
-        self._last_motor_r = 1.08
-        self._last_motor_l = 0.0018
-        self._last_bw = 150.0
         self._cal_present = False
         self.last_axis_state: Optional[AxisStateFlag] = None
 
@@ -139,50 +133,19 @@ class TuningPanel(QWidget):
         mform.addRow(btn_apply)
         root.addWidget(manual)
 
-        # --- Motor model (analysis tab) ---
-        mpz = QGroupBox("Motor model (analysis)")
-        mfrm = QFormLayout(mpz)
-        self._r_spin = _spin(0.001, 1000.0, 4, self._last_motor_r,
-                             step=0.01, suffix=" Ω")
-        self._l_mh_spin = _spin(0.001, 10_000.0, 4,
-                                self._last_motor_l * 1000.0,
-                                step=0.01, suffix=" mH")
-        self._bw_spin = _spin(1.0, 5000.0, 1, self._last_bw,
-                              step=10.0, suffix=" Hz")
+        fc_box = QGroupBox("Current filter")
+        fc_form = QFormLayout(fc_box)
         self._fc_spin = _spin(10.0, 20000.0, 1, 300.0,
                               step=10.0, suffix=" Hz")
-        mfrm.addRow("R", self._r_spin)
-        mfrm.addRow("L", self._l_mh_spin)
-        mfrm.addRow("Bandwidth", self._bw_spin)
-        mfrm.addRow("I-LPF fc", self._fc_spin)
-        btn_fc = QPushButton("Apply current LPF cutoff")
+        btn_fc = QPushButton("Apply I-LPF cutoff")
         btn_fc.clicked.connect(self._on_apply_fc)
-        mfrm.addRow(btn_fc)
-        root.addWidget(mpz)
-        # Push any initial model to the Analysis view.
-        if self._on_params_changed is not None:
-            self._on_params_changed(self._last_motor_r, self._last_motor_l,
-                                    self._last_bw,
-                                    self._kp_spin.value(),
-                                    self._ki_spin.value())
-        for spin in (self._r_spin, self._l_mh_spin, self._bw_spin,
-                     self._kp_spin, self._ki_spin):
-            spin.valueChanged.connect(self._notify_params_changed)
+        fc_form.addRow("I-LPF fc", self._fc_spin)
+        fc_form.addRow(btn_fc)
+        root.addWidget(fc_box)
 
-        # --- Calibration (motion / align live on Control view) ---
-        align = QGroupBox("Calibration NVS")
-        align_layout = QVBoxLayout(align)
         self._cal_label = QLabel("calibration: -")
         self._cal_label.setStyleSheet("font-family: monospace; color: #9aa0a6;")
-        align_layout.addWidget(self._cal_label)
-        cal_btns = QHBoxLayout()
-        for label, slot in (("Store NVS", self._on_persist),
-                            ("Erase",     self._on_erase)):
-            b = QPushButton(label)
-            b.clicked.connect(slot)
-            cal_btns.addWidget(b)
-        align_layout.addLayout(cal_btns)
-        root.addWidget(align)
+        root.addWidget(self._cal_label)
 
         # --- Log channel viewer ---
         self._log_view = QPlainTextEdit()
@@ -271,7 +234,6 @@ class TuningPanel(QWidget):
             self._status.setText(str(e))
             return
         self._status.setText("")
-        self._notify_params_changed()
 
     def _on_apply_fc(self) -> None:
         if self._client is None:
@@ -294,27 +256,6 @@ class TuningPanel(QWidget):
         self._state_label.setText(label)
         self._state_label.setStyleSheet(qss)
 
-    def _on_persist(self) -> None:
-        if self._client is None:
-            return
-        try:
-            self._client.store_calibration()
-        except TunerError as e:
-            self._status.setText(str(e))
-            return
-        self._status.setText("")
-        self.poll_refresh_requested.emit(True)
-
-    def _on_erase(self) -> None:
-        if self._client is None:
-            return
-        try:
-            self._client.erase_calibration()
-        except TunerError as e:
-            self._status.setText(str(e))
-            return
-        self.poll_refresh_requested.emit(True)
-
     # --- LOG channel viewer --------------------------------------------
 
     def _on_log_reader(self, seq: int, payload: bytes) -> None:
@@ -328,14 +269,6 @@ class TuningPanel(QWidget):
         if line:
             self._log_view.appendPlainText(line.rstrip("\n"))
 
-    def _notify_params_changed(self) -> None:
-        if self._on_params_changed is None:
-            return
-        motor_l_h = self._l_mh_spin.value() * 1e-3  # mH -> H for the model
-        self._on_params_changed(self._r_spin.value(), motor_l_h,
-                                self._bw_spin.value(),
-                                self._kp_spin.value(), self._ki_spin.value())
-
     def apply_nvs_shadow_floats(
             self,
             r: float,
@@ -346,27 +279,16 @@ class TuningPanel(QWidget):
             fc: float,
     ) -> None:
         """Apply NVS-shadow values to spinboxes (GUI thread only; no I/O)."""
-        for sp in (self._r_spin, self._l_mh_spin, self._bw_spin,
-                   self._kp_spin, self._ki_spin, self._fc_spin):
+        for sp in (self._kp_spin, self._ki_spin, self._fc_spin):
             sp.blockSignals(True)
         try:
-            if r > 1e-10:
-                self._r_spin.setValue(r)
-            if l_h > 1e-12:
-                self._l_mh_spin.setValue(l_h * 1e3)
-            if bw > 0.5:
-                self._bw_spin.setValue(bw)
             self._kp_spin.setValue(kp)
             self._ki_spin.setValue(ki)
             if fc > 0.0:
                 self._fc_spin.setValue(fc)
         finally:
-            for sp in (self._r_spin, self._l_mh_spin, self._bw_spin,
-                       self._kp_spin, self._ki_spin, self._fc_spin):
+            for sp in (self._kp_spin, self._ki_spin, self._fc_spin):
                 sp.blockSignals(False)
-        self._last_motor_r = self._r_spin.value()
-        self._last_motor_l = self._l_mh_spin.value() * 1e-3
-        self._last_bw = self._bw_spin.value()
 
     def sync_motor_from_nvs_shadows(self) -> None:
         """Pull R/L/BW and live controls from the target (blocks on :class:`TunerClient`).
