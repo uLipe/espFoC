@@ -9,7 +9,7 @@
  * @brief UART bridge for the espFoC tuner / scope link.
  *
  * Implements the weak callbacks declared by esp_foc_tuner.h so any
- * espFoC build can talk to the host TunerStudio over a regular UART:
+ * espFoC build can talk to the host espFoC Tool over a regular UART:
  *
  *   - esp_foc_tuner_init_bus_callback()   -> driver install + RX task
  *   - esp_foc_tuner_recv_callback()       -> shim around uart_read_bytes
