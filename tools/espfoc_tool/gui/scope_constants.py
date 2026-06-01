@@ -1,0 +1,8 @@
+"""Shared scope stream buffer sizing (axis_tuning wire map)."""
+
+WINDOW_S = 2.0
+BUFFER_CAP = 4096
+INBOX_CAP = 8192
+MAX_PENDING_DECODED = 8192
+MAX_MERGE_SAMPLES_PER_TICK = 8192
+MAX_RAW_FRAMES_DECODE_BATCH = 2048

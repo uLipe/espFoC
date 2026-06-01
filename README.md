@@ -14,7 +14,7 @@ position loops live in the application's regulation callback; the
 library stays focused and the hot path runs without floating-point
 math. Gains can be synthesised at build time, retuned live from the
 firmware API, persisted to NVS, or dialled in interactively through
-the bundled TunerStudio GUI.
+the bundled **espFoC Tool** desktop GUI.
 
 Targets: ESP32, **ESP32-C6**, ESP32-S3, ESP32-P4 (ESP-IDF v5+). The
 reference bring-up target is **ESP32-C6** (fixed-point hot path sized for
@@ -83,27 +83,29 @@ Inverter and rotor drivers are pluggable:
 
 ---
 
-## Tuning
+## Tuning (espFoC Tool)
 
-![TunerStudio demo](doc/images/tuner_studio.gif)
+![espFoC Tool](doc/images/espfoc_tool_logo.svg)
 
-espFoC ships with **TunerStudio**, a PySide6 + pyqtgraph desktop app
-that speaks the runtime tuner protocol over UART or USB-CDC. In a
-single window you get:
+**espFoC Tool** is a PySide6 + pyqtgraph control app over UART/USB-CDC.
+It opens without a board connected (USB auto-scan) and exposes four views:
 
-- live axis state and gain readout with in-place editing;
-- one-click rotor alignment with auto-detected natural direction;
-- align / run / stop lifecycle and store / erase calibration to NVS;
-- predicted step response, Bode, pole-zero and root-locus plots;
-- firmware scope stream with per-channel colour, toggle and cursor;
-- SVPWM hexagon with the three phase projections and the resultant
-  voltage vector rotating as the motor is driven.
+| View | Purpose |
+|------|---------|
+| **Config** | Live gains, NVS store/erase, motor parameters |
+| **Current** | MPZ design plots (step, Bode, pole-zero, root locus) |
+| **Control** | id/iq targets, align, E-stop, SVPWM hexagon |
+| **States** | Named scope channels (axis_tuning wire map) |
 
-### Launch TunerStudio
+OpenGL plot rendering is enabled by default; set `ESPFOC_TOOL_NO_GL=1` to disable.
+
+### Launch espFoC Tool
 
 ```bash
-pip install -r tools/espfoc_studio/requirements.txt
-PYTHONPATH=tools python3 -m espfoc_studio.gui --port /dev/ttyACM0
+pip install -r tools/espfoc_tool/requirements.txt
+PYTHONPATH=tools python3 -m espfoc_tool.gui
+# optional fixed port:
+PYTHONPATH=tools python3 -m espfoc_tool.gui --port /dev/ttyACM0
 ```
 
 ### Talk to a real target
@@ -130,14 +132,17 @@ For your own firmware, enable a transport bridge in `menuconfig`
 Then:
 
 ```bash
-PYTHONPATH=tools python3 -m espfoc_studio.gui --port /dev/ttyACM0
+PYTHONPATH=tools python3 -m espfoc_tool.gui --port /dev/ttyACM0
 ```
 
-### Scripted tuning
+### Scripted control
 
-A companion CLI (`tunerctl`) drives align, run, stop, gain writes,
-target id/iq, store, and erase from scripts. Details in
-[`doc/TUNING.md`](doc/TUNING.md).
+**espfocctl** drives align, run, stop, E-stop, gain writes, id/iq targets,
+and NVS store/erase from scripts:
+
+```bash
+PYTHONPATH=tools python3 -m espfoc_tool.cli.espfocctl --port /dev/ttyACM0 -i
+```
 
 ---
 
@@ -219,7 +224,7 @@ loop contains no floating-point operations.
 ```
 espFoC/
 ├── doc/
-│   ├── images/         # architecture, TunerStudio screenshot, demo gif
+│   ├── images/         # architecture, espFoC Tool logo, demo gif
 │   └── TUNING.md       # deep dive: autogen, runtime API, protocol, CLI
 ├── examples/           # axis_tuning / unit_test_runner / test_drivers
 ├── include/espFoC/     # public API
@@ -232,7 +237,7 @@ espFoC/
 │   ├── motor_control/  # axis core (FOC ISR + slow loop), MPZ, Q16 helpers
 │   └── osal/           # OS abstraction (tasks, critical sections, esp_timer)
 ├── test/               # Unity unit tests (run via examples/unit_test_runner)
-└── tools/espfoc_studio # PySide6 + pyqtgraph GUI, CLI, host protocol
+└── tools/espfoc_tool    # PySide6 GUI (espFoC Tool), espfocctl, host protocol
 ```
 
 ---

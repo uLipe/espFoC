@@ -78,7 +78,7 @@ jobs:
   # Temporarily disabled while tuner protocol / axis lifecycle catches up with Studio.
   python_tests:
     if: false
-    name: TunerStudio host tests
+    name: espFoC Tool host tests
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
@@ -94,14 +94,15 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y libegl1 libxkbcommon0 libdbus-1-3
         python -m pip install --upgrade pip
-        pip install -r tools/espfoc_studio/requirements.txt
+        pip install -r tools/espfoc_tool/requirements.txt
 
     - name: Run host test suite
       env:
         QT_QPA_PLATFORM: offscreen
         PYTHONPATH: ${{ github.workspace }}/tools
+        ESPFOC_TOOL_NO_GL: "1"
       run: |
-        python -m pytest tools/espfoc_studio/tests/ -v --tb=short
+        python -m pytest tools/espfoc_tool/tests/ -v --tb=short
 
   unit_tests:
     name: Unit tests (build and run on QEMU)
