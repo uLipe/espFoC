@@ -25,7 +25,7 @@ set(requires esp_driver_uart esp_driver_pcnt esp_driver_gpio esp_driver_mcpwm dr
 if(target STREQUAL "esp32s2" OR target STREQUAL "esp32s3" OR target STREQUAL "esp32p4")
     list(APPEND requires espressif__esp_tinyusb)
 endif()
-list(APPEND includes "source/drivers")
+list(APPEND includes "source/drivers" "source/drivers/cali")
 list(APPEND srcs    "source/drivers/inverter_3pwm_mcpwm.c"
                     "source/drivers/inverter_6pwm_mcpwm.c"
                     "source/drivers/rotor_sensor_as5600.c"
@@ -35,9 +35,18 @@ list(APPEND srcs    "source/drivers/inverter_3pwm_mcpwm.c"
                     "source/drivers/current_sensor_adc.c"
                     "source/drivers/esp_foc_adc_cali_lut.c"
                     "source/drivers/cali/esp_foc_adc_cali_curve.c"
-                    "source/drivers/cali/esp_foc_adc_cali_line.c"
-                    "source/drivers/cali/esp_foc_cali_curve_coeff.c"
+                    "source/drivers/cali/esp_foc_adc_range_extend.c"
                     "source/osal/os_interface_idf.c")
+
+if(target STREQUAL "esp32")
+    list(APPEND srcs "source/drivers/cali/esp_foc_adc_cali_line_esp32.c")
+elseif(target STREQUAL "esp32s2")
+    list(APPEND srcs "source/drivers/cali/esp_foc_adc_cali_line_esp32s2.c")
+elseif(target STREQUAL "esp32c2")
+    list(APPEND srcs "source/drivers/cali/esp_foc_adc_cali_line_esp32c2.c")
+elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/source/drivers/cali/coeff/esp_foc_curve_coeff_${target}.c")
+    list(APPEND srcs "source/drivers/cali/coeff/esp_foc_curve_coeff_${target}.c")
+endif()
 
 if(CONFIG_SOC_ETM_SUPPORTED)
     list(APPEND srcs "source/drivers/isensor_adc_etm.c")

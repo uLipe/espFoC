@@ -62,6 +62,8 @@ esp_err_t isensor_adc_dma_init(isensor_adc_dma_ctx_t *ctx,
         return ESP_OK;
     }
 
+    int __DECLARE_RCC_ATOMIC_ENV __attribute__((unused));
+
     gdma_ll_enable_bus_clock(ISENSOR_ADC_GDMA_GROUP, true);
     gdma_ll_reset_register(ISENSOR_ADC_GDMA_GROUP);
 

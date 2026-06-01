@@ -10,7 +10,7 @@
 
 TEST_CASE("adc cali LUT builds 4096 entries", "[espFoC][isensor_adc]")
 {
-    int16_t lut[ESP_FOC_ISENSOR_ADC_LUT_SIZE];
+    static int16_t lut[ESP_FOC_ISENSOR_ADC_LUT_SIZE];
     bool ok = esp_foc_adc_cali_lut_build(ADC_UNIT_1, ADC_CHANNEL_0, ADC_ATTEN_DB_12,
                                          lut, ESP_FOC_ISENSOR_ADC_LUT_SIZE);
     (void)ok;
@@ -20,7 +20,7 @@ TEST_CASE("adc cali LUT builds 4096 entries", "[espFoC][isensor_adc]")
 
 TEST_CASE("adc cali LUT apply clamps out of range", "[espFoC][isensor_adc]")
 {
-    int16_t lut[ESP_FOC_ISENSOR_ADC_LUT_SIZE];
+    static int16_t lut[ESP_FOC_ISENSOR_ADC_LUT_SIZE];
     for (int i = 0; i < ESP_FOC_ISENSOR_ADC_LUT_SIZE; i++) {
         lut[i] = (int16_t)i;
     }

@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <assert.h>
+#include <stddef.h>
 #include "esp_err.h"
 #include "sdkconfig.h"
 #include "esp_private/adc_share_hw_ctrl.h"
@@ -48,15 +49,19 @@ static esp_foc_cali_curve_ctx_t s_curve_ctx;
 
 static int32_t get_reading_error(uint64_t v_cali_1, const esp_foc_cali_chars_second_step_t *param)
 {
-    if (v_cali_1 == 0 || param->term_num == 0) {
+    if (v_cali_1 == 0 || param->term_num == 0 || param->coeff == NULL || param->sign == NULL) {
         return 0;
     }
 
     uint8_t term_num = param->term_num;
     int32_t error = 0;
     uint64_t coeff = 0;
-    uint64_t variable[3];
-    uint64_t term[3];
+    uint64_t variable[5];
+    uint64_t term[5];
+
+    if (term_num > (uint8_t)(sizeof(variable) / sizeof(variable[0]))) {
+        term_num = (uint8_t)(sizeof(variable) / sizeof(variable[0]));
+    }
 
     variable[0] = 1;
     coeff = param->coeff[0][0];
@@ -66,8 +71,7 @@ static int32_t get_reading_error(uint64_t v_cali_1, const esp_foc_cali_chars_sec
     for (int i = 1; i < term_num; i++) {
         variable[i] = variable[i - 1] * v_cali_1;
         coeff = param->coeff[i][0];
-        term[i] = variable[i] * coeff;
-        term[i] = term[i] / param->coeff[i][1];
+        term[i] = variable[i] * coeff / param->coeff[i][1];
         error += (int32_t)term[i] * param->sign[i];
     }
 

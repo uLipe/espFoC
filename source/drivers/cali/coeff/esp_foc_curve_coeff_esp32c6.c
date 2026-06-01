@@ -1,9 +1,10 @@
 /*
- * SPDX-FileCopyrightText: 2023 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: Espressif Systems (Shanghai) CO LTD
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Curve-fitting coefficients ported from ESP-IDF esp_adc/esp32c6/curve_fitting_coefficients.c
  */
 
-#include <stdio.h>
 #include <stdint.h>
 #include <assert.h>
 #include "sdkconfig.h"
@@ -11,6 +12,7 @@
 
 #if SOC_ADC_CALIB_SCHEME_CURVE_FITTING_SUPPORTED
 #include "esp_efuse_rtc_calib.h"
+
 
 #define COEFF_VERSION_NUM  2 // Currently C6 has two versions of curve calibration schemes
 #define COEFF_GROUP_NUM    4
@@ -65,11 +67,8 @@ const static int32_t adc1_error_sign[COEFF_VERSION_NUM][COEFF_GROUP_NUM][TERM_MA
     },
 };
 
-void esp_foc_curve_fitting_get_second_step_coeff(adc_unit_t unit,
-                                                 adc_atten_t atten,
-                                                 esp_foc_cali_chars_second_step_t *ctx)
+void esp_foc_curve_fitting_get_second_step_coeff(adc_unit_t unit, adc_atten_t atten, esp_foc_cali_chars_second_step_t *ctx)
 {
-    (void)unit;
     uint32_t adc_calib_ver = esp_efuse_rtc_calib_get_ver();
     assert((adc_calib_ver >= ESP_EFUSE_ADC_CALIB_VER_MIN) &&
            (adc_calib_ver <= ESP_EFUSE_ADC_CALIB_VER_MAX));
@@ -86,15 +85,11 @@ void esp_foc_curve_fitting_get_second_step_coeff(adc_unit_t unit,
 
 #else
 
-void esp_foc_curve_fitting_get_second_step_coeff(adc_unit_t unit,
-                                                 adc_atten_t atten,
+void esp_foc_curve_fitting_get_second_step_coeff(adc_unit_t unit, adc_atten_t atten,
                                                  esp_foc_cali_chars_second_step_t *ctx)
 {
-    (void)unit;
-    (void)atten;
-    ctx->term_num = 0;
-    ctx->coeff = NULL;
-    ctx->sign = NULL;
+    (void)unit; (void)atten;
+    ctx->term_num = 0; ctx->coeff = NULL; ctx->sign = NULL;
 }
 
-#endif /* SOC_ADC_CALIB_SCHEME_CURVE_FITTING_SUPPORTED */
+#endif

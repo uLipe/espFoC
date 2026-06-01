@@ -87,7 +87,8 @@ typedef struct {
 DRAM_ATTR static isensor_adc_t s_isensor;
 static bool s_adc_initialized;
 
-static const float adc_to_volts = 3.1f / 4096.0f;
+#define ESP_FOC_ADC_FULL_SCALE_MV  3300
+static const float adc_to_volts = (float)ESP_FOC_ADC_FULL_SCALE_MV / 4096.0f;
 
 static adc_bitwidth_t isensor_adc_digi_bitwidth(void)
 {
