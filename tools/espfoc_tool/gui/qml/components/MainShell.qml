@@ -7,6 +7,10 @@ import espFoC.theme
 Item {
     id: root
 
+    readonly property int minCardWidth: 360
+    readonly property int minCardHeight: 200
+    readonly property int maxCardHeight: 320
+
     Rectangle {
         anchors.fill: parent
         color: Theme.windowBg
@@ -27,29 +31,104 @@ Item {
         anchors.margins: 16
         spacing: Theme.spacing
 
-        Label {
+        RowLayout {
             Layout.fillWidth: true
-            text: scope.statusText
-            font.pixelSize: 12
-            color: Theme.textMuted
-            horizontalAlignment: Text.AlignRight
+            spacing: Theme.spacing
+
+            Button {
+                id: autosetBtn
+                text: "Autoset"
+                highlighted: true
+                font.pixelSize: 12
+                Material.background: Theme.surfaceVariant
+                Material.foreground: Theme.primary
+                Material.elevation: 3
+                leftPadding: 14
+                rightPadding: 14
+                onClicked: scope.autoset()
+            }
+
+            ToolButton {
+                display: AbstractButton.IconOnly
+                Material.foreground: Theme.textMuted
+                ToolTip.visible: hovered
+                ToolTip.text: "Plot settings"
+                onClicked: scope.openPlotSettingsDialog()
+                contentItem: Text {
+                    text: "\u2699"
+                    color: Theme.textMuted
+                    font.pixelSize: 20
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: scope.statusText
+                font.pixelSize: 12
+                color: Theme.textMuted
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideLeft
+            }
         }
 
         ScrollView {
+            id: plotScroll
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            contentWidth: plotContent.width
+            contentHeight: plotContent.height
 
-            Flow {
-                width: parent.width
-                spacing: Theme.spacing
+            Item {
+                id: plotContent
+                width: plotScroll.availableWidth
 
-                Repeater {
-                    model: scope.plotModel
-                    delegate: ChannelPlotCard {
-                        width: Math.max(400, (parent.width - Theme.spacing) / 2 - Theme.spacing)
-                        height: 300
+                property int plotCount: plotRepeater.count
+                property int gridColumns: Math.max(1,
+                    Math.floor((width + Theme.spacing) / (root.minCardWidth + Theme.spacing)))
+                property real cardWidth: gridColumns > 0
+                    ? (width - (gridColumns - 1) * Theme.spacing) / gridColumns
+                    : width
+                property int gridRows: plotCount > 0
+                    ? Math.ceil(plotCount / gridColumns)
+                    : 0
+                property real cardHeight: {
+                    if (plotCount <= 0)
+                        return root.maxCardHeight
+                    var rows = gridRows
+                    var avail = plotScroll.height
+                    if (avail <= 0)
+                        return root.maxCardHeight
+                    var fitted = (avail - (rows - 1) * Theme.spacing) / rows
+                    return Math.max(root.minCardHeight,
+                                    Math.min(root.maxCardHeight, fitted))
+                }
+                height: plotCount > 0
+                    ? gridRows * cardHeight + Math.max(0, gridRows - 1) * Theme.spacing
+                    : 0
+
+                GridLayout {
+                    id: plotGrid
+                    width: parent.width
+                    columns: plotContent.gridColumns
+                    rowSpacing: Theme.spacing
+                    columnSpacing: Theme.spacing
+
+                    Repeater {
+                        id: plotRepeater
+                        model: scope.plotModel
+                        delegate: ChannelPlotCard {
+                            Layout.preferredWidth: plotContent.cardWidth
+                            Layout.preferredHeight: plotContent.cardHeight
+                            Layout.maximumWidth: plotContent.cardWidth
+                            Layout.maximumHeight: plotContent.cardHeight
+                            width: plotContent.cardWidth
+                            height: plotContent.cardHeight
+                        }
                     }
                 }
             }

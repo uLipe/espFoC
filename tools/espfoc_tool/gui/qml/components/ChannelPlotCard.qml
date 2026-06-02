@@ -36,29 +36,53 @@ Item {
     }
 
     function computeDomain(pts) {
+        var minX = scope.plotTimeMin
+        var maxX = scope.plotTimeMax
+        if (maxX - minX < 1e-9)
+            maxX = minX + 1
+
         if (!pts || pts.length === 0) {
             return {
-                minX: emptyMinX, maxX: emptyMaxX,
+                minX: minX, maxX: maxX,
                 minY: emptyMinY, maxY: emptyMaxY
             }
         }
-        var minX = pts[0].x
-        var maxX = pts[0].x
-        var minY = pts[0].y
-        var maxY = pts[0].y
-        for (var i = 1; i < pts.length; i++) {
-            minX = Math.min(minX, pts[i].x)
-            maxX = Math.max(maxX, pts[i].x)
-            minY = Math.min(minY, pts[i].y)
-            maxY = Math.max(maxY, pts[i].y)
+        var minY = 0
+        var maxY = 0
+        var foundY = false
+        for (var i = 0; i < pts.length; i++) {
+            if (pts[i].x < minX || pts[i].x > maxX)
+                continue
+            if (!foundY) {
+                minY = pts[i].y
+                maxY = pts[i].y
+                foundY = true
+            } else {
+                minY = Math.min(minY, pts[i].y)
+                maxY = Math.max(maxY, pts[i].y)
+            }
         }
-        if (maxX - minX < 1e-9)
-            maxX = minX + 1
+        if (!foundY) {
+            return {
+                minX: minX, maxX: maxX,
+                minY: emptyMinY, maxY: emptyMaxY
+            }
+        }
         if (maxY - minY < 1e-9) {
             minY -= 0.5
             maxY += 0.5
+        } else {
+            var yPad = (maxY - minY) * 0.1
+            minY -= yPad
+            maxY += yPad
         }
         return { minX: minX, maxX: maxX, minY: minY, maxY: maxY }
+    }
+
+    Connections {
+        target: scope
+        function onPlotAxisChanged() { plotCanvas.requestPaint() }
+        function onPlotSettingsChanged() { plotCanvas.requestPaint() }
     }
 
     Rectangle {

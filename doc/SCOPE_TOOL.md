@@ -18,9 +18,11 @@ PYTHONPATH=tools python3 -m espfoc_tool.gui
 
 ## UI (QML / Material 3)
 
-1. Splash → port dialog → main shell (watermark, plot grid, status bar).
+1. Splash → port dialog → main shell (watermark, responsive plot grid, status bar).
 2. **`+`** opens channel picker (color + catalog).
-3. Each plot card: grid, trace, hover readout, remove.
+3. Each plot card: grid, trace, hover readout, remove. Cards reflow to fit the window; scroll when there are more plots than fit on screen.
+4. **Autoset** clears capture buffers and rebases the time axis (use if the trace looks wrong or stale).
+5. **⚙ Plot settings** — sample rate (1–1000 Hz), max points (10–2048); time window = points ÷ rate. Fixed horizontal scale avoids waveform compression at startup.
 
 Catalog: `tools/espfoc_tool/catalog/axis_shell_17ch.py` (names, units, Q16 scale).
 
@@ -36,6 +38,7 @@ The tool is **RX-only**. The firmware must (1) enable scope, (2) wire channels, 
 CONFIG_ESP_FOC_SCOPE=y
 CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS=17
 CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE=8
+CONFIG_ESP_FOC_SCOPE_DAEMON_PRIORITY=3
 CONFIG_ESP_FOC_STREAM_BRIDGE_USBCDC=y   # esp32c6: USB Serial/JTAG
 CONFIG_ESPFOC_SHELL=y
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
@@ -45,18 +48,13 @@ On ESP32-S2/S3/P4 use TinyUSB CDC; on C6/C3 use `USBCDC` → USJ driver in CMake
 
 `CONFIG_ESP_FOC_SCOPE=y` **requires** a bridge (UART or USBCDC) — no stub fallback.
 
-### 2. Wire channels (match catalog order)
+### 2. Wire channels
 
-See `examples/axis_shell/main/main.c` and [SCOPE_CHANNELS.md](SCOPE_CHANNELS.md). Order on the wire must match `tools/espfoc_tool/catalog/axis_shell_17ch.py` (`EXPECTED_N_CH = 17`).
+For **`axis_shell` (17ch)** this is automatic: `esp_foc_initialize_axis()` calls
+`esp_foc_scope_initalize()` first, then `esp_foc_scope_wire_axis()` at the end.
 
-```c
-#if defined(CONFIG_ESP_FOC_SCOPE)
-    esp_foc_scope_add_channel(&s_axis.target_i_d.raw, 0);
-    /* ... channels 1..16 per SCOPE_CHANNELS.md ... */
-    esp_foc_scope_bind_axis(&s_axis);
-    esp_foc_scope_initalize();
-#endif
-```
+Custom maps: `esp_foc_scope_bind_axis()` + `esp_foc_scope_add_channel()` per
+channel (see `SCOPE_CHANNELS.md` for the standard order).
 
 ### 3. Shell + axis lifecycle
 
@@ -80,7 +78,7 @@ idf.py flash monitor
 PYTHONPATH=tools python3 -m espfoc_tool.gui --port /dev/ttyACM0
 ```
 
-Status bar: `frames=N` should increase after `run 0`. On the monitor UART you should see `first ESPF frame TX` from the USJ bridge.
+Status bar: `frames=N` should increase after `run 0`. The scope bridge is silent on the hot path (no periodic TX logs) so the shell REPL stays usable on the monitor UART.
 
 ### 5. Custom channel maps
 

@@ -67,3 +67,10 @@ class ChannelStore:
     def stats(self) -> Tuple[int, int]:
         with self._lock:
             return self._frames, self._seq_gaps
+
+    def clear(self) -> None:
+        with self._lock:
+            self._rings.clear()
+            self._frames = 0
+            self._last_seq = None
+            self._seq_gaps = 0

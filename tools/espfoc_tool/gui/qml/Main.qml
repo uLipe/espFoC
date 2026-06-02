@@ -41,6 +41,10 @@ ApplicationWindow {
         id: channelDlg
     }
 
+    PlotSettingsSheet {
+        id: plotSettingsDlg
+    }
+
     Connections {
         target: scope
         function onNavigateTo(screenName) {
@@ -56,6 +60,9 @@ ApplicationWindow {
             channelDlg.selectedChannel = -1
             channelDlg.selectedColor = scope.defaultPlotColor
             channelDlg.open()
+        }
+        function onRequestPlotSettingsDialog() {
+            plotSettingsDlg.open()
         }
     }
 
