@@ -30,12 +30,13 @@ int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority,
     int cpu_num = 0;
 #endif
     if (priority < 0) {
+        /* Legacy: was used for scope with -1 → RT prio 8 (too low). Prefer explicit 1–10. */
         priority = (configMAX_PRIORITIES - 8);
         cpu_num = PRO_CPU_NUM;
     }
 
     TaskHandle_t created = NULL;
-    int ret = xTaskCreatePinnedToCore(runner, "", CONFIG_FOC_TASK_STACK_SIZE,
+    int ret = xTaskCreatePinnedToCore(runner, "espfoc_runner", CONFIG_FOC_TASK_STACK_SIZE,
                                       argument, configMAX_PRIORITIES - priority,
                                       &created, cpu_num);
     if (ret != pdPASS) {
@@ -67,6 +68,11 @@ bool esp_foc_in_task_context(void)
 {
     return xTaskGetSchedulerState() == taskSCHEDULER_RUNNING &&
            xTaskGetCurrentTaskHandle() != NULL && !xPortInIsrContext();
+}
+
+bool esp_foc_in_isr_context(void)
+{
+    return xPortInIsrContext();
 }
 
 void esp_foc_sleep_ms(int sleep_ms)
@@ -106,6 +112,9 @@ void esp_foc_wait_notifier(void)
 
 void esp_foc_send_notification_from_isr(esp_foc_event_handle_t handle)
 {
+    if (handle == NULL) {
+        return;
+    }
     BaseType_t wake;
     vTaskNotifyGiveFromISR((TaskHandle_t)handle, &wake);
     if (wake == pdTRUE) {
@@ -115,7 +124,22 @@ void esp_foc_send_notification_from_isr(esp_foc_event_handle_t handle)
 
 void esp_foc_send_notification(esp_foc_event_handle_t handle)
 {
+    if (handle == NULL) {
+        return;
+    }
     xTaskNotifyGive((TaskHandle_t)handle);
+}
+
+void esp_foc_notify_runner(esp_foc_event_handle_t handle)
+{
+    if (handle == NULL) {
+        return;
+    }
+    if (esp_foc_in_isr_context()) {
+        esp_foc_send_notification_from_isr(handle);
+    } else {
+        esp_foc_send_notification(handle);
+    }
 }
 
 int esp_foc_debug_pin_init(int debug_pin)

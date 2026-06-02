@@ -36,6 +36,7 @@ int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority,
 bool esp_foc_runner_is_alive(void *task_handle);
 void esp_foc_runner_wake(void *task_handle);
 bool esp_foc_in_task_context(void);
+bool esp_foc_in_isr_context(void);
 void esp_foc_sleep_ms(int sleep_ms);
 void esp_foc_runner_yield(void);
 uint64_t esp_foc_now_useconds(void);
@@ -45,6 +46,8 @@ esp_foc_event_handle_t esp_foc_get_event_handle(void);
 void esp_foc_wait_notifier(void);
 void esp_foc_send_notification_from_isr(esp_foc_event_handle_t handle);
 void esp_foc_send_notification(esp_foc_event_handle_t handle);
+/** Task notify: uses FromISR path when called from an interrupt. */
+void esp_foc_notify_runner(esp_foc_event_handle_t handle);
 int esp_foc_debug_pin_init(int debug_pin);
 int esp_foc_debug_pin_set(void);
 int esp_foc_debug_pin_clear(void);
