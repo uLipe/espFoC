@@ -9,17 +9,19 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from ..protocol import TunerClient, TunerError
+from . import labels as L
 from .alignment_progress import AlignmentProgressDialog
-from .theme import make_estop_button_qss
+from .buttons import action_button
+from .widgets import SurfaceCard
 
 
 def _spin(minimum: float, maximum: float, decimals: int, value: float,
@@ -66,13 +68,19 @@ class ControlRail(QWidget):
         self._connected = connected
         self._align_thread: Optional[_AlignThread] = None
         self._align_progress: Optional[AlignmentProgressDialog] = None
+        self._autoset_cb: Optional[Callable[[], None]] = None
+
+        self.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(12)
 
-        motion = QGroupBox("Motion")
-        mform = QFormLayout(motion)
-        self._override_box = QCheckBox("Override active")
+        motion_card = SurfaceCard("Motion")
+        mform = QFormLayout()
+        mform.setLabelAlignment(Qt.AlignRight)
+        self._override_box = QCheckBox("Manual setpoints")
         self._override_box.toggled.connect(self._on_override_toggled)
         mform.addRow(self._override_box)
 
@@ -80,44 +88,52 @@ class ControlRail(QWidget):
         self._iq_spin = _spin(-50.0, 50.0, 4, 0.0, step=0.1, suffix=" A")
         self._id_spin.setEnabled(False)
         self._iq_spin.setEnabled(False)
-        mform.addRow("id ref", self._id_spin)
-        mform.addRow("iq ref", self._iq_spin)
+        mform.addRow(L.D_AXIS_CURRENT, self._id_spin)
+        mform.addRow(L.Q_AXIS_CURRENT, self._iq_spin)
 
         id_row = QHBoxLayout()
-        for label, delta in (("id −", -0.1), ("id 0", None), ("id +", 0.1)):
-            b = QPushButton(label)
+        id_row.setSpacing(6)
+        for label, delta in (("−", -0.1), ("0", None), ("+", 0.1)):
+            b = action_button(label, "BtnNudge")
             b.clicked.connect(
                 lambda _c=False, d=delta, s=self._id_spin: self._nudge(s, d))
             id_row.addWidget(b)
-        mform.addRow(id_row)
+        id_row.addStretch(1)
+        mform.addRow("d-axis", id_row)
 
         iq_row = QHBoxLayout()
-        for label, delta in (("iq −", -0.1), ("iq 0", None), ("iq +", 0.1)):
-            b = QPushButton(label)
+        iq_row.setSpacing(6)
+        for label, delta in (("−", -0.1), ("0", None), ("+", 0.1)):
+            b = action_button(label, "BtnNudge")
             b.clicked.connect(
                 lambda _c=False, d=delta, s=self._iq_spin: self._nudge(s, d))
             iq_row.addWidget(b)
-        mform.addRow(iq_row)
+        iq_row.addStretch(1)
+        mform.addRow("q-axis", iq_row)
 
         self._id_spin.valueChanged.connect(self._on_id_changed)
         self._iq_spin.valueChanged.connect(self._on_iq_changed)
-        root.addWidget(motion)
+        motion_card.body_layout.addLayout(mform)
+        root.addWidget(motion_card)
 
-        align = QGroupBox("Alignment")
-        al = QVBoxLayout(align)
-        self._align_btn = QPushButton("Align axis")
+        safety_card = SurfaceCard("Actions")
+        safety_lay = QVBoxLayout()
+        safety_lay.setSpacing(10)
+        self._align_btn = action_button("Run alignment", "BtnDefault")
         self._align_btn.clicked.connect(self._on_align)
-        al.addWidget(self._align_btn)
-        root.addWidget(align)
-
-        self._estop_btn = QPushButton("E-STOP")
-        self._estop_btn.setStyleSheet(make_estop_button_qss())
-        self._estop_btn.setCursor(Qt.PointingHandCursor)
+        safety_lay.addWidget(self._align_btn)
+        self._estop_btn = action_button("E-STOP", "BtnEstop")
         self._estop_btn.clicked.connect(self._on_estop)
-        root.addWidget(self._estop_btn)
+        safety_lay.addWidget(self._estop_btn)
+        self._autoset_btn = action_button("Autoset", "BtnDefault")
+        self._autoset_btn.clicked.connect(self._on_autoset)
+        safety_lay.addWidget(self._autoset_btn)
+        safety_card.body_layout.addLayout(safety_lay)
+        root.addWidget(safety_card)
 
         self._status = QLabel("")
-        self._status.setStyleSheet("color: #ef5350;")
+        self._status.setStyleSheet("color: #ef5350; font-size: 11px;")
+        self._status.setWordWrap(True)
         root.addWidget(self._status)
         root.addStretch(1)
 
@@ -126,6 +142,9 @@ class ControlRail(QWidget):
     def set_client(self, client: Optional[TunerClient]) -> None:
         self._client = client
 
+    def bind_svm_autoset(self, callback: Callable[[], None]) -> None:
+        self._autoset_cb = callback
+
     def set_actions_enabled(self, on: bool) -> None:
         for w in (
             self._override_box,
@@ -133,11 +152,16 @@ class ControlRail(QWidget):
             self._iq_spin,
             self._align_btn,
             self._estop_btn,
+            self._autoset_btn,
         ):
             w.setEnabled(on)
         for btn in self.findChildren(QPushButton):
             if btn is not self._estop_btn:
                 btn.setEnabled(on)
+
+    def _on_autoset(self) -> None:
+        if self._autoset_cb is not None:
+            self._autoset_cb()
 
     def apply_override_state(self, active: bool) -> None:
         self._override_box.blockSignals(True)

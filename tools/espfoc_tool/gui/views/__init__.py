@@ -1,6 +1,6 @@
 """espFoC Tool main views."""
 
-from .config_view import ConfigView
-from .current_view import CurrentView
+from .dashboard_view import DashboardView
+from .tune_view import TuneView
 
-__all__ = ["ConfigView", "CurrentView"]
+__all__ = ["TuneView", "DashboardView"]

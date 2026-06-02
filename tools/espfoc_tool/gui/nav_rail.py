@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QButtonGroup, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QButtonGroup, QLabel, QPushButton, QVBoxLayout, QWidget
 
-from .theme import make_nav_button_qss
+from .buttons import apply_button_style
 
 
 class NavRail(QWidget):
     page_selected = Signal(int)
 
-    LABELS = ("Config", "Current", "Control", "States")
+    LABELS = ("Tune", "Dashboard")
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -20,6 +20,9 @@ class NavRail(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 12, 8, 12)
         lay.setSpacing(6)
+        brand = QLabel("espFoC")
+        brand.setObjectName("NavBrand")
+        lay.addWidget(brand)
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
         self._buttons: list[QPushButton] = []
@@ -27,7 +30,7 @@ class NavRail(QWidget):
             b = QPushButton(label)
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
-            b.setStyleSheet(make_nav_button_qss())
+            apply_button_style(b, "BtnNav")
             if i == 0:
                 b.setChecked(True)
             b.clicked.connect(lambda _c=False, idx=i: self.page_selected.emit(idx))
