@@ -290,6 +290,10 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
+#if defined(CONFIG_ESP_FOC_SCOPE)
+    esp_foc_scope_initalize();
+#endif
+
 #if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
     axis->magic = ESP_FOC_AXIS_MAGIC;
 #endif
@@ -403,6 +407,11 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     esp_foc_debug_pin_init(CONFIG_ESP_FOC_DEBUG_PIN);
 #endif
 
+#if defined(CONFIG_ESP_FOC_SCOPE) && CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS == 17
+    if (esp_foc_scope_wire_axis(axis) != ESP_FOC_OK) {
+        ESP_LOGW(tag, "scope wire_axis skipped or failed");
+    }
+#endif
 
     esp_foc_sleep_ms(250);
     axis->state = ESP_FOC_AXIS_STATE_IDLE;

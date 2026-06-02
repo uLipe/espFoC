@@ -11,6 +11,11 @@
 #include "espFoC/stream/esp_foc_stream_frame.h"
 #include "espFoC/stream/esp_foc_stream_bridge.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+
+#ifndef CONFIG_ESP_FOC_SCOPE_DAEMON_PRIORITY
+#define CONFIG_ESP_FOC_SCOPE_DAEMON_PRIORITY 3
+#endif
 
 const char *TAG = "ESP_FOC_SCOPE";
 
@@ -91,8 +96,10 @@ static void esp_foc_scope_daemon_thread(void *arg)
     struct scope_frame *next_sample;
 
     (void)arg;
+    ESP_LOGI(TAG, "daemon running (runner prio %d, RT prio %u)",
+             CONFIG_ESP_FOC_SCOPE_DAEMON_PRIORITY,
+             (unsigned)(configMAX_PRIORITIES - CONFIG_ESP_FOC_SCOPE_DAEMON_PRIORITY));
     memset(&scope_buffer, 0, sizeof(scope_buffer));
-    scope_ev = esp_foc_get_event_handle();
 
     while (1) {
         esp_foc_wait_notifier();
@@ -114,15 +121,103 @@ void esp_foc_scope_bind_axis(esp_foc_axis_t *axis)
     s_axis = axis;
 }
 
+esp_foc_err_t esp_foc_scope_wire_axis(esp_foc_axis_t *axis)
+{
+    if (axis == NULL) {
+        return ESP_FOC_ERR_INVALID_ARG;
+    }
+#if CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS != 17
+    ESP_LOGE(TAG, "wire_axis needs CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS=17");
+    return ESP_FOC_ERR_INVALID_ARG;
+#else
+    esp_foc_scope_bind_axis(axis);
+    used_channels = 0;
+
+    if (esp_foc_scope_add_channel(&axis->target_i_d.raw, 0) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(&axis->i_d.raw, 1) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(&axis->target_i_q.raw, 2) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(&axis->i_q.raw, 3) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(&axis->u_d.raw, 4) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(&axis->u_q.raw, 5) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(
+            (const q16_t *)(const volatile void *)&axis->rotor_estimator.theta_meas_mech,
+            6) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(
+            (const q16_t *)(const volatile void *)&axis->rotor_elec_angle, 7) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(&axis->rotor_estimator.omega_est_mech, 8) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(&axis->u_u.raw, 9) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(&axis->u_v.raw, 10) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(&axis->u_w.raw, 11) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(&axis->i_u, 12) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(&axis->i_v, 13) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(&axis->i_alpha.raw, 14) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(&axis->i_beta.raw, 15) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+    if (esp_foc_scope_add_channel(&esp_foc_debug_scope_hot_path_dt_us_q16, 16) != 0) {
+        return ESP_FOC_ERR_UNKNOWN;
+    }
+
+    ESP_LOGI(TAG, "wired axis %p (17ch)", (void *)axis);
+    return ESP_FOC_OK;
+#endif
+}
+
+bool esp_foc_scope_is_initialized(void)
+{
+    return scope_enable && scope_ev != NULL && esp_foc_runner_is_alive(scope_ev);
+}
+
 void esp_foc_scope_initalize(void)
 {
-    if (!scope_enable) {
-        scope_enable = true;
-        s_frame_seq = 0;
-        esp_foc_stream_bridge_init();
-        esp_foc_create_runner(esp_foc_scope_daemon_thread, NULL, -1, NULL);
-        esp_foc_sleep_ms(10);
+    if (scope_enable) {
+        return;
     }
+
+    esp_foc_stream_bridge_init();
+
+    void *daemon_handle = NULL;
+    if (esp_foc_create_runner(esp_foc_scope_daemon_thread, NULL,
+                              CONFIG_ESP_FOC_SCOPE_DAEMON_PRIORITY,
+                              &daemon_handle) != 0) {
+        ESP_LOGE(TAG, "scope daemon task create failed");
+        return;
+    }
+
+    scope_ev = (esp_foc_event_handle_t)daemon_handle;
+    s_frame_seq = 0;
+    scope_enable = true;
+    esp_foc_sleep_ms(10);
 }
 
 static inline bool scope_capture_frame(void)
@@ -146,24 +241,24 @@ static inline bool scope_capture_frame(void)
     return false;
 }
 
-void esp_foc_scope_data_push(void)
+static void esp_foc_scope_data_push_impl(void)
 {
-    if (!scope_enable) {
+    if (!scope_enable || scope_ev == NULL) {
         return;
     }
     if (scope_capture_frame()) {
-        esp_foc_send_notification(scope_ev);
+        esp_foc_notify_runner(scope_ev);
     }
+}
+
+void esp_foc_scope_data_push(void)
+{
+    esp_foc_scope_data_push_impl();
 }
 
 void esp_foc_scope_data_push_from_isr(void)
 {
-    if (!scope_enable) {
-        return;
-    }
-    if (scope_capture_frame()) {
-        esp_foc_send_notification_from_isr(scope_ev);
-    }
+    esp_foc_scope_data_push_impl();
 }
 
 int esp_foc_scope_add_channel(const q16_t *data_to_wire, int channel_number)

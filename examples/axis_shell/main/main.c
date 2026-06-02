@@ -10,7 +10,6 @@
 #include "esp_err.h"
 
 #include "espFoC/esp_foc.h"
-#include "espFoC/stream/esp_foc_scope.h"
 #include "espFoC/shell/espfoc_shell.h"
 #include "espFoC/utils/esp_foc_q16.h"
 
@@ -41,33 +40,6 @@ static void regulation_stub(esp_foc_axis_t *axis,
     (void)axis;
     (void)id_ref;
     (void)iq_ref;
-}
-
-static void wire_scope_channels(void)
-{
-#if defined(CONFIG_ESP_FOC_SCOPE)
-    esp_foc_scope_add_channel(&s_axis.target_i_d.raw, 0);
-    esp_foc_scope_add_channel(&s_axis.i_d.raw, 1);
-    esp_foc_scope_add_channel(&s_axis.target_i_q.raw, 2);
-    esp_foc_scope_add_channel(&s_axis.i_q.raw, 3);
-    esp_foc_scope_add_channel(&s_axis.u_d.raw, 4);
-    esp_foc_scope_add_channel(&s_axis.u_q.raw, 5);
-    esp_foc_scope_add_channel(
-        (const q16_t *)(const volatile void *)&s_axis.rotor_estimator.theta_meas_mech, 6);
-    esp_foc_scope_add_channel(
-        (const q16_t *)(const volatile void *)&s_axis.rotor_elec_angle, 7);
-    esp_foc_scope_add_channel(&s_axis.rotor_estimator.omega_est_mech, 8);
-    esp_foc_scope_add_channel(&s_axis.u_u.raw, 9);
-    esp_foc_scope_add_channel(&s_axis.u_v.raw, 10);
-    esp_foc_scope_add_channel(&s_axis.u_w.raw, 11);
-    esp_foc_scope_add_channel(&s_axis.i_u, 12);
-    esp_foc_scope_add_channel(&s_axis.i_v, 13);
-    esp_foc_scope_add_channel(&s_axis.i_alpha.raw, 14);
-    esp_foc_scope_add_channel(&s_axis.i_beta.raw, 15);
-    esp_foc_scope_add_channel(&esp_foc_debug_scope_hot_path_dt_us_q16, 16);
-    esp_foc_scope_bind_axis(&s_axis);
-    esp_foc_scope_initalize();
-#endif
 }
 
 #if !defined(CONFIG_ESP_FOC_FITL) || !CONFIG_ESP_FOC_FITL
@@ -176,7 +148,6 @@ void app_main(void)
     rotor_sensor_simu_wire_ud_uq(s_rotor, &s_axis.u_d.raw, &s_axis.u_q.raw);
 #endif
 
-    wire_scope_channels();
     esp_foc_set_regulation_callback(&s_axis, regulation_stub);
 
 #if defined(CONFIG_ESPFOC_SHELL)

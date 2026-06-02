@@ -83,7 +83,6 @@ static void wire_scope_channels(void)
     esp_foc_scope_add_channel(
         (const q16_t *)(const volatile void *)&s_axis.rotor_estimator.pll_err, 5);
     esp_foc_scope_bind_axis(&s_axis);
-    esp_foc_scope_initalize();
 #endif
 }
 

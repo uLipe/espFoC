@@ -139,6 +139,15 @@ menu "espFoC Settings"
             default 4096 if ESP_FOC_SCOPE_NUM_CHANNELS = 8
             default 8
 
+        config ESP_FOC_SCOPE_DAEMON_PRIORITY
+            int "Scope daemon runner priority (esp_foc_create_runner arg)"
+            depends on ESP_FOC_SCOPE
+            range 1 10
+            default 3
+            help
+                Lower number = higher FreeRTOS priority (same scale as FOC outer
+                loop). Default 3 → RT priority 22 on IDF (below plant/FOC at 23–24).
+
         config ESP_FOC_SCOPE_TX_ALWAYS
             bool "Stream without RUNNING gate (test / bring-up only)"
             depends on ESP_FOC_SCOPE
@@ -204,6 +213,10 @@ menu "espFoC Settings"
             config FOC_ITL_PWM_10KHZ
                 bool "Use 10 kHz PWM tick (default 20 kHz)"
                 default n
+                help
+                    FITL inverter ISR tick rate. Plant integration runs at
+                    ISR rate divided by "Outer loop downsample factor" in
+                    espFoC Settings -> Control loop (default 10 → 2 kHz plant).
 
             config FOC_ITL_USE_RK2
                 bool "Plant integrator: RK2 instead of RK4"

@@ -17,9 +17,16 @@ extern "C" {
 extern q16_t esp_foc_debug_scope_hot_path_dt_us_q16;
 #endif
 
+/** Start scope daemon + stream bridge (idempotent). Called from axis init. */
 void esp_foc_scope_initalize(void);
 
-/** Axis used to gate TX: stream only when state is RUNNING. */
+/** True when daemon task is running (tests / diagnostics). */
+bool esp_foc_scope_is_initialized(void);
+
+/** Wire standard 17ch axis_shell map; requires CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS=17. */
+esp_foc_err_t esp_foc_scope_wire_axis(esp_foc_axis_t *axis);
+
+/** Custom channel maps (test apps): bind axis for TX gate, then add_channel. */
 void esp_foc_scope_bind_axis(esp_foc_axis_t *axis);
 
 void esp_foc_scope_data_push(void);
