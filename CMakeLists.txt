@@ -5,8 +5,6 @@ set(srcs    "source/motor_control/esp_foc_core.c"
             "source/calibration/esp_foc_calibration_format.c"
             "source/calibration/esp_foc_calibration_nvs.c"
             "source/calibration/esp_foc_calibration_axis.c"
-            "source/gui_link/esp_foc_link.c"
-            "source/gui_link/esp_foc_scope.c"
             "source/motor_control/esp_foc_iq31.c"
             "source/motor_control/esp_foc_q16.c"
             )
@@ -78,22 +76,29 @@ if(target STREQUAL "esp32s2" OR target STREQUAL "esp32s3" OR target STREQUAL "es
     list(APPEND requires espressif__esp_tinyusb)
 endif()
 
-if(CONFIG_ESP_FOC_TUNER_ENABLE)
-    list(APPEND srcs "source/gui_link/esp_foc_tuner.c"
-                     "source/gui_link/esp_foc_link_session.c")
-endif()
-if(CONFIG_ESP_FOC_BRIDGE_UART)
-    list(APPEND srcs "source/drivers/gui_link/esp_foc_bridge_uart.c")
-    list(APPEND requires esp_driver_uart)
-elseif(CONFIG_ESP_FOC_BRIDGE_USBCDC)
-    if(target STREQUAL "esp32s2" OR target STREQUAL "esp32s3" OR target STREQUAL "esp32p4")
-        list(APPEND srcs "source/drivers/gui_link/esp_foc_bridge_usbcdc.c")
+if(CONFIG_ESP_FOC_SCOPE)
+    list(APPEND srcs "source/stream/esp_foc_scope.c")
+    if(CONFIG_ESP_FOC_STREAM_BRIDGE_UART)
+        list(APPEND srcs "source/drivers/stream/esp_foc_stream_bridge_uart.c")
+        list(APPEND requires esp_driver_uart)
+    elseif(CONFIG_ESP_FOC_STREAM_BRIDGE_USBCDC)
+        if(target STREQUAL "esp32s2" OR target STREQUAL "esp32s3" OR target STREQUAL "esp32p4")
+            list(APPEND srcs "source/drivers/stream/esp_foc_stream_bridge_usbcdc.c")
+        else()
+            list(APPEND srcs "source/drivers/stream/esp_foc_stream_bridge_usb_serial_jtag.c")
+            list(APPEND requires esp_driver_usb_serial_jtag)
+        endif()
     else()
-        list(APPEND srcs "source/drivers/gui_link/esp_foc_bridge_usb_serial_jtag.c")
-        list(APPEND requires esp_driver_usb_serial_jtag)
+        message(FATAL_ERROR
+            "espFoC: CONFIG_ESP_FOC_SCOPE=y requires ESP_FOC_STREAM_BRIDGE_UART or "
+            "ESP_FOC_STREAM_BRIDGE_USBCDC (no stub fallback)")
     endif()
+endif()
+if(CONFIG_ESPFOC_SHELL)
+    list(APPEND srcs "source/shell/espfoc_shell_parse.c"
+                     "source/shell/espfoc_shell.c")
 else()
-    list(APPEND srcs "source/gui_link/esp_foc_bus_stub.c")
+    list(APPEND srcs "source/shell/espfoc_shell_parse.c")
 endif()
 
 idf_component_register(SRCS "${srcs}"

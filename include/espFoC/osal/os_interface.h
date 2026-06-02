@@ -56,6 +56,14 @@ uint32_t esp_foc_ms_to_wait_ticks(unsigned ms);
 int esp_foc_task_spawn(foc_loop_runner fn, void *arg, size_t stack_bytes,
                        int freertos_priority, void **out_task_handle_opt);
 
+typedef struct esp_foc_mutex esp_foc_mutex_t;
+
+/** @return 0 on success, negative on failure. */
+int esp_foc_mutex_create(esp_foc_mutex_t **out);
+void esp_foc_mutex_destroy(esp_foc_mutex_t *mutex);
+void esp_foc_mutex_lock(esp_foc_mutex_t *mutex);
+void esp_foc_mutex_unlock(esp_foc_mutex_t *mutex);
+
 typedef void (*esp_foc_timer_callback_t)(void *arg);
 typedef struct esp_foc_timer esp_foc_timer_t;
 
@@ -64,3 +72,17 @@ void esp_foc_timer_destroy(esp_foc_timer_t *t);
 int esp_foc_timer_arm_oneshot_us(esp_foc_timer_t *t, uint64_t period_us);
 int esp_foc_timer_arm_periodic_us(esp_foc_timer_t *t, uint64_t period_us);
 void esp_foc_timer_cancel(esp_foc_timer_t *t);
+
+/** Console (platform REPL port). Used by espfoc_shell — no driver headers in shell. */
+
+/** One-time setup (blocking stdin on the IDF console VFS). Safe to call repeatedly. */
+void esp_foc_console_init(void);
+
+/** Block until one byte or timeout. @p timeout_ms < 0 waits forever. Returns 0–255 or -1. */
+int esp_foc_console_read_byte(int timeout_ms);
+
+/** Write bytes to the console port (no implicit newline). Returns bytes sent or -1. */
+int esp_foc_console_write(const char *data, size_t len);
+
+/** Does not return on success. */
+void esp_foc_reboot(void);

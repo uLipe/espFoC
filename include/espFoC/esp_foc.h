@@ -14,7 +14,7 @@
 #include "espFoC/osal/os_interface.h"
 #include "espFoC/esp_foc_err.h"
 #include "espFoC/esp_foc_axis.h"
-#include "espFoC/gui_link/esp_foc_scope.h"
+#include "espFoC/stream/esp_foc_scope.h"
 #include "espFoC/calibration/esp_foc_calibration.h"
 
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,

@@ -121,74 +121,74 @@ menu "espFoC Settings"
 
     endmenu
 
-    menu "GUI link"
+    menu "Scope stream"
         config ESP_FOC_SCOPE
-            bool "Enable scope channel support"
+            bool "Enable scope channel capture and ESPF streaming"
             default n
 
         config ESP_FOC_SCOPE_NUM_CHANNELS
-            int "Max scope channels"
-            default 14
+            int "Scope channels per frame (fixed on wire)"
+            depends on ESP_FOC_SCOPE
+            default 17
 
         config ESP_FOC_SCOPE_BUFFER_SIZE
             int "Scope ring buffer (frames per half-buffer)"
-            default 512 if ESP_FOC_SCOPE_NUM_CHANNELS = 14
+            depends on ESP_FOC_SCOPE
+            default 8 if ESP_FOC_SCOPE_NUM_CHANNELS = 17
+            default 8 if ESP_FOC_SCOPE_NUM_CHANNELS = 14
             default 4096 if ESP_FOC_SCOPE_NUM_CHANNELS = 8
-            default 1024
+            default 8
 
-        config ESP_FOC_TUNER_ENABLE
-            bool "Runtime PI tuner and protocol (esp_foc_tuner)"
+        config ESP_FOC_SCOPE_TX_ALWAYS
+            bool "Stream without RUNNING gate (test / bring-up only)"
+            depends on ESP_FOC_SCOPE
             default n
+
+        choice ESP_FOC_STREAM_BRIDGE
+            prompt "Scope stream physical interface (TX only)"
+            depends on ESP_FOC_SCOPE
+            default ESP_FOC_STREAM_BRIDGE_USBCDC if IDF_TARGET_ESP32C6
+            default ESP_FOC_STREAM_BRIDGE_UART
             help
-                Compiles the tuner; attach axes and handle requests from UART/USB.
+                Separate from the console UART used for logs and espfoc_shell.
+                ESP32-C6: use USB Serial/JTAG for espFoC Tool; UART for monitor.
 
-        choice ESP_FOC_TUNER_BRIDGE
-            prompt "Tuner / scope link"
-            depends on ESP_FOC_TUNER_ENABLE
-            default ESP_FOC_BRIDGE_USBCDC if IDF_TARGET_ESP32C6
-            default ESP_FOC_BRIDGE_UART
-            help
-                Physical bus for espFoC Tool / espfocctl or custom host tools.
+            config ESP_FOC_STREAM_BRIDGE_UART
+                bool "Dedicated UART"
 
-            config ESP_FOC_BRIDGE_NONE
-                bool "None (weak callbacks in application)"
-
-            config ESP_FOC_BRIDGE_UART
-                bool "UART"
-                help
-                    Works on all targets with a hardware UART.
-
-            config ESP_FOC_BRIDGE_USBCDC
-                bool "USB CDC"
+            config ESP_FOC_STREAM_BRIDGE_USBCDC
+                bool "USB CDC / Serial-JTAG"
                 depends on SOC_USB_OTG_SUPPORTED || SOC_USB_SERIAL_JTAG_SUPPORTED
-                help
-                    Virtual serial port to the host over USB.
-                    ESP32-S2/S3/P4: TinyUSB device stack (native USB OTG).
-                    ESP32-C3/C5/C6/H2/C61: on-chip USB Serial/JTAG (no external PHY).
-                    Do not enable ESP_CONSOLE_USB_SERIAL_JTAG on the same port;
-                    use UART for logs or disable the console on USJ.
         endchoice
 
-        if ESP_FOC_BRIDGE_UART
-            config ESP_FOC_BRIDGE_UART_NUM
-                int "UART port index"
+        if ESP_FOC_STREAM_BRIDGE_UART
+            config ESP_FOC_STREAM_UART_NUM
+                int "Scope UART port index"
                 range 0 2
                 default 1
-            config ESP_FOC_BRIDGE_UART_BAUD
-                int "UART baud"
+            config ESP_FOC_STREAM_UART_BAUD
+                int "Scope UART baud"
                 default 921600
-            config ESP_FOC_BRIDGE_UART_TX_PIN
-                int "UART TX"
+            config ESP_FOC_STREAM_UART_TX_PIN
+                int "Scope UART TX GPIO"
                 default 17
-            config ESP_FOC_BRIDGE_UART_RX_PIN
-                int "UART RX"
+            config ESP_FOC_STREAM_UART_RX_PIN
+                int "Scope UART RX GPIO (unused for TX-only)"
                 default 18
         endif
 
         config ESP_FOC_CALIBRATION_NVS
-            bool "Persist current-loop gains to NVS (requires NVS on chip)"
-            depends on ESP_FOC_TUNER_ENABLE
+            bool "Persist calibration to NVS"
             default y
+    endmenu
+
+    menu "espfoc_shell (console REPL)"
+        config ESPFOC_SHELL
+            bool "Console command shell on ESP_CONSOLE UART"
+            default y
+            help
+                Line-oriented REPL on the main serial console (idf monitor).
+                Not on the scope stream port.
     endmenu
 
     menu "FOC-in-the-loop (simulated plant)"

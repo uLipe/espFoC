@@ -9,11 +9,14 @@
 #include <unistd.h>
 #include "espFoC/esp_foc.h"
 #include "esp_err.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "esp_cpu.h"
 #include "driver/gpio.h"
+#include "sdkconfig.h"
 
 static portMUX_TYPE spinlock =  portMUX_INITIALIZER_UNLOCKED;
 static int debug_pin_internal = -1;
@@ -153,6 +156,53 @@ uint32_t esp_foc_ms_to_wait_ticks(unsigned ms)
     return (uint32_t)pdMS_TO_TICKS(ms);
 }
 
+struct esp_foc_mutex {
+    SemaphoreHandle_t h;
+};
+
+int esp_foc_mutex_create(esp_foc_mutex_t **out)
+{
+    if (out == NULL) {
+        return -1;
+    }
+    esp_foc_mutex_t *m = (esp_foc_mutex_t *)calloc(1, sizeof(*m));
+    if (m == NULL) {
+        return -2;
+    }
+    m->h = xSemaphoreCreateMutex();
+    if (m->h == NULL) {
+        free(m);
+        return -3;
+    }
+    *out = m;
+    return 0;
+}
+
+void esp_foc_mutex_destroy(esp_foc_mutex_t *mutex)
+{
+    if (mutex == NULL) {
+        return;
+    }
+    if (mutex->h != NULL) {
+        vSemaphoreDelete(mutex->h);
+    }
+    free(mutex);
+}
+
+void esp_foc_mutex_lock(esp_foc_mutex_t *mutex)
+{
+    if (mutex != NULL && mutex->h != NULL) {
+        (void)xSemaphoreTake(mutex->h, portMAX_DELAY);
+    }
+}
+
+void esp_foc_mutex_unlock(esp_foc_mutex_t *mutex)
+{
+    if (mutex != NULL && mutex->h != NULL) {
+        (void)xSemaphoreGive(mutex->h);
+    }
+}
+
 int esp_foc_task_spawn(foc_loop_runner fn, void *arg, size_t stack_bytes,
                        int freertos_priority, void **out_task_handle_opt)
 {
@@ -246,4 +296,89 @@ void esp_foc_timer_cancel(esp_foc_timer_t *t)
         return;
     }
     (void)esp_timer_stop(t->h);
+}
+
+#if defined(CONFIG_ESP_CONSOLE_UART) || defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/select.h>
+#include <unistd.h>
+
+void esp_foc_console_init(void)
+{
+    int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    if (flags >= 0) {
+        (void)fcntl(STDIN_FILENO, F_SETFL, flags & ~O_NONBLOCK);
+    }
+}
+
+int esp_foc_console_read_byte(int timeout_ms)
+{
+    if (timeout_ms >= 0) {
+        fd_set rfds;
+        struct timeval tv;
+
+        FD_ZERO(&rfds);
+        FD_SET(STDIN_FILENO, &rfds);
+        tv.tv_sec = (time_t)(timeout_ms / 1000);
+        tv.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
+        int sel = select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv);
+        if (sel <= 0) {
+            return -1;
+        }
+    }
+
+    uint8_t ch;
+    ssize_t n = read(STDIN_FILENO, &ch, 1);
+    if (n != 1) {
+        return -1;
+    }
+    return (int)ch;
+}
+
+int esp_foc_console_write(const char *data, size_t len)
+{
+    if (data == NULL || len == 0U) {
+        return 0;
+    }
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = write(STDOUT_FILENO, data + off, len - off);
+        if (n > 0) {
+            off += (size_t)n;
+            continue;
+        }
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        break;
+    }
+    return (int)off;
+}
+
+#else /* no console */
+
+void esp_foc_console_init(void)
+{
+}
+
+int esp_foc_console_read_byte(int timeout_ms)
+{
+    (void)timeout_ms;
+    return -1;
+}
+
+int esp_foc_console_write(const char *data, size_t len)
+{
+    (void)data;
+    (void)len;
+    return -1;
+}
+
+#endif
+
+void esp_foc_reboot(void)
+{
+    esp_restart();
 }

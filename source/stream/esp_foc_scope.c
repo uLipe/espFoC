@@ -8,20 +8,28 @@
 #include <string.h>
 #include <stdbool.h>
 #include "espFoC/esp_foc.h"
-#include "espFoC/gui_link/esp_foc_link.h"
-#include "espFoC/gui_link/esp_foc_tuner.h"
+#include "espFoC/stream/esp_foc_stream_frame.h"
+#include "espFoC/stream/esp_foc_stream_bridge.h"
 #include "esp_log.h"
 
 const char *TAG = "ESP_FOC_SCOPE";
 
-extern void esp_foc_init_bus_callback(void);
-extern void esp_foc_send_buffer_callback(const uint8_t *buffer, int size);
+struct scope_frame {
+    q16_t data[CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS];
+};
 
-/* Binary SCOPE v1: 0xFF 'S' 'C' 0x01, uint16le n, n × int32le (q16_t). */
-#define SCOPE_WIRE_V1 0x01U
-#define SCOPE_BIN_BODY_LEN  (6U + 4U * CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS)
-_Static_assert(SCOPE_BIN_BODY_LEN <= ESP_FOC_LINK_MAX_PAYLOAD,
-    "Scope v1 frame exceeds link payload; reduce CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS");
+static uint32_t used_channels = 0;
+static q16_t *scope_channels[CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS];
+static esp_foc_event_handle_t scope_ev;
+static esp_foc_axis_t *s_axis;
+
+static bool scope_enable = false;
+static struct scope_frame scope_buffer[2][CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE];
+static bool ping_pong_switch = false;
+static volatile uint8_t s_tx_bank;
+static uint32_t rd_buff_index = 0;
+static uint32_t wr_buff_index = 0;
+static uint16_t s_frame_seq;
 
 static inline void put_u16_le(uint8_t *d, uint16_t v)
 {
@@ -37,20 +45,46 @@ static inline void put_i32_le(uint8_t *d, int32_t v)
     d[3] = (uint8_t)(((uint32_t)v >> 24) & 0xFFU);
 }
 
-struct scope_frame {
-    q16_t data[CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS];
-};
+static bool scope_may_transmit(void)
+{
+#if defined(CONFIG_ESP_FOC_SCOPE_TX_ALWAYS)
+    (void)s_axis;
+    return true;
+#else
+    if (s_axis == NULL) {
+        return false;
+    }
+    return (s_axis->state == ESP_FOC_AXIS_STATE_RUNNING
+            || s_axis->state == ESP_FOC_AXIS_STATE_BENCH);
+#endif
+}
 
-static uint32_t used_channels = 0;
-static q16_t *scope_channels[CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS];
-static esp_foc_event_handle_t scope_ev;
+static void scope_send_espf_frame(const struct scope_frame *sample)
+{
+    uint8_t out[ESP_FOC_STREAM_FIXED_BYTES
+                 + 4U * CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS];
+    const uint16_t n_ch = (uint16_t)CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS;
+    uint8_t *wp = out;
 
-static bool scope_enable = false;
-static bool scope_stream = false;
-static struct scope_frame scope_buffer[2][CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE];
-static bool ping_pong_switch = false;
-static uint32_t rd_buff_index = 0;
-static uint32_t wr_buff_index = 0;
+    wp[0] = ESP_FOC_STREAM_MAGIC_HDR_0;
+    wp[1] = ESP_FOC_STREAM_MAGIC_HDR_1;
+    wp[2] = ESP_FOC_STREAM_MAGIC_HDR_2;
+    wp[3] = ESP_FOC_STREAM_MAGIC_HDR_3;
+    wp += 4;
+    put_u16_le(wp, s_frame_seq++);
+    put_u16_le(wp + 2, n_ch);
+    wp += 4;
+    for (int i = 0; i < CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS; i++) {
+        put_i32_le(wp, (int32_t)sample->data[i]);
+        wp += 4;
+    }
+    wp[0] = ESP_FOC_STREAM_MAGIC_FTR_0;
+    wp[1] = ESP_FOC_STREAM_MAGIC_FTR_1;
+    wp[2] = ESP_FOC_STREAM_MAGIC_FTR_2;
+    wp[3] = ESP_FOC_STREAM_MAGIC_FTR_3;
+
+    esp_foc_stream_bridge_send_frame(out, esp_foc_stream_frame_total_bytes(n_ch));
+}
 
 static void esp_foc_scope_daemon_thread(void *arg)
 {
@@ -59,55 +93,33 @@ static void esp_foc_scope_daemon_thread(void *arg)
     (void)arg;
     memset(&scope_buffer, 0, sizeof(scope_buffer));
     scope_ev = esp_foc_get_event_handle();
-    esp_foc_wait_notifier();
 
     while (1) {
-        if (rd_buff_index >= CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE) {
-            esp_foc_wait_notifier();
-        }
-
-        next_sample = &scope_buffer[ping_pong_switch][rd_buff_index];
-        {
-            static uint8_t out_buf[ESP_FOC_LINK_MAX_PAYLOAD];
-            const size_t olen = SCOPE_BIN_BODY_LEN;
-            uint8_t *wp;
-            int i;
-
-            wp = out_buf;
-            *wp++ = 0xFFU;
-            *wp++ = (uint8_t)'S';
-            *wp++ = (uint8_t)'C';
-            *wp++ = SCOPE_WIRE_V1;
-            put_u16_le(wp, (uint16_t)CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS);
-            wp += 2;
-            for (i = 0; i < CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS; i++) {
-                put_i32_le(wp, (int32_t)next_sample->data[i]);
-                wp += 4;
+        esp_foc_wait_notifier();
+        const uint8_t bank = s_tx_bank;
+        rd_buff_index = 0;
+        while (rd_buff_index < CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE) {
+            next_sample = &scope_buffer[bank][rd_buff_index];
+            if (scope_may_transmit()) {
+                scope_send_espf_frame(next_sample);
             }
-            if (scope_stream) {
-                esp_foc_send_buffer_callback((const uint8_t *)out_buf, olen);
-            }
+            rd_buff_index++;
+            esp_foc_runner_yield();
         }
-        rd_buff_index++;
     }
 }
 
-void esp_foc_scope_set_stream_enabled(bool enabled)
+void esp_foc_scope_bind_axis(esp_foc_axis_t *axis)
 {
-    scope_stream = enabled;
-}
-
-bool esp_foc_scope_stream_enabled(void)
-{
-    return scope_stream;
+    s_axis = axis;
 }
 
 void esp_foc_scope_initalize(void)
 {
     if (!scope_enable) {
         scope_enable = true;
-        scope_stream = false;
-        esp_foc_tuner_init_bus_callback();
+        s_frame_seq = 0;
+        esp_foc_stream_bridge_init();
         esp_foc_create_runner(esp_foc_scope_daemon_thread, NULL, -1, NULL);
         esp_foc_sleep_ms(10);
     }
@@ -126,8 +138,8 @@ static inline bool scope_capture_frame(void)
     }
     wr_buff_index++;
     if (wr_buff_index >= CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE) {
-        rd_buff_index = 0;
         wr_buff_index = 0;
+        s_tx_bank = (uint8_t)!ping_pong_switch;
         ping_pong_switch ^= 1;
         return true;
     }
@@ -137,7 +149,6 @@ static inline bool scope_capture_frame(void)
 void esp_foc_scope_data_push(void)
 {
     if (!scope_enable) {
-        ESP_LOGW(TAG, "ESP FOC scope is not ready yet, skipping...");
         return;
     }
     if (scope_capture_frame()) {
@@ -172,6 +183,6 @@ int esp_foc_scope_add_channel(const q16_t *data_to_wire, int channel_number)
     scope_channels[channel_number] = (q16_t *)data_to_wire;
     esp_foc_critical_leave();
 
-    ESP_LOGI(TAG, "Wire data %p is attached to channel %d", data_to_wire, channel_number);
+    ESP_LOGD(TAG, "Wire data %p is attached to channel %d", data_to_wire, channel_number);
     return 0;
 }

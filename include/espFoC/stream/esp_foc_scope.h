@@ -7,6 +7,7 @@
 #pragma once
 
 #include "espFoC/utils/esp_foc_q16.h"
+#include "espFoC/esp_foc_axis.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,9 +19,8 @@ extern q16_t esp_foc_debug_scope_hot_path_dt_us_q16;
 
 void esp_foc_scope_initalize(void);
 
-/** When false, captured samples are not transmitted (saves bandwidth). */
-void esp_foc_scope_set_stream_enabled(bool enabled);
-bool esp_foc_scope_stream_enabled(void);
+/** Axis used to gate TX: stream only when state is RUNNING. */
+void esp_foc_scope_bind_axis(esp_foc_axis_t *axis);
 
 void esp_foc_scope_data_push(void);
 void esp_foc_scope_data_push_from_isr(void);
