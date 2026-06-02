@@ -1,38 +1,49 @@
-"""Qt application bootstrap: theme, OpenGL plots, optional GPU opt-out."""
+"""Qt application bootstrap (QML + Material)."""
 
 from __future__ import annotations
 
-import os
 import sys
+from pathlib import Path
 
-import pyqtgraph as pg
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QSurfaceFormat
-from PySide6.QtWidgets import QApplication
-
-from .theme import apply_dark_theme
-
-
-def graphics_disabled() -> bool:
-    v = os.environ.get("ESPFOC_TOOL_NO_GL", "").strip().lower()
-    return v in ("1", "true", "yes", "on")
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QGuiApplication, QIcon
+from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuickControls2 import QQuickStyle
 
 
-def configure_graphics() -> None:
-    if graphics_disabled():
-        pg.setConfigOptions(useOpenGL=False)
-        return
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseDesktopOpenGL, True)
-    fmt = QSurfaceFormat()
-    fmt.setSamples(4)
-    QSurfaceFormat.setDefaultFormat(fmt)
-    pg.setConfigOptions(useOpenGL=True)
+def _gui_dir() -> Path:
+    return Path(__file__).resolve().parent
 
 
-def create_application(argv: list[str] | None = None) -> QApplication:
-    app = QApplication.instance()
+def _window_icon() -> QIcon | None:
+    base = _gui_dir().parents[2] / "doc" / "images"
+    for name in ("espfoc_tool_logo.png",):
+        p = base / name
+        if p.is_file():
+            return QIcon(str(p))
+    return None
+
+
+def create_qml_engine(scope_backend) -> QQmlApplicationEngine:
+    QQuickStyle.setStyle("Material")
+    app = QGuiApplication.instance()
     if app is None:
-        app = QApplication(argv if argv is not None else sys.argv)
-    configure_graphics()
-    apply_dark_theme(app)
-    return app
+        raise RuntimeError("QGuiApplication required before engine")
+    icon = _window_icon()
+    if icon is not None:
+        app.setWindowIcon(icon)
+
+    engine = QQmlApplicationEngine()
+    gui = _gui_dir()
+    qml_root = gui / "qml"
+    engine.addImportPath(str(qml_root))
+    engine.setBaseUrl(QUrl.fromLocalFile(str(qml_root) + "/"))
+    engine.rootContext().setContextProperty("scope", scope_backend)
+    engine.load(QUrl.fromLocalFile(str(gui / "qml" / "Main.qml")))
+    if not engine.rootObjects():
+        raise RuntimeError("Failed to load Main.qml")
+    return engine
+
+
+def create_application(argv: list[str] | None = None) -> QGuiApplication:
+    return QGuiApplication(argv if argv is not None else sys.argv)

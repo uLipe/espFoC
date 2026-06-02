@@ -1,3 +1,3 @@
-"""espFoC Tool — host-side GUI and CLI for motor control."""
+"""espFoC Tool — passive scope stream viewer."""
 
-__version__ = "0.1.0"
+__version__ = "3.0.0"
