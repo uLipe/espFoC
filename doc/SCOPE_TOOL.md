@@ -88,12 +88,17 @@ Status bar: `frames=N` should increase after `run 0`. On the monitor UART you sh
 2. Point `StreamReader(..., expected_n_ch=N)` in your GUI backend (see `tools/espfoc_tool/gui/backend.py`).
 3. Keep `CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS` equal to `EXPECTED_N_CH`.
 
-### 6. Debug (JTAG + GDB)
+### 6. Debug (JTAG + GDB + monitor in tmux)
+
+ESP32-C6 uses **two USB cables**: UART adapter (`ttyUSB*`) for flash/monitor, native USB-JTAG for OpenOCD/GDB.
 
 ```bash
 cd examples/axis_shell
-python3 ../../scripts/esp_foc_debug.py
+idf.py set-target esp32c6
+python3 ../../scripts/esp_foc_debug.py -p /dev/ttyUSB0
 ```
+
+Builds/flashes on UART, OpenOCD on USB-JTAG, tmux: **left = GDB**, **right = shell monitor**.
 
 See [SHELL.md](SHELL.md) for REPL grammar.
 
