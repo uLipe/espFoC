@@ -23,6 +23,7 @@ static bool IRAM_ATTR tick_isr(gptimer_handle_t timer,
     (void)timer;
     (void)edata;
     (void)user_data;
+    /* GPTimer driver clears ALARM and re-arms auto-reload before this runs. */
     if (s_cb != NULL) {
         s_cb(s_cb_arg);
     }

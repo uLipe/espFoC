@@ -17,11 +17,15 @@
 
 #include "esp_foc_itl_plant.h"
 #include "esp_foc_itl_tick.h"
+#if defined(CONFIG_ESP_FOC_SCOPE)
+#include "espFoC/stream/esp_foc_scope.h"
+#endif
 
 static const char *TAG = "foc_itl";
 
 #define FOC_ITL_PLANT_RUNNER_PRIORITY  2
 #define FOC_ITL_PLANT_JOIN_MS          50
+#define FOC_ITL_PLANT_DECIM            ((uint32_t)CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING)
 
 static void plant_runner_join(esp_foc_event_handle_t ev)
 {
@@ -57,6 +61,7 @@ typedef struct {
     q16_t vdc_q16;
 
     esp_foc_event_handle_t plant_ev;
+    uint8_t plant_decim_count;
     bool alive;
 
     esp_foc_inverter_t inverter;
@@ -138,6 +143,14 @@ static void plant_task_fn(void *arg)
     esp_foc_runner_delete_self();
 }
 
+static uint32_t fitl_plant_hz(uint32_t pwm_hz)
+{
+    if (FOC_ITL_PLANT_DECIM <= 1u) {
+        return pwm_hz;
+    }
+    return pwm_hz / FOC_ITL_PLANT_DECIM;
+}
+
 static void IRAM_ATTR tick_cb(void *arg)
 {
     esp_foc_itl_ctx_t *ctx = (esp_foc_itl_ctx_t *)arg;
@@ -148,7 +161,16 @@ static void IRAM_ATTR tick_cb(void *arg)
         cb(cb_arg);
     }
 
-    if (ctx->plant_ev != NULL) {
+    if (ctx->plant_ev == NULL || FOC_ITL_PLANT_DECIM <= 1u) {
+        if (ctx->plant_ev != NULL) {
+            esp_foc_send_notification_from_isr(ctx->plant_ev);
+        }
+        return;
+    }
+
+    ctx->plant_decim_count++;
+    if (ctx->plant_decim_count >= FOC_ITL_PLANT_DECIM) {
+        ctx->plant_decim_count = 0;
         esp_foc_send_notification_from_isr(ctx->plant_ev);
     }
 }
@@ -375,6 +397,10 @@ esp_foc_err_t esp_foc_in_the_loop_create(const esp_foc_in_the_loop_config_t *cfg
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
+#if defined(CONFIG_ESP_FOC_SCOPE)
+    esp_foc_scope_initalize();
+#endif
+
     memset(&s_ctx, 0, sizeof(s_ctx));
     s_ctx.pwm_hz = fitl_pwm_hz_from_config(cfg->pwm_hz);
     s_ctx.vdc_q16 = cfg->vdc_q16;
@@ -384,11 +410,12 @@ esp_foc_err_t esp_foc_in_the_loop_create(const esp_foc_in_the_loop_config_t *cfg
 
     const esp_foc_itl_plant_params_t plant_params = params_from_config(cfg);
     esp_foc_itl_plant_init(&s_ctx.plant, &plant_params);
-    esp_foc_itl_plant_set_dt(&s_ctx.plant, s_ctx.pwm_hz);
+    const uint32_t plant_hz = fitl_plant_hz(s_ctx.pwm_hz);
+    esp_foc_itl_plant_set_dt(&s_ctx.plant, plant_hz);
     wire_vtables(&s_ctx);
 
     const float fc = (float)CONFIG_ESP_FOC_CURRENT_FILTER_CUTOFF_HZ;
-    const float fs = (float)s_ctx.pwm_hz;
+    const float fs = (float)plant_hz;
     esp_foc_biquad_butterworth_lpf_design_q16(&s_ctx.bq_u, fc, fs);
     esp_foc_biquad_butterworth_lpf_design_q16(&s_ctx.bq_v, fc, fs);
 
@@ -416,8 +443,9 @@ esp_foc_err_t esp_foc_in_the_loop_create(const esp_foc_in_the_loop_config_t *cfg
     out->rotor = &s_ctx.rotor;
     s_created = true;
 
-    ESP_LOGI(TAG, "FITL ready @ %lu Hz, pp=%d, locked=%d",
-             (unsigned long)s_ctx.pwm_hz, plant_params.pole_pairs,
+    ESP_LOGI(TAG, "FITL ready: ISR %lu Hz, plant %lu Hz (decim %lu), pp=%d, locked=%d",
+             (unsigned long)s_ctx.pwm_hz, (unsigned long)plant_hz,
+             (unsigned long)FOC_ITL_PLANT_DECIM, plant_params.pole_pairs,
              (int)plant_params.locked_rotor);
     return ESP_FOC_OK;
 }

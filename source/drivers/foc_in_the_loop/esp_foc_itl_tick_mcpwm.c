@@ -23,6 +23,7 @@ static bool IRAM_ATTR tick_isr(mcpwm_timer_handle_t timer,
     (void)timer;
     (void)edata;
     (void)user_data;
+    /* MCPWM driver clears TIMER_FULL in mcpwm_timer_default_isr before this runs. */
     if (s_cb != NULL) {
         s_cb(s_cb_arg);
     }
@@ -45,7 +46,7 @@ esp_foc_err_t esp_foc_itl_tick_start(esp_foc_itl_tick_cb_t cb, void *arg, uint32
         .group_id = 0,
         .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
         .resolution_hz = resolution_hz,
-        .count_mode = MCPWM_TIMER_COUNT_MODE_UP_DOWN,
+        .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
         .period_ticks = period_ticks,
     };
 
