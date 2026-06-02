@@ -24,10 +24,10 @@ build_one() {
     popd >/dev/null
 }
 
-build_one examples/axis_tuning set-target esp32s3 build
-rm -rf examples/axis_tuning/build examples/axis_tuning/sdkconfig
-build_one examples/axis_tuning set-target esp32c6 build
-rm -rf examples/axis_tuning/build examples/axis_tuning/sdkconfig
+build_one examples/axis_shell set-target esp32s3 build
+rm -rf examples/axis_shell/build examples/axis_shell/sdkconfig
+build_one examples/axis_shell set-target esp32c6 build
+rm -rf examples/axis_shell/build examples/axis_shell/sdkconfig
 
 build_one examples/test_drivers/test_current_sense set-target esp32s3 build
 build_one examples/test_drivers/test_encoder set-target esp32s3 build

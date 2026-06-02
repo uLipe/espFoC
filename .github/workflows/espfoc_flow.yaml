@@ -6,7 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
-      uses: actions/checkout@main
+      uses: actions/checkout@v4
 
     - name: Install python
       uses: actions/setup-python@v2
@@ -50,7 +50,7 @@ jobs:
       run: |
         ./idf/install.sh
         . ./idf/export.sh
-        pushd examples/axis_tuning
+        pushd examples/axis_shell
         idf.py set-target esp32s3
         idf.py build
         rm -rf build sdkconfig
@@ -156,6 +156,15 @@ jobs:
         pip install pexpect
         cd examples/unit_test_runner
         python run_unit_tests_qemu.py
+
+    - name: Shell QEMU smoke (axis_shell FITL)
+      timeout-minutes: 10
+      run: |
+        . ./idf/export.sh
+        cd examples/axis_shell
+        idf.py set-target esp32
+        idf.py build
+        python3 ../../scripts/run_shell_qemu.py
 
     - name: Build unit test runner (esp32c6 compile check)
       run: |
