@@ -11,8 +11,8 @@ and shows:
   fading trail; α and β are in **per-unit** relative to a running
   scale so the view stays in [-1, 1] and phase rails stay inside the
   unit hex;
-* the three-phase time-series underneath, physical units (V), matching
-  the scope tab's channels 0/1/2.
+* the three-phase time-series beside the hexagon (same row height),
+  physical units (V), matching the scope tab's channels 0/1/2.
 
 Rendering is buffered on the reader side and flushed at a modest UI
 rate so scope bursts after a current step do not stall the Qt loop.
@@ -30,13 +30,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
 from ..link import LinkReader
 from ..link.scope_sample import decode_scope_payload_to_floats_csv_first
@@ -49,6 +43,7 @@ from .plot_display import (
     rolling_plot_x_upper,
 )
 from .scope_stream_timing import scope_uniform_dt_s
+from .widgets import horizontal_splitter
 
 
 _HEX_COLOR = "#6e7681"
@@ -56,7 +51,6 @@ _CIRCLE_COLOR = "#3a3b3f"
 _VERTEX_COLOR = "#ffcc66"
 _TRAIL_COLOR = "#4fc3f7"
 _ARROW_COLOR = "#ff7043"
-_LABEL_COLOR = "#9aa0a6"
 # Keep these in sync with ScopePanel's first three entries so a phase
 # colour in the SVM view matches its counterpart in the scope tab.
 _PHASE_COLORS = ("#4fc3f7", "#ffb74d", "#81c784")
@@ -117,18 +111,18 @@ class SvmPanel(QWidget):
         self._last_abc: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
 
-        # --- Top half: hexagon + readout column --------------------------
-        top_row = QHBoxLayout()
-        root.addLayout(top_row, 2)
-
-        self._plot = pg.PlotWidget(title="SVPWM voltage vector (per unit)")
+        self._plot = pg.PlotWidget(title="SVPWM vector (pu)")
         self._plot.setAspectLocked(True)
         self._plot.setLabel('left', "β (pu)", units="")
         self._plot.setLabel('bottom', "α (pu)", units="")
         self._plot.showGrid(x=True, y=True, alpha=0.15)
         configure_rolling_time_xaxis(self._plot)
-        self._plot.setMinimumHeight(380)
+        plot_min_h = 300
+        self._plot.setMinimumHeight(plot_min_h)
+        self._plot.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._hex_crosshair = attach_crosshair(
             self._plot,
             fmt=lambda x, y: f"α = {x:+.3f} pu\nβ = {y:+.3f} pu")
@@ -183,37 +177,15 @@ class SvmPanel(QWidget):
         self._plot.addItem(self._head_scatter)
         self._redraw_hexagon()
         self._apply_hex_viewport()
-        top_row.addWidget(self._plot, 1)
 
-        side = QVBoxLayout()
-        side.setContentsMargins(6, 6, 6, 6)
-        side.setSpacing(4)
-        self._alpha_label = QLabel("α = 0.000 pu")
-        self._beta_label = QLabel("β = 0.000 pu")
-        self._mag_label = QLabel("|V| = 0.000 pu")
-        self._sector_label = QLabel("sector: -")
-        self._scale_label = QLabel("1 pu = 1.00 (arb.)")
-        for lbl in (self._alpha_label, self._beta_label,
-                    self._mag_label, self._sector_label, self._scale_label):
-            lbl.setStyleSheet("font-family: monospace; color: %s;"
-                              % _LABEL_COLOR)
-            side.addWidget(lbl)
-        autoset_btn = QPushButton("Autoset")
-        autoset_btn.setToolTip(
-            "Clear the trail, reset the per-unit scale, lock the SVM view "
-            "to [-1,1], rebase the waveform, and re-enable voltage autorange.")
-        autoset_btn.clicked.connect(self.autoset)
-        side.addWidget(autoset_btn)
-        side.addStretch(1)
-        top_row.addLayout(side, 0)
-
-        # --- Bottom half: three-phase waveform ---------------------------
         # X is seconds within the rolling window (0 = oldest on screen).
-        self._wave_plot = pg.PlotWidget(title="Three-phase output")
+        self._wave_plot = pg.PlotWidget(title="Three-phase (V)")
         self._wave_plot.setLabel('left', "voltage", units='V')
         self._wave_plot.setLabel('bottom', "time", units='s')
         self._wave_plot.showGrid(x=True, y=True, alpha=0.2)
-        self._wave_plot.setMinimumHeight(220)
+        self._wave_plot.setMinimumHeight(plot_min_h)
+        self._wave_plot.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         configure_rolling_time_xaxis(self._wave_plot)
         self._wave_plot.setXRange(0.0, self.WAVEFORM_WINDOW_S, padding=0)
         self._wave_plot.enableAutoRange(axis='x', enable=False)
@@ -229,7 +201,13 @@ class SvmPanel(QWidget):
             pen=pg.mkPen(QColor(_PHASE_COLORS[2]), width=2), name="iw (ch12 proxy)")
         for _c in (self._uu_curve, self._uv_curve, self._uw_curve):
             configure_dynamic_curve(_c)
-        root.addWidget(self._wave_plot, 1)
+
+        root.addWidget(horizontal_splitter(
+            self._plot,
+            self._wave_plot,
+            stretches=(1, 1),
+            sizes=(520, 520),
+        ), 1)
 
         # --- Render timer ------------------------------------------------
         self._render_timer = QTimer(self)
@@ -393,22 +371,6 @@ class SvmPanel(QWidget):
 
         x_up = rolling_plot_x_upper(t_d, self.WAVEFORM_WINDOW_S)
         self._wave_plot.setXRange(0.0, x_up, padding=0)
-
-        mag_pu = mag * inv
-        self._alpha_label.setText(f"α = {a_n:+8.3f} pu")
-        self._beta_label.setText(f"β = {b_n:+8.3f} pu")
-        self._mag_label.setText(f"|V| = {mag_pu:8.3f} pu")
-        self._scale_label.setText(f"1 pu = {self._pu_ref:8.4f}  (phase A)")
-        if mag < 1e-20:
-            self._sector_label.setText("sector: -")
-        else:
-            ang = math.atan2(b_n, a_n)
-            if ang < 0:
-                ang += 2.0 * math.pi
-            sec = int(ang // (math.pi / 3.0)) + 1
-            if sec > 6:
-                sec = 6
-            self._sector_label.setText(f"sector: {sec}")
 
     # --- Static geometry --------------------------------------------------
 

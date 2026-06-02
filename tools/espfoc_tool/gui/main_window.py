@@ -1,4 +1,4 @@
-"""espFoC Tool main window: nav rail + four views, optional USB auto-connect."""
+"""espFoC Tool main window: nav rail + Tune/Dashboard, optional USB auto-connect."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QMainWindow,
     QPushButton,
-    QSplitter,
     QStackedWidget,
     QSizePolicy,
     QWidget,
@@ -28,10 +27,11 @@ from .nav_rail import NavRail
 from .scope_stream_timing import scope_uniform_dt_s
 from .states_panel import StatesPanel
 from .svm_panel import SvmPanel
-from .theme import make_badge_qss, make_reset_board_button_qss
+from .buttons import action_button
+from .theme import make_badge_qss
 from .tuning_panel import TuningPanel
 from .tuner_poll_worker import TunerPollSnapshot, TunerPollWorker
-from .views import ConfigView, CurrentView
+from .views import DashboardView, TuneView
 
 _LINK_DOWN_AFTER_CONSECUTIVE_PING_FAILS = 10
 
@@ -74,33 +74,21 @@ class MainWindow(QMainWindow):
         self._analysis_debounce.timeout.connect(self._run_pending_analysis)
         self._analysis_pending = None
 
-        self._tuning = TuningPanel(client=None)
-        self._config = ConfigView(self._tuning)
-        self._current = CurrentView(
-            self._analysis, on_params_changed=self._on_params)
+        self._tuning = TuningPanel(client=None, scrollable=False)
+        self._tune = TuneView(
+            self._tuning,
+            self._analysis,
+            on_params_changed=self._on_params,
+        )
         self._control = ControlRail(
             client=None, connected=self._device_connected)
         self._svm = SvmPanel(reader=None)
         self._states = StatesPanel(reader=None)
+        self._dashboard = DashboardView(
+            self._control, self._svm, self._states)
 
-        self._stack.addWidget(self._config)
-        self._stack.addWidget(self._current)
-        ctrl = QWidget()
-        cs = QHBoxLayout(ctrl)
-        cs.setContentsMargins(8, 8, 8, 8)
-        split = QSplitter(Qt.Horizontal)
-        split.addWidget(self._control)
-        split.addWidget(self._svm)
-        split.setStretchFactor(0, 0)
-        split.setStretchFactor(1, 1)
-        split.setSizes([320, 900])
-        cs.addWidget(split)
-        self._stack.addWidget(ctrl)
-        states_wrap = QWidget()
-        sl = QHBoxLayout(states_wrap)
-        sl.setContentsMargins(8, 8, 8, 8)
-        sl.addWidget(self._states)
-        self._stack.addWidget(states_wrap)
+        self._stack.addWidget(self._tune)
+        self._stack.addWidget(self._dashboard)
 
         sb = self.statusBar()
         self._link_badge = QLabel()
@@ -108,8 +96,7 @@ class MainWindow(QMainWindow):
             QSizePolicy.Minimum, QSizePolicy.Fixed)
         self._link_descr = QLabel()
         self._link_descr.setStyleSheet("color: #9aa0a6; font-size: 12px;")
-        self._reset_btn = QPushButton("RESET BOARD")
-        self._reset_btn.setStyleSheet(make_reset_board_button_qss())
+        self._reset_btn = action_button("RESET BOARD", "BtnDefault")
         self._reset_btn.clicked.connect(self._on_reset_board_clicked)
         sb.addPermanentWidget(self._link_badge)
         sb.addPermanentWidget(self._reset_btn)
@@ -135,8 +122,8 @@ class MainWindow(QMainWindow):
     def _set_device_actions_enabled(self, on: bool) -> None:
         self._reset_btn.setEnabled(on)
         self._tuning.set_actions_enabled(on)
-        self._config.nvs.set_actions_enabled(on)
-        self._config.nvs.set_client(self._client if on else None)
+        self._tune.nvs.set_actions_enabled(on)
+        self._tune.nvs.set_client(self._client if on else None)
         self._control.set_actions_enabled(on)
         self._analysis._apply_mpz_btn.setEnabled(on)
         self._analysis._motor_pole_pairs.setEnabled(on)
@@ -341,10 +328,10 @@ class MainWindow(QMainWindow):
         if ok and snap is not None:
             self._tuning.apply_poll_snapshot(snap)
             self._control.apply_override_state(snap.override_active)
-            self._config.nvs.update_live(
+            self._tune.nvs.update_live(
                 snap.kp, snap.ki, snap.lim, snap.fc)
-            self._config.nvs.set_calibration_present(snap.cal_present)
-            self._current.motor.set_kp_ki_hint(snap.kp, snap.ki)
+            self._tune.nvs.set_calibration_present(snap.cal_present)
+            self._tune.motor.set_kp_ki_hint(snap.kp, snap.ki)
         else:
             self._tuning.apply_poll_error(err or "poll failed")
             if (self._serial_config is not None
@@ -367,8 +354,8 @@ class MainWindow(QMainWindow):
             t = shadows
             self._tuning.apply_nvs_shadow_floats(
                 t[0], t[1], t[2], t[3], t[4], t[5])
-            self._current.motor.apply_nvs_motor(t[0], t[1], t[2])
-            self._config.nvs.capture_nvs_reference(
+            self._tune.motor.apply_nvs_motor(t[0], t[1], t[2])
+            self._tune.nvs.capture_nvs_reference(
                 t[3], t[4], self._tuning._lim_spin.value(), t[5])
         if pole is not None:
             self._analysis.set_motor_pole_pairs_silent(int(pole))

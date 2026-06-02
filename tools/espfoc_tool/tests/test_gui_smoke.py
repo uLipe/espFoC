@@ -27,7 +27,12 @@ def test_main_window_offline_smoke():
     app = create_application()
     conn = ConnectionManager(fixed_port=None)
     w = MainWindow(conn, title="espFoC Tool test")
-    assert w._stack.count() == 4
+    assert w._stack.count() == 2
+    from PySide6.QtWidgets import QLabel
+    titles = [lb.text() for lb in w.findChildren(QLabel)
+              if lb.objectName() == "PageTitle"]
+    assert "Tune" in titles
+    assert "Dashboard" in titles
     w.close()
     conn.stop()
 

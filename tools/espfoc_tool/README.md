@@ -1,8 +1,8 @@
 # espFoC Tool (host)
 
-Desktop control GUI and CLI for espFoC targets over the link/tuner protocol.
+Desktop GUI and CLI for espFoC targets over the link/tuner protocol.
 
-**Documentation:** [`doc/TUNING.md`](../../doc/TUNING.md)
+**Full workflow:** [`doc/TUNING.md`](../../doc/TUNING.md)
 
 ## Install
 
@@ -24,6 +24,36 @@ PYTHONPATH=tools python3 -m espfoc_tool.gui
 | `--no-gl` | CPU plot rendering |
 | `--scope-csv` | Legacy CSV scope decode |
 
+Connection state (scanning, connected, link health) is shown in the **status bar**.
+All device actions stay disabled until a board is connected; views remain navigable offline.
+
+## Views
+
+### Tune
+
+Setup, flash, and MPZ preview in one screen:
+
+| Column | Content |
+|--------|---------|
+| Left | Live gains, manual editor (Kp/Ki/lim/filter), firmware log |
+| Center | Flash diff (device vs pending); **Read** / **Write** / **Patch** |
+| Right | Motor model (R, L, bandwidth) + four MPZ plots |
+
+- **Apply gains** (editor): push spinbox values to RAM.
+- **Apply gains** (plots): write MPZ-designed Kp/Ki/lim to RAM.
+- **Patch**: write dirty fields, then store calibration to flash (firmware RMW).
+
+### Dashboard
+
+Runtime control and scope:
+
+| Column | Content |
+|--------|---------|
+| Left | Motion (manual id/iq, nudge), **Actions** (align, E-STOP, Autoset) |
+| Right | SVPWM hexagon + three-phase waveforms (top), rolling scope channels (bottom) |
+
+**Autoset** clears SVM trail/waveform history and resets the per-unit scale.
+
 ## CLI
 
 ```bash
@@ -39,8 +69,9 @@ espfoc_tool/
 ├── protocol/     # tuner requests
 ├── model/        # MPZ / Bode (numpy)
 ├── gui/
-│   ├── views/    # Config, Current wrappers
-│   ├── app.py    # Qt + OpenGL bootstrap
+│   ├── views/    # tune_view, dashboard_view
+│   ├── theme.py  # dark palette + button/surface styles
+│   ├── widgets.py
 │   └── ...
 └── cli/espfocctl.py
 ```

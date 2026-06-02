@@ -17,6 +17,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import labels as L
+from .buttons import action_button
+from .widgets import SurfaceCard
+
 from ..model import (
     MotorParams,
     PiGains,
@@ -44,18 +48,18 @@ class AnalysisPanel(QWidget):
         pg.setConfigOptions(antialias=True)
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(10)
+        toolbar = SurfaceCard()
         top = QFormLayout()
         self._motor_pole_pairs = QSpinBox()
         self._motor_pole_pairs.setRange(1, 64)
         self._motor_pole_pairs.setValue(7)
-        self._motor_pole_pairs.setToolTip(
-            "Number of motor pole pairs p (sent to the target). Use "
-            "Tuning \u2192 Save to NVS to store in flash together with the "
-            "rest of the calibration.")
-        top.addRow("Pole pairs count", self._motor_pole_pairs)
+        top.addRow(L.POLE_PAIRS, self._motor_pole_pairs)
         self._motor_pole_pairs.valueChanged.connect(
             self._on_motor_pole_pairs_changed)
-        root.addLayout(top)
+        toolbar.body_layout.addLayout(top)
+        root.addWidget(toolbar)
         grid = QGridLayout()
         root.addLayout(grid, 1)
 
@@ -122,7 +126,7 @@ class AnalysisPanel(QWidget):
         grid.addWidget(self._rl_plot,   1, 1)
 
         btn_row = QHBoxLayout()
-        self._apply_mpz_btn = QPushButton("Apply MPZ to RAM")
+        self._apply_mpz_btn = action_button("Apply gains", "BtnDefault")
         self._apply_mpz_btn.clicked.connect(self._on_apply_mpz)
         btn_row.addWidget(self._apply_mpz_btn)
         btn_row.addStretch(1)

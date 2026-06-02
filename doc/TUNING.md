@@ -20,7 +20,7 @@ Enable in your own project:
 
 - `CONFIG_ESP_FOC_TUNER_ENABLE=y`
 - `CONFIG_ESP_FOC_BRIDGE_UART` or `CONFIG_ESP_FOC_BRIDGE_USBCDC`
-- `CONFIG_ESP_FOC_SCOPE=y` (for States / Control plots)
+- `CONFIG_ESP_FOC_SCOPE=y` (for Dashboard scope plots)
 
 ---
 
@@ -32,55 +32,55 @@ python3 -m espfoc_tool.gui
 python3 -m espfoc_tool.gui --port /dev/ttyACM0 --baud 921600
 ```
 
-1. Wait for **CONNECTED** (or plug the board — scan runs every 2 s).
-2. **Control** → **Align axis** (rotor direction + encoder zero).
-3. **Control** → enable **Override active** (starts `RUN`).
-4. Set **iq** / **id** with spinboxes or nudge buttons.
-5. **Config** → tune Kp/Ki, **Write dirty fields**, then **Store to NVS (RMW)**.
-6. **E-STOP** or disable override → `stop` (inverter disabled, targets zeroed).
+1. Wait for **CONNECTED** in the status bar (or plug the board — scan runs every 2 s).
+2. Open **Dashboard** → **Run alignment** (rotor direction + encoder zero).
+3. Enable **Manual setpoints**, set **iq** / **id** (nudge buttons optional).
+4. Open **Tune** → edit Kp/Ki/lim/filter → **Write** (RAM) → **Patch** (flash).
+5. **E-STOP** (Dashboard → Actions) or disable manual setpoints → axis stops.
 
-The GUI works **offline**: all views are navigable without a board; device
+The GUI works **offline**: both views are navigable without a board; device
 actions stay disabled until connected.
 
 ---
 
 ## Views
 
-### Config
+### Tune
 
 | Area | Purpose |
 |------|---------|
-| Left | Live gains, manual Kp/Ki/ILim editor, I-LPF cutoff, axis badge, firmware log |
-| Right | **Live vs editor** diff; **Write dirty fields**; **Store to NVS** (firmware RMW); **Erase NVS** |
+| Left | Live gains, manual editor, **Apply gains** / **Apply filter**, serial log |
+| Center | Device vs pending diff; flash badge (stored / empty) |
+| Right | Motor **R**, **L**, **bandwidth**; MPZ step/Bode/pole-zero/root locus |
+
+**Flash actions** (center column):
+
+| Button | Action |
+|--------|--------|
+| **Read** | Load Kp, Ki, lim, filter cutoff from device RAM into the editor |
+| **Write** | Push only fields that differ from live RAM |
+| **Patch** | Write dirty fields, then **store calibration** to NVS (firmware RMW) |
+
+**Apply gains** under the MPZ plots writes synthesized Kp/Ki/lim from the motor model.
+Pole pairs can be changed in the plot toolbar; persist with **Patch**.
 
 NVS **store** only writes tuning fields that changed relative to the blob
 (`esp_foc_calibration_axis_tuner_store` on device). Align data in NVS is not
 edited from the tool in this release.
 
-### Current design
+### Dashboard
 
 | Area | Purpose |
 |------|---------|
-| Left | Motor **R**, **L**, **bandwidth** for MPZ synthesis |
-| Right | Predicted step, Bode, pole-zero, root locus |
-| Actions | **Apply MPZ to RAM** writes computed Kp/Ki/ILim to the device |
-
-Pole pairs can be pushed to the target from this view (persist with Config → Store).
-
-### Control
-
-| Area | Purpose |
-|------|---------|
-| Left | Override, id/iq spinboxes + nudge, align, **E-STOP** |
-| Right | SVPWM hexagon + phase waveforms (scope ch 10–12 on `axis_tuning`) |
+| Left — Motion | Manual setpoints, id/iq spinboxes + nudge |
+| Left — Actions | **Run alignment**, **E-STOP**, **Autoset** (SVM/scope reset) |
+| Right — top | SVPWM hexagon (pu) beside three-phase waveforms (scope ch 10–12) |
+| Right — bottom | Rolling plots for all scope channels (`axis_tuning` map) |
 
 **E-STOP** sequence: id/iq → 0, `stop` axis (also calls `inverter.disable` via
 `park_inverter_safe`).
 
-### States
-
-Rolling plots for all scope channels wired in `axis_tuning` (see table below).
-Requires scope streaming (`scope_start` on connect in the GUI).
+Scope streaming starts automatically on connect.
 
 ---
 
@@ -166,8 +166,8 @@ QT_QPA_PLATFORM=offscreen ESPFOC_TOOL_NO_GL=1 PYTHONPATH=tools \
 |---------|--------|
 | Stuck on SCANNING | Cable, driver, correct port; firmware must expose bridge + `TSGX` |
 | NO LINK after connect | Heartbeat / baud (default 921600); another app holding the port |
-| Align fails | Motor wiring, pole pairs, sensor; see serial log in Config |
-| States flat | `CONFIG_ESP_FOC_SCOPE`, scope started, PWM loop running |
+| Align fails | Motor wiring, pole pairs, sensor; see serial log on **Tune** |
+| Scope flat | `CONFIG_ESP_FOC_SCOPE`, scope started, PWM loop running |
 | Plots slow on VM | `ESPFOC_TOOL_NO_GL=1` or smaller window |
 
 ---

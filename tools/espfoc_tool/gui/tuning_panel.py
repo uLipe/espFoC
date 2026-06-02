@@ -4,177 +4,118 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QDoubleSpinBox,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
-    QPushButton,
     QScrollArea,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
-from ..protocol import AxisStateFlag, TunerClient, TunerError
+from ..protocol import TunerClient, TunerError
+from . import labels as L
 from .tuner_poll_worker import TunerPollSnapshot
-from .theme import make_badge_qss
-
-
-def _spin(minimum: float, maximum: float,
-          decimals: int, value: float,
-          step: float = 0.1,
-          suffix: str = "") -> QDoubleSpinBox:
-    """Convenience wrapper matching Qt's (min, max) ordering and with an
-    optional unit suffix. Type-in is always allowed — the step value
-    only controls the ± buttons / scroll wheel."""
-    if minimum > maximum:
-        minimum, maximum = maximum, minimum
-    box = QDoubleSpinBox()
-    box.setRange(minimum, maximum)
-    box.setDecimals(decimals)
-    box.setSingleStep(step)
-    box.setValue(value)
-    if suffix:
-        box.setSuffix(suffix)
-    # Keep the spinner buttons; make the field wide enough so long
-    # suffixes like " Ω" do not visually collide with the number.
-    box.setMinimumWidth(140)
-    return box
+from .theme import monospace_font
+from .buttons import action_button
+from .widgets import LiveMetricGrid, SurfaceCard, spin_box
 
 
 class TuningPanel(QWidget):
-    """Left-hand side of the main window: controls + live readout.
-
-    Most slots use short TunerClient round-trips. Long executables
-    (align) run in a QThread; MainWindow pauses the background poll
-    worker to keep bus usage serialized.
-
-    Periodic tuner reads run on :class:`TunerPollWorker`; results arrive via
-    :meth:`apply_poll_snapshot`."""
+    """Left column of Config: status, live metrics, overrides, log."""
 
     _logFromReader = Signal(str)
     long_operation = Signal(bool)
     poll_refresh_requested = Signal(bool)
 
-    def __init__(self, client: Optional[TunerClient] = None) -> None:
+    def __init__(
+        self,
+        client: Optional[TunerClient] = None,
+        *,
+        scrollable: bool = True,
+    ) -> None:
         super().__init__()
         self._client = client
         self.last_poll_ok: bool = False
-        self._cal_present = False
-        self.last_axis_state: Optional[AxisStateFlag] = None
-
-        # The whole panel sits inside a QScrollArea so a small window
-        # gets a vertical scroll bar instead of clipping content. Keeps
-        # every existing widget the operator already knows.
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-        outer.addWidget(scroll)
 
         body = QWidget()
-        scroll.setWidget(body)
         root = QVBoxLayout(body)
+        root.setContentsMargins(0, 0, 8, 0)
+        root.setSpacing(12)
 
-        # --- Axis state badge (single colored pill, dominant flag) ---
-        state_row = QHBoxLayout()
-        state_row.addWidget(QLabel("Axis status:"))
-        self._state_label = QLabel("OFFLINE")
-        label, qss = make_badge_qss("OFFLINE")
-        self._state_label.setText(label)
-        self._state_label.setStyleSheet(qss)
-        self._state_label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        state_row.addWidget(self._state_label)
-        state_row.addStretch(1)
-        root.addLayout(state_row)
+        live_card = SurfaceCard("Live")
+        self._live_grid = LiveMetricGrid([
+            L.PROPORTIONAL_GAIN,
+            L.INTEGRAL_GAIN,
+            L.CURRENT_LIMIT,
+            L.VOLTAGE_LIMIT,
+            L.CURRENT_FILTER,
+            L.LOOP_RATE,
+        ])
+        live_card.body_layout.addWidget(self._live_grid)
+        root.addWidget(live_card)
 
-        # --- Live gains readout ---
-        live_box = QGroupBox("Live gains")
-        live_form = QFormLayout(live_box)
-        self._kp_label = QLabel("-")
-        self._ki_label = QLabel("-")
-        self._lim_label = QLabel("-")
-        self._vmax_label = QLabel("-")
-        for lbl in (self._kp_label, self._ki_label,
-                    self._lim_label, self._vmax_label):
-            lbl.setStyleSheet("font-family: monospace;")
-        self._fc_label = QLabel("-")
-        self._fc_label.setStyleSheet("font-family: monospace;")
-        self._loop_fs_label = QLabel("-")
-        self._loop_fs_label.setStyleSheet("font-family: monospace;")
-        live_form.addRow("Kp [V/A]", self._kp_label)
-        live_form.addRow("Ki [V/(A·s)]", self._ki_label)
-        live_form.addRow("ILim [V]", self._lim_label)
-        live_form.addRow("Vmax [V]", self._vmax_label)
-        live_form.addRow("I-LPF fc [Hz]", self._fc_label)
-        live_form.addRow("Loop fs [Hz]", self._loop_fs_label)
-        root.addWidget(live_box)
-
-        # --- Manual gain editor ---
-        manual = QGroupBox("Manual gain override")
-        mform = QFormLayout(manual)
-        self._kp_spin = _spin(0.0, 500.0, 4, 1.46, step=0.01, suffix=" V/A")
-        self._ki_spin = _spin(0.0, 1_000_000.0, 2, 659.17, step=10.0,
-                              suffix=" V/(A·s)")
-        self._lim_spin = _spin(0.0, 200.0, 3, 12.0, step=0.1, suffix=" V")
-        mform.addRow("Kp", self._kp_spin)
-        mform.addRow("Ki", self._ki_spin)
-        mform.addRow("ILim", self._lim_spin)
-        btn_apply = QPushButton("Apply manual gains")
+        editor_card = SurfaceCard("Editor")
+        mform = QFormLayout()
+        mform.setLabelAlignment(Qt.AlignRight)
+        self._kp_spin = spin_box(0.0, 500.0, 4, 1.46, step=0.01, suffix=" V/A")
+        self._ki_spin = spin_box(0.0, 1_000_000.0, 2, 659.17, step=10.0,
+                                 suffix=" V/(A·s)")
+        self._lim_spin = spin_box(0.0, 200.0, 3, 12.0, step=0.1, suffix=" V")
+        self._fc_spin = spin_box(10.0, 20000.0, 1, 300.0, step=10.0, suffix=" Hz")
+        mform.addRow(L.PROPORTIONAL_GAIN, self._kp_spin)
+        mform.addRow(L.INTEGRAL_GAIN, self._ki_spin)
+        mform.addRow(L.CURRENT_LIMIT, self._lim_spin)
+        mform.addRow(L.CURRENT_FILTER, self._fc_spin)
+        btn_apply = action_button("Apply gains", "BtnDefault")
         btn_apply.clicked.connect(self._on_apply_manual)
-        mform.addRow(btn_apply)
-        root.addWidget(manual)
-
-        fc_box = QGroupBox("Current filter")
-        fc_form = QFormLayout(fc_box)
-        self._fc_spin = _spin(10.0, 20000.0, 1, 300.0,
-                              step=10.0, suffix=" Hz")
-        btn_fc = QPushButton("Apply I-LPF cutoff")
+        btn_fc = action_button("Apply filter", "BtnDefault")
         btn_fc.clicked.connect(self._on_apply_fc)
-        fc_form.addRow("I-LPF fc", self._fc_spin)
-        fc_form.addRow(btn_fc)
-        root.addWidget(fc_box)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_row.addWidget(btn_apply)
+        btn_row.addWidget(btn_fc)
+        btn_row.addStretch(1)
+        editor_card.body_layout.addLayout(mform)
+        editor_card.body_layout.addLayout(btn_row)
+        root.addWidget(editor_card)
 
-        self._cal_label = QLabel("calibration: -")
-        self._cal_label.setStyleSheet("font-family: monospace; color: #9aa0a6;")
-        root.addWidget(self._cal_label)
-
-        # --- Log channel viewer ---
+        log_card = SurfaceCard("Log")
         self._log_view = QPlainTextEdit()
         self._log_view.setReadOnly(True)
         self._log_view.setMaximumBlockCount(80)
-        self._log_view.setMaximumHeight(110)
-        f = QFont("monospace")
-        f.setPointSize(9)
-        self._log_view.setFont(f)
-        root.addWidget(self._log_view)
+        self._log_view.setMaximumHeight(120)
+        self._log_view.setFont(monospace_font(9))
+        log_card.body_layout.addWidget(self._log_view)
+        root.addWidget(log_card)
+
+        self._status = QLabel("")
+        self._status.setStyleSheet("color: #c62828; font-size: 11px;")
+        root.addWidget(self._status)
+
+        if scrollable:
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            scroll.setFrameShape(QScrollArea.NoFrame)
+            scroll.setWidget(body)
+            outer.addWidget(scroll)
+        else:
+            outer.addWidget(body)
+
+        self._loop_fs_hz = 0.0
         self._logFromReader.connect(self._append_log)
         self.rebind_log_reader()
 
-        # --- Status / errors bar ---
-        self._status = QLabel("")
-        self._status.setStyleSheet("color: #c62828;")
-        root.addWidget(self._status)
-        root.addStretch(1)
-
-    # --- Public slots (driven by MainWindow / poll worker) -----------------
-
     def set_loop_rate_hz(self, fs_hz: float) -> None:
-        """Receive the firmware's current PI sample rate (read once
-        on connect by MainWindow). Cached so the UI can show it
-        without a round-trip per refresh — the value is fixed for
-        the duration of a session."""
         if fs_hz > 1.0:
             self._loop_fs_hz = fs_hz
-            self._loop_fs_label.setText(f"{fs_hz:9.1f}")
+            self._live_grid.metric(5).set_value(f"{fs_hz:.1f} Hz")
 
     def set_client(self, client: Optional[TunerClient]) -> None:
         self._client = client
@@ -189,39 +130,32 @@ class TuningPanel(QWidget):
             pass
 
     def detach_log_reader(self) -> None:
+        if self._client is None:
+            return
         try:
             self._client.reader.register_log_callback(None)
         except Exception:
             pass
 
     def request_full_tuner_poll(self) -> None:
-        """Ask the background worker for Vmax + NVS-present on the next pass."""
         self.poll_refresh_requested.emit(True)
 
     def apply_poll_snapshot(self, snap: TunerPollSnapshot) -> None:
-        """Apply a snapshot emitted by :class:`TunerPollWorker` (GUI thread)."""
         self.last_poll_ok = snap.last_poll_ok
-        self._cal_present = snap.cal_present
         self._status.setText("")
-        self._kp_label.setText(f"{snap.kp:9.4f}")
-        self._ki_label.setText(f"{snap.ki:9.2f}")
-        self._lim_label.setText(f"{snap.lim:9.3f}")
-        self._vmax_label.setText(f"{snap.vmax:9.3f}")
-        self._fc_label.setText(f"{snap.fc:9.1f}")
-        self.last_axis_state = AxisStateFlag(snap.state)
-        badge_key = self._badge_key_for_state(self.last_axis_state)
-        label, qss = make_badge_qss(badge_key)
-        self._state_label.setText(label)
-        self._state_label.setStyleSheet(qss)
-        self._cal_label.setText("calibration: " +
-                                ("\u2713 present in NVS" if snap.cal_present
-                                 else "\u2717 none stored"))
+        fs_str = (f"{self._loop_fs_hz:.1f} Hz" if self._loop_fs_hz > 1.0
+                  else "—")
+        self._live_grid.set_values([
+            f"{snap.kp:.4f} V/A",
+            f"{snap.ki:.1f} V/(A·s)",
+            f"{snap.lim:.2f} V",
+            f"{snap.vmax:.2f} V",
+            f"{snap.fc:.0f} Hz",
+            fs_str,
+        ])
     def apply_poll_error(self, msg: str) -> None:
-        """Worker poll failed (transport / tuner error)."""
         self._status.setText(msg)
         self.last_poll_ok = False
-
-    # --- Handlers ----------------------------------------------------------
 
     def _on_apply_manual(self) -> None:
         if self._client is None:
@@ -251,15 +185,7 @@ class TuningPanel(QWidget):
         for w in self.findChildren(QDoubleSpinBox):
             w.setEnabled(on)
 
-    def _set_axis_badge_key(self, key: str) -> None:
-        label, qss = make_badge_qss(key)
-        self._state_label.setText(label)
-        self._state_label.setStyleSheet(qss)
-
-    # --- LOG channel viewer --------------------------------------------
-
     def _on_log_reader(self, seq: int, payload: bytes) -> None:
-        """Reader thread context — bounce to the Qt thread."""
         try:
             self._logFromReader.emit(payload.decode("ascii", errors="replace"))
         except Exception:
@@ -278,7 +204,6 @@ class TuningPanel(QWidget):
             ki: float,
             fc: float,
     ) -> None:
-        """Apply NVS-shadow values to spinboxes (GUI thread only; no I/O)."""
         for sp in (self._kp_spin, self._ki_spin, self._fc_spin):
             sp.blockSignals(True)
         try:
@@ -291,10 +216,8 @@ class TuningPanel(QWidget):
                 sp.blockSignals(False)
 
     def sync_motor_from_nvs_shadows(self) -> None:
-        """Pull R/L/BW and live controls from the target (blocks on :class:`TunerClient`).
-
-        Prefer having the poll worker read and call :meth:`apply_nvs_shadow_floats`
-        from the GUI thread so the main thread never holds the bus lock."""
+        if self._client is None:
+            return
         try:
             kp = self._client.read_kp()
             ki = self._client.read_ki()
@@ -302,14 +225,3 @@ class TuningPanel(QWidget):
         except TunerError:
             return
         self.apply_nvs_shadow_floats(0.0, 0.0, 0.0, kp, ki, fc)
-
-    @staticmethod
-    def _badge_key_for_state(s: AxisStateFlag) -> str:
-        """Pick the dominant flag and map it to a badge palette key."""
-        if s & AxisStateFlag.RUNNING:
-            return "RUNNING"
-        if s & AxisStateFlag.ALIGNED:
-            return "ALIGNED"
-        if s & AxisStateFlag.INITIALIZED:
-            return "INIT"
-        return "OFFLINE"

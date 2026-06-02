@@ -5,20 +5,23 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtWidgets import (
-    QFormLayout,
-    QGroupBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
-    QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from ..protocol import TunerClient, TunerError
+from . import labels as L
+from .theme import make_nvs_badge_qss, monospace_font
+from .buttons import action_button
+from .widgets import SurfaceCard
 
 
 class NvsDiffPanel(QWidget):
-    """Right-hand Config card: live vs editor, write dirty fields, store NVS."""
+    """Right-hand Config column: live vs editor, write dirty fields, store NVS."""
 
     _EPS_KP = 0.02
     _EPS_KI = 1.0
@@ -43,71 +46,91 @@ class NvsDiffPanel(QWidget):
         self._live = {"kp": 0.0, "ki": 0.0, "lim": 0.0, "fc": 0.0}
 
         root = QVBoxLayout(self)
-        box = QGroupBox("Live vs editor (NVS RMW on store)")
-        form = QFormLayout(box)
-        mono = "font-family: monospace; font-size: 12px;"
-        self._live_kp = QLabel("-")
-        self._live_ki = QLabel("-")
-        self._live_lim = QLabel("-")
-        self._live_fc = QLabel("-")
-        self._delta_kp = QLabel("-")
-        self._delta_ki = QLabel("-")
-        self._delta_lim = QLabel("-")
-        self._delta_fc = QLabel("-")
-        for w in (
-            self._live_kp, self._live_ki, self._live_lim, self._live_fc,
-            self._delta_kp, self._delta_ki, self._delta_lim, self._delta_fc,
-        ):
-            w.setStyleSheet(mono)
-        form.addRow("Kp live", self._live_kp)
-        form.addRow("Kp Δ edit", self._delta_kp)
-        form.addRow("Ki live", self._live_ki)
-        form.addRow("Ki Δ edit", self._delta_ki)
-        form.addRow("ILim live", self._live_lim)
-        form.addRow("ILim Δ edit", self._delta_lim)
-        form.addRow("fc live", self._live_fc)
-        form.addRow("fc Δ edit", self._delta_fc)
-        self._nvs_hint = QLabel("NVS: —")
-        self._nvs_hint.setWordWrap(True)
-        self._nvs_hint.setStyleSheet("color: #9aa0a6; font-size: 11px;")
-        form.addRow(self._nvs_hint)
-        root.addWidget(box)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(12)
 
-        self._write_btn = QPushButton("Write dirty fields to device")
-        self._write_btn.clicked.connect(self._on_write_dirty)
-        self._store_btn = QPushButton("Store to NVS (RMW)")
-        self._store_btn.clicked.connect(self._on_store)
-        row = QHBoxLayout()
-        row.addWidget(self._write_btn)
-        row.addWidget(self._store_btn)
-        root.addLayout(row)
-        self._erase_btn = QPushButton("Erase NVS calibration")
-        self._erase_btn.clicked.connect(self._on_erase)
-        root.addWidget(self._erase_btn)
+        card = SurfaceCard("Flash")
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(8)
+        hdr_style = "color: #9aa0a6; font-size: 11px; font-weight: 600;"
+        mono_font = monospace_font(12)
+        for col, text in enumerate(("", "Device", "Pending")):
+            h = QLabel(text)
+            h.setStyleSheet(hdr_style)
+            grid.addWidget(h, 0, col)
+
+        self._rows: list[tuple[str, QLabel, QLabel]] = []
+        row_labels = (
+            ("kp", L.PROPORTIONAL_GAIN),
+            ("ki", L.INTEGRAL_GAIN),
+            ("lim", L.CURRENT_LIMIT),
+            ("fc", L.CURRENT_FILTER),
+        )
+        for row_i, (key, label) in enumerate(row_labels, start=1):
+            name = QLabel(label)
+            live = QLabel("—")
+            live.setFont(mono_font)
+            delta = QLabel("—")
+            delta.setFont(mono_font)
+            grid.addWidget(name, row_i, 0)
+            grid.addWidget(live, row_i, 1)
+            grid.addWidget(delta, row_i, 2)
+            self._rows.append((key, live, delta))
+
+        self._live_kp = self._rows[0][1]
+        self._live_ki = self._rows[1][1]
+        self._live_lim = self._rows[2][1]
+        self._live_fc = self._rows[3][1]
+        self._delta_kp = self._rows[0][2]
+        self._delta_ki = self._rows[1][2]
+        self._delta_lim = self._rows[2][2]
+        self._delta_fc = self._rows[3][2]
+
+        card.body_layout.addLayout(grid)
+        self._nvs_badge = QLabel("—")
+        self._nvs_badge.setObjectName("NvsBadge")
+        card.body_layout.addWidget(self._nvs_badge)
+        root.addWidget(card)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(6)
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        self._read_btn = action_button("Read", "BtnCompact")
+        self._write_btn = action_button("Write", "BtnCompact")
+        self._patch_btn = action_button("Patch", "BtnCompact")
+        for btn in (self._read_btn, self._write_btn, self._patch_btn):
+            btn.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            btn_row.addWidget(btn, 1)
+        root.addLayout(btn_row)
         root.addStretch(1)
         self._status = QLabel("")
         self._status.setStyleSheet("color: #ef5350; font-size: 11px;")
         root.addWidget(self._status)
 
+        self._read_btn.clicked.connect(self._on_read)
+        self._write_btn.clicked.connect(self._on_write_dirty)
+        self._patch_btn.clicked.connect(self._on_patch)
+
     def set_client(self, client: Optional[TunerClient]) -> None:
         self._client = client
 
     def set_actions_enabled(self, on: bool) -> None:
+        self._read_btn.setEnabled(on)
         self._write_btn.setEnabled(on)
-        self._store_btn.setEnabled(on)
-        self._erase_btn.setEnabled(on)
+        self._patch_btn.setEnabled(on)
 
     def set_calibration_present(self, present: bool) -> None:
-        self._nvs_hint.setText(
-            "NVS: calibration present — Store merges only changed tuning fields."
-            if present else "NVS: empty — Store writes a new blob.")
+        self._nvs_badge.setText("Stored" if present else "Empty")
+        self._nvs_badge.setStyleSheet(make_nvs_badge_qss(present))
 
     def update_live(self, kp: float, ki: float, lim: float, fc: float) -> None:
         self._live = {"kp": kp, "ki": ki, "lim": lim, "fc": fc}
-        self._live_kp.setText(f"{kp:9.4f}")
-        self._live_ki.setText(f"{ki:9.2f}")
-        self._live_lim.setText(f"{lim:9.3f}")
-        self._live_fc.setText(f"{fc:9.1f}")
+        self._live_kp.setText(f"{kp:.4f}")
+        self._live_ki.setText(f"{ki:.1f}")
+        self._live_lim.setText(f"{lim:.2f}")
+        self._live_fc.setText(f"{fc:.0f}")
         self._refresh_deltas()
 
     def _editor_values(self) -> dict[str, float]:
@@ -129,10 +152,10 @@ class NvsDiffPanel(QWidget):
     def _set_delta(lbl: QLabel, d: float, eps: float) -> None:
         if abs(d) <= eps:
             lbl.setText("—")
-            lbl.setStyleSheet("font-family: monospace; color: #66bb6a;")
+            lbl.setStyleSheet("color: #66bb6a;")
         else:
             lbl.setText(f"{d:+.4f}")
-            lbl.setStyleSheet("font-family: monospace; color: #ffb300;")
+            lbl.setStyleSheet("color: #ffb300;")
 
     def refresh_from_editor(self) -> None:
         self._refresh_deltas()
@@ -143,6 +166,33 @@ class NvsDiffPanel(QWidget):
             return None
         self._status.setText("")
         return self._client
+
+    def _on_read(self) -> None:
+        cli = self._require_client()
+        if cli is None:
+            return
+        if not all((self._kp_spin, self._ki_spin, self._lim_spin, self._fc_spin)):
+            return
+        try:
+            kp = cli.read_kp()
+            ki = cli.read_ki()
+            lim = cli.read_int_lim()
+            fc = cli.read_current_filter_fc()
+        except TunerError as e:
+            self._status.setText(str(e))
+            return
+        for sp in (self._kp_spin, self._ki_spin, self._lim_spin, self._fc_spin):
+            sp.blockSignals(True)
+        try:
+            self._kp_spin.setValue(kp)
+            self._ki_spin.setValue(ki)
+            self._lim_spin.setValue(lim)
+            self._fc_spin.setValue(fc)
+        finally:
+            for sp in (self._kp_spin, self._ki_spin, self._lim_spin, self._fc_spin):
+                sp.blockSignals(False)
+        self.update_live(kp, ki, lim, fc)
+        self._refresh_deltas()
 
     def _on_write_dirty(self) -> None:
         cli = self._require_client()
@@ -161,7 +211,7 @@ class NvsDiffPanel(QWidget):
         except TunerError as e:
             self._status.setText(str(e))
 
-    def _on_store(self) -> None:
+    def _on_patch(self) -> None:
         cli = self._require_client()
         if cli is None:
             return
@@ -171,11 +221,5 @@ class NvsDiffPanel(QWidget):
         except TunerError as e:
             self._status.setText(str(e))
 
-    def _on_erase(self) -> None:
-        cli = self._require_client()
-        if cli is None:
-            return
-        try:
-            cli.erase_calibration()
-        except TunerError as e:
-            self._status.setText(str(e))
+    def capture_nvs_reference(self, *args, **kwargs) -> None:
+        pass

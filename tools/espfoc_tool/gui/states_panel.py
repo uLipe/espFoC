@@ -119,17 +119,9 @@ class StatesPanel(QWidget):
         self._row_specs = _all_specs()
 
         root = QVBoxLayout(self)
-        intro = QLabel(
-            "SCOPE channels per axis_tuning firmware map. "
-            f"Window {WINDOW_S:.0f} s. Connect and start scope from firmware "
-            "(auto on connect in a later build)."
-        )
-        intro.setWordWrap(True)
-        intro.setStyleSheet("color: #9aa0a6; font-size: 11px;")
-        root.addWidget(intro)
 
         cpr_row = QHBoxLayout()
-        cpr_row.addWidget(QLabel("Encoder CPR"))
+        cpr_row.addWidget(QLabel("Encoder counts per rev"))
         self._cpr_spin = QSpinBox()
         self._cpr_spin.setRange(1, 65536)
         self._cpr_spin.setValue(4096)
