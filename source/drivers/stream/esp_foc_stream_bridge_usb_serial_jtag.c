@@ -6,33 +6,29 @@
 
 #include "esp_log.h"
 #include "driver/usb_serial_jtag.h"
-#include "espFoC/osal/os_interface.h"
 #include "espFoC/stream/esp_foc_stream_bridge.h"
 
 static const char *TAG = "espfoc_stream_usj";
 
-#define USJ_TX_BUFFER 4096
+#define USJ_TX_BUFFER 8192
 
 static volatile bool s_ready;
-static volatile bool s_logged_first_tx;
-static uint32_t s_tx_frames;
-static uint32_t s_tx_drops;
 
-static void usj_write_all(const uint8_t *buf, size_t len)
+static bool usj_try_write(const uint8_t *buf, size_t len)
 {
-    if (buf == NULL || len == 0) {
-        return;
-    }
     size_t off = 0;
-    const TickType_t chunk_wait = esp_foc_ms_to_wait_ticks(20);
+
+    if (buf == NULL || len == 0) {
+        return false;
+    }
     while (off < len) {
-        int w = usb_serial_jtag_write_bytes(buf + off, len - off, chunk_wait);
+        int w = usb_serial_jtag_write_bytes(buf + off, len - off, 0);
         if (w <= 0) {
-            s_tx_drops++;
-            break;
+            return false;
         }
         off += (size_t)w;
     }
+    return true;
 }
 
 void esp_foc_stream_bridge_init(void)
@@ -56,15 +52,5 @@ void esp_foc_stream_bridge_send_frame(const uint8_t *data, size_t len)
     if (!s_ready || data == NULL || len == 0) {
         return;
     }
-    if (!s_logged_first_tx) {
-        s_logged_first_tx = true;
-        ESP_LOGI(TAG, "first ESPF frame TX (%u bytes) — connect espFoC Tool on ttyACM*",
-                 (unsigned)len);
-    }
-    usj_write_all(data, len);
-    s_tx_frames++;
-    if ((s_tx_frames & 0x3FFU) == 0U) {
-        ESP_LOGI(TAG, "scope TX: frames=%lu drops=%lu",
-                 (unsigned long)s_tx_frames, (unsigned long)s_tx_drops);
-    }
+    (void)usj_try_write(data, len);
 }
