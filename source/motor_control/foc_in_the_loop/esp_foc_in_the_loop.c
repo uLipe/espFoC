@@ -12,6 +12,7 @@
 #include "espFoC/esp_foc.h"
 #include "espFoC/utils/biquad_q16.h"
 #include "espFoC/utils/foc_math_q16.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 
 #include "esp_foc_itl_plant.h"
@@ -49,8 +50,8 @@ typedef struct {
     volatile q16_t *publish_iu;
     volatile q16_t *publish_iv;
 
-    esp_foc_inverter_callback_t inverter_cb;
-    void *inverter_cb_arg;
+    volatile esp_foc_inverter_callback_t inverter_cb;
+    volatile void *inverter_cb_arg;
 
     uint32_t pwm_hz;
     q16_t vdc_q16;
@@ -137,20 +138,18 @@ static void plant_task_fn(void *arg)
     esp_foc_runner_delete_self();
 }
 
-static void tick_cb(void *arg)
+static void IRAM_ATTR tick_cb(void *arg)
 {
     esp_foc_itl_ctx_t *ctx = (esp_foc_itl_ctx_t *)arg;
+    esp_foc_inverter_callback_t cb = ctx->inverter_cb;
+    void *cb_arg = (void *)ctx->inverter_cb_arg;
 
-    if (ctx->inverter_cb != NULL) {
-        ctx->inverter_cb(ctx->inverter_cb_arg);
+    if (cb != NULL) {
+        cb(cb_arg);
     }
 
     if (ctx->plant_ev != NULL) {
-        if (esp_foc_in_task_context()) {
-            esp_foc_send_notification(ctx->plant_ev);
-        } else {
-            esp_foc_send_notification_from_isr(ctx->plant_ev);
-        }
+        esp_foc_send_notification_from_isr(ctx->plant_ev);
     }
 }
 

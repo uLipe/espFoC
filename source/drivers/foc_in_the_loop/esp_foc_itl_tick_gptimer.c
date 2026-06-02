@@ -7,6 +7,7 @@
 #include "esp_foc_itl_tick.h"
 
 #include "driver/gptimer.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 
 static const char *TAG = "foc_itl_tick";
@@ -15,9 +16,9 @@ static gptimer_handle_t s_timer;
 static esp_foc_itl_tick_cb_t s_cb;
 static void *s_cb_arg;
 
-static bool tick_isr(gptimer_handle_t timer,
-                     const gptimer_alarm_event_data_t *edata,
-                     void *user_data)
+static bool IRAM_ATTR tick_isr(gptimer_handle_t timer,
+                               const gptimer_alarm_event_data_t *edata,
+                               void *user_data)
 {
     (void)timer;
     (void)edata;
@@ -41,6 +42,7 @@ esp_foc_err_t esp_foc_itl_tick_start(esp_foc_itl_tick_cb_t cb, void *arg, uint32
         .clk_src = GPTIMER_CLK_SRC_DEFAULT,
         .direction = GPTIMER_COUNT_UP,
         .resolution_hz = 1000000,
+        .intr_priority = 1,
     };
 
     esp_err_t err = gptimer_new_timer(&timer_cfg, &s_timer);
@@ -69,11 +71,10 @@ esp_foc_err_t esp_foc_itl_tick_start(esp_foc_itl_tick_cb_t cb, void *arg, uint32
     }
 
     const uint64_t alarm_us = 1000000ull / (uint64_t)rate_hz;
-    gptimer_alarm_config_t alarm_cfg = {
-        .alarm_count = alarm_us,
-        .reload_count = 0,
-        .flags.auto_reload_on_alarm = true,
-    };
+    static gptimer_alarm_config_t alarm_cfg;
+    alarm_cfg.alarm_count = alarm_us;
+    alarm_cfg.reload_count = 0;
+    alarm_cfg.flags.auto_reload_on_alarm = true;
     err = gptimer_set_alarm_action(s_timer, &alarm_cfg);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "set alarm failed: %s", esp_err_to_name(err));

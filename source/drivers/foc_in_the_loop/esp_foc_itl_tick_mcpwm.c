@@ -7,6 +7,7 @@
 #include "esp_foc_itl_tick.h"
 
 #include "driver/mcpwm_prelude.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 
 static const char *TAG = "foc_itl_tick";
@@ -15,9 +16,9 @@ static mcpwm_timer_handle_t s_timer;
 static esp_foc_itl_tick_cb_t s_cb;
 static void *s_cb_arg;
 
-static bool tick_isr(mcpwm_timer_handle_t timer,
-                     const mcpwm_timer_event_data_t *edata,
-                     void *user_data)
+static bool IRAM_ATTR tick_isr(mcpwm_timer_handle_t timer,
+                               const mcpwm_timer_event_data_t *edata,
+                               void *user_data)
 {
     (void)timer;
     (void)edata;

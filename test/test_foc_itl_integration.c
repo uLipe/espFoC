@@ -5,16 +5,19 @@
 #if CONFIG_ESP_FOC_FITL
 
 #include <unity.h>
+#include "esp_attr.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "espFoC/esp_foc_in_the_loop.h"
 #include "espFoC/esp_foc.h"
 #include "espFoC/esp_foc_err.h"
 #include "espFoC/utils/esp_foc_q16.h"
 
-#define FITL_ITL_POLL_MS  25
+#define FITL_ITL_POLL_MS  100
 
 static volatile int s_tick_cb_count;
 
-static void fitl_count_tick(void *arg)
+static void IRAM_ATTR fitl_count_tick(void *arg)
 {
     (void)arg;
     s_tick_cb_count++;
@@ -62,7 +65,7 @@ TEST_CASE("fitl: tick invokes inverter callback", "[espFoC][foc_itl]")
     h.inverter->set_inverter_callback(h.inverter, fitl_count_tick, NULL);
 
     for (int ms = 0; ms < FITL_ITL_POLL_MS && s_tick_cb_count == 0; ++ms) {
-        esp_foc_sleep_ms(1);
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 
     TEST_ASSERT_GREATER_THAN(0, s_tick_cb_count);
