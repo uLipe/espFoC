@@ -8,51 +8,28 @@ This file is used to generate GitHub releases. All versions from 2.0.0 onward ar
 
 ### Added
 
-- **espFoC Tool** (`tools/espfoc_tool`) — PySide6 control GUI replacing TunerStudio: Config / Current / Control / States views, USB auto-scan, offline navigation, OpenGL plots by default.
-- **`espfocctl`** — CLI rename from `tunerctl`; adds `estop` (id/iq zero + stop).
-- **`doc/TUNING.md`** — host tuning reference (views, scope map, CLI, troubleshooting).
+- **ESPF scope stream** — TX-only binary frames (`ESPF` magic, fixed channel count); `esp_foc_stream_bridge` (UART / USB Serial-JTAG / TinyUSB CDC).
+- **espfoc_shell** — console REPL on the monitor UART (`align`, `run`, `stop`, `set iq/id`, `store`, `list axis`); parser in `espfoc_shell_parse.c` with Unity tests.
+- **espFoC Tool (passive viewer)** — PySide6/QML Material 3 scope GUI; decodes ESPF only, no host commands. Catalog `axis_shell_17ch.py`.
+- **`examples/axis_shell`** — reference app: FITL default, 17ch scope, shell + stream on separate ports (C6: UART monitor + USJ).
+- **Debug scripts** — `scripts/esp_foc_debug.py`, `scripts/run_shell_qemu.py` (FITL shell smoke on QEMU).
+- **Docs** — `doc/PIVOT_SCOPE_SHELL.md`, `doc/SHELL.md`, `doc/AXIS_SHELL.md`, `doc/SCOPE_CHANNELS.md`, `doc/SCOPE_TOOL.md` (app ↔ tool integration guide).
 
 ### Removed
 
-- **TunerStudio** host app (`tools/espfoc_studio`), generic Scope tab, in-GUI demo/loopback mode, Generate App / Hardware tabs (never shipped in 3.x tree).
+- **gui_link / tuner stack** — `esp_foc_tuner`, `esp_foc_link_session`, link protocol, `espfocctl`, TunerStudio-era host control path.
+- **`examples/axis_tuning`**, **`doc/TUNING.md`**, tuner/link unit tests and managed TinyUSB copy in the example tree.
+- **Stream bridge stub** — `CONFIG_ESP_FOC_SCOPE=y` requires UART or USBCDC bridge.
 
 ### Changed
 
-- Host package **`espfoc_studio` → `espfoc_tool`**; launch with `python -m espfoc_tool.gui`.
-- CI **`python_tests`** job runs `tools/espfoc_tool/tests` (offscreen Qt, no GL).
+- **espFoC Tool** is RX-only (scope viewer); motor control via firmware shell, not host writes.
+- **CI** — builds `axis_shell` (esp32s3/esp32c6); host pytest; Unity on QEMU + shell smoke test.
+- **Scope daemon** — explicit TX bank; `SCOPE_BUFFER_SIZE=8` in axis_shell.
 
-### Removed
+### Archived (squashed commit)
 
-- **Tuner override mode** (`CMD_OVERRIDE_ON/OFF`, `TUNER_OVERRIDE` state bit, `ESP_FOC_TUNER_ALWAYS_OVERRIDE_VOLTAGE_MODE`). Host writes `target_i_d` / `target_i_q` directly while the axis is `RUNNING`.
-- **`CMD_LOAD_NVS`** — boot already applies stored calibration via `esp_foc_calibration_axis_boot_apply`.
-- **Build-time autotuner** (`scripts/gen_pi_gains.py`, `scripts/motors/`, `CONFIG_ESP_FOC_USE_AUTOGEN_GAINS`).
-- **Examples** `axis_simple`, `tuner_studio_target`, `tuner_demo` — replaced by `examples/axis_tuning`.
-
-### Added
-
-- **Encoder PLL estimator** (`esp_foc_estimator_q16.c`) — mechanical angle/speed tracked at PWM rate; slow loop publishes encoder samples only. Extensible API for future sensorless observers.
-- **`examples/axis_tuning` on ESP32-C6** — reference CI/build target for fixed-point sizing.
-
-### Removed
-
-- **Encoder velocity biquad** (`CONFIG_ESP_FOC_VELOCITY_FILTER_CUTOFF_HZ`, `velocity_filter`, Δcounts speed path).
-- **Legacy SCOPE CSV mode** (`CONFIG_ESP_FOC_SCOPE_LEGACY_CSV`).
-
-### Changed
-
-- **`rotor_elec_angle` is ISR-write-only**; `current_speed` is PLL mechanical rev/s from the estimator.
-- **Scope default 14 channels** grouped by torque / PLL / phase / ISR timing.
-
-### Added
-
-- **Link protocol v2 (breaking):** `CH_HEARTBEAT` (500 ms, host ack), session `CONNECT`/`DISCONNECT`, scope `SCOPE_START`/`SCOPE_STOP`; no `CH_LOG`; `tunerctl` interactive REPL.
-- **`examples/axis_tuning`** — single reference firmware (tuner + scope + NVS; AS5600 or `rotor_sensor_simu`).
-- **`CMD_RUN_AXIS` (0x00A4)** — start FOC after alignment; **`CMD_STORE_NVS`** replaces persist (skips write when blob unchanged).
-- **`tunerctl`** subcommands: `run`, `stop`, `store` (replaces `override`, `persist`, `load`).
-
-### Changed
-
-- **`esp_foc_stop`** no longer resets PI gains or torque targets; **`CMD_ERASE_NVS`** stops the axis, zeros targets, applies bypass PIs, and erases NVS.
+- **TunerStudio → espFoC Tool control era** (history squashed into one commit): interactive host tuning, link protocol v2, `axis_tuning` reference firmware, espFoC Tool config/current/control views.
 
 ### Removed (earlier unreleased notes)
 

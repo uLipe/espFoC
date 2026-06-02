@@ -48,8 +48,8 @@ set(EXTRA_COMPONENT_DIRS "path/to/espFoC")
 Then pick an example as a starting point:
 
 ```bash
-cd examples/axis_tuning
-idf.py set-target esp32c6    # reference target (UART bridge)
+cd examples/axis_shell
+idf.py set-target esp32c6    # scope on USB Serial/JTAG
 idf.py build flash monitor
 ```
 
@@ -83,68 +83,33 @@ Inverter and rotor drivers are pluggable:
 
 ---
 
-## Tuning (espFoC Tool)
+## Scope viewer (espFoC Tool)
 
 ![espFoC Tool](doc/images/espfoc_tool_logo.svg)
 
-**espFoC Tool** is a PySide6 + pyqtgraph control app over UART/USB-CDC.
-It opens without a board connected (USB auto-scan) and exposes four views:
+**espFoC Tool** is a passive scope viewer: it opens the ESPF stream port,
+decodes fixed **ESPF** frames, and plots channels in real time (OpenGL when
+available). No commands are sent to the device.
 
-| View | Purpose |
-|------|---------|
-| **Config** | Live gains, editor vs device diff, write dirty fields, NVS RMW store/erase |
-| **Current** | Motor R/L/bw + MPZ plots (step, Bode, pole-zero, root locus) |
-| **Control** | id/iq targets, align, E-stop, SVPWM hexagon |
-| **States** | Named scope channels ([axis_tuning](examples/axis_tuning) wire map) |
-
-OpenGL plot rendering is enabled by default; set `ESPFOC_TOOL_NO_GL=1` to disable.
-Full workflow: [`doc/TUNING.md`](doc/TUNING.md).
-
-### Launch espFoC Tool
+See [`doc/SCOPE_TOOL.md`](doc/SCOPE_TOOL.md) and [`doc/PIVOT_SCOPE_SHELL.md`](doc/PIVOT_SCOPE_SHELL.md).
 
 ```bash
 pip install -r tools/espfoc_tool/requirements.txt
-PYTHONPATH=tools python3 -m espfoc_tool.gui
-# optional fixed port:
+PYTHONPATH=tools python3 -m espfoc_tool.gui              # port picker
 PYTHONPATH=tools python3 -m espfoc_tool.gui --port /dev/ttyACM0
 ```
 
-### Talk to a real target
+### Reference firmware: `axis_shell`
 
-**`axis_tuning`** is the reference bring-up firmware: it boots, auto-loads
-NVS calibration when present, attaches the tuner, and waits for the host
-(`align` → `run` → tune → `store` → `stop`). It advertises `TSGX` for host
-identification.
+Motor control + **console shell** ([`doc/SHELL.md`](doc/SHELL.md), UART used by
+`idf monitor`) + **scope stream** (USB on ESP32-C6). Default build uses **FITL**
+(simulated plant); pin/ADC/encoder options in [`doc/AXIS_SHELL.md`](doc/AXIS_SHELL.md).
+After flash: `align 0`, `run 0` on the monitor, then open the tool on `ttyACM*`.
 
 ```bash
-cd examples/axis_tuning
-idf.py set-target esp32c6    # USB Serial/JTAG CDC (sdkconfig.defaults.esp32c6)
-idf.py menuconfig            # pin map + AS5600 vs rotor_sensor_simu
+cd examples/axis_shell
+idf.py set-target esp32c6
 idf.py build flash monitor
-```
-
-On ESP32-S3, use `idf.py set-target esp32s3`. On ESP32-P4, USB-CDC via
-`sdkconfig.defaults.esp32p4`.
-
-For your own firmware, enable a transport bridge in `menuconfig`
-(`CONFIG_ESP_FOC_BRIDGE_UART` or `CONFIG_ESP_FOC_BRIDGE_USBCDC`) and set
-`CONFIG_ESP_FOC_TUNER_ENABLE=y`.
-
-Then:
-
-```bash
-PYTHONPATH=tools python3 -m espfoc_tool.gui --port /dev/ttyACM0
-```
-
-### Scripted control
-
-**espfocctl** drives align, run, stop, E-stop, gain writes, id/iq targets,
-and NVS store/erase from scripts:
-
-```bash
-PYTHONPATH=tools python3 -m espfoc_tool.cli.espfocctl --port /dev/ttyACM0 -i
-# one-shot E-stop:
-PYTHONPATH=tools python3 -m espfoc_tool.cli.espfocctl --port /dev/ttyACM0 estop
 ```
 
 ---
@@ -158,7 +123,7 @@ tuner can supply tuned values.
 The snippet below is **illustrative** (placeholders for pins and ADC
 config will not compile until you fill them in). For a **complete,
 buildable** wiring and init sequence, use
-[`examples/axis_tuning/main/main.c`](examples/axis_tuning/main/main.c).
+[`examples/axis_shell/main/main.c`](examples/axis_shell/main/main.c).
 
 ```c
 #include "esp_log.h"
@@ -205,8 +170,7 @@ averages (same *Control loop* menu as downsampling).
 
 ## Examples
 
-- `examples/axis_tuning` — reference firmware for live tuning (tuner +
-  scope + NVS; AS5600 or `rotor_sensor_simu`).
+- `examples/axis_shell` — reference firmware (ESPF scope + console shell + NVS).
 - `examples/unit_test_runner` — Unity suite for CI / QEMU.
 - `examples/test_drivers` — inverter / encoder / shunt bring-up.
 
@@ -228,18 +192,18 @@ loop contains no floating-point operations.
 espFoC/
 ├── doc/
 │   ├── images/         # architecture, espFoC Tool logo, demo gifs
-│   └── TUNING.md       # espFoC Tool + espfocctl workflow and scope map
-├── examples/           # axis_tuning / unit_test_runner / test_drivers
+│   └── SCOPE_TOOL.md   # passive scope viewer
+├── examples/           # axis_shell / unit_test_runner / test_drivers
 ├── include/espFoC/     # public API
-├── scripts/            # gen_iq31_sin_lut.py, build_samples.sh
+├── scripts/            # esp_foc_debug.py, gen_iq31_sin_lut.py, build_samples.sh
 ├── source/
 │   ├── calibration/    # NVS calibration format and axis helpers
 │   ├── drivers/        # inverters, encoders, shunts, tuner bridges
-│   ├── gui_link/       # binary link codec, scope, tuner reactor
+│   ├── stream/         # ESPF scope encoder + USB/UART bridges
 │   ├── motor_control/  # axis core (FOC ISR + slow loop), MPZ, Q16 helpers
 │   └── osal/           # OS abstraction (tasks, critical sections, esp_timer)
 ├── test/               # Unity unit tests (run via examples/unit_test_runner)
-└── tools/espfoc_tool    # PySide6 GUI (espFoC Tool), espfocctl, host protocol
+└── tools/espfoc_tool    # passive scope viewer (PySide6 QML / Material 3)
 ```
 
 ---

@@ -12,7 +12,7 @@
 
 When the UI is stable:
 
-1. Run `axis_tuning` on hardware and connect espFoC Tool.
+1. Run `axis_shell` on hardware and connect espFoC Tool on the scope port (`ttyACM*`).
 2. Capture 1280×720, ~15 s: connect → Tune → Dashboard (iq step, scope).
 3. Export as GIF (e.g. `ffmpeg` or Peek) and save as `espfoc_tool.gif`.
 4. Link from the root `README.md` tuning section.
