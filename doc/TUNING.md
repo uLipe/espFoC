@@ -22,6 +22,16 @@ Enable in your own project:
 - `CONFIG_ESP_FOC_BRIDGE_UART` or `CONFIG_ESP_FOC_BRIDGE_USBCDC`
 - `CONFIG_ESP_FOC_SCOPE=y` (for Dashboard scope plots)
 
+**USB CDC** (`CONFIG_ESP_FOC_BRIDGE_USBCDC`) picks the backend per chip:
+
+| Targets | Stack | Host port |
+|---------|--------|-----------|
+| ESP32-S2/S3/P4 | TinyUSB CDC-ACM | `/dev/ttyACM*` (OTG USB) |
+| ESP32-C3/C5/C6/H2/C61 | USB Serial/JTAG | `/dev/ttyACM*` (built-in USB) |
+
+On ESP32-C6, `axis_tuning` defaults to USB Serial/JTAG. Use UART for
+`idf.py monitor` and leave USJ to the tuner (`CONFIG_ESP_CONSOLE_SECONDARY_NONE`).
+
 ---
 
 ## Quick start (GUI)

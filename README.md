@@ -118,7 +118,7 @@ identification.
 
 ```bash
 cd examples/axis_tuning
-idf.py set-target esp32c6    # reference target (UART; sdkconfig.defaults.esp32c6)
+idf.py set-target esp32c6    # USB Serial/JTAG CDC (sdkconfig.defaults.esp32c6)
 idf.py menuconfig            # pin map + AS5600 vs rotor_sensor_simu
 idf.py build flash monitor
 ```

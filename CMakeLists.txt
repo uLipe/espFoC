@@ -87,7 +87,12 @@ if(CONFIG_ESP_FOC_BRIDGE_UART)
     list(APPEND requires esp_driver_uart)
 endif()
 if(CONFIG_ESP_FOC_BRIDGE_USBCDC)
-    list(APPEND srcs "source/drivers/gui_link/esp_foc_bridge_usbcdc.c")
+    if(target STREQUAL "esp32s2" OR target STREQUAL "esp32s3" OR target STREQUAL "esp32p4")
+        list(APPEND srcs "source/drivers/gui_link/esp_foc_bridge_usbcdc.c")
+    else()
+        list(APPEND srcs "source/drivers/gui_link/esp_foc_bridge_usb_serial_jtag.c")
+        list(APPEND requires esp_driver_usb_serial_jtag)
+    endif()
 endif()
 
 idf_component_register(SRCS "${srcs}"

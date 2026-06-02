@@ -6,15 +6,14 @@
 
 /**
  * @file esp_foc_bridge_usbcdc.h
- * @brief TinyUSB CDC-ACM bridge for the espFoC tuner / scope link.
+ * @brief USB CDC bridge for the espFoC tuner / scope link.
  *
- * Implements the weak callbacks declared by esp_foc_tuner.h on top of
- * the espressif/esp_tinyusb managed component. The same physical USB
- * cable used to flash the board carries the tuner traffic — no extra
- * adapter required for ESP32-S2/S3/P4.
+ * Implements the weak callbacks declared by esp_foc_tuner.h. Backend is
+ * selected at build time:
+ * - ESP32-S2/S3/P4: TinyUSB CDC-ACM (espressif/esp_tinyusb)
+ * - ESP32-C3/C5/C6/H2/C61: USB Serial/JTAG (esp_driver_usb_serial_jtag)
  *
- * Compiled into the espFoC component when CONFIG_ESP_FOC_BRIDGE_USBCDC
- * is set.
+ * Compiled when CONFIG_ESP_FOC_BRIDGE_USBCDC is set.
  */
 
 #pragma once

@@ -145,7 +145,8 @@ menu "espFoC Settings"
         choice ESP_FOC_TUNER_BRIDGE
             prompt "Tuner / scope link"
             depends on ESP_FOC_TUNER_ENABLE
-            default ESP_FOC_BRIDGE_NONE
+            default ESP_FOC_BRIDGE_USBCDC if IDF_TARGET_ESP32C6
+            default ESP_FOC_BRIDGE_UART
             help
                 Physical bus for espFoC Tool / espfocctl or custom host tools.
 
@@ -158,10 +159,14 @@ menu "espFoC Settings"
                     Works on all targets with a hardware UART.
 
             config ESP_FOC_BRIDGE_USBCDC
-                bool "USB device CDC (TinyUSB)"
-                depends on IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4
+                bool "USB CDC"
+                depends on SOC_USB_OTG_SUPPORTED || SOC_USB_SERIAL_JTAG_SUPPORTED
                 help
-                    Native USB on S2/S3/P4; add espressif/tinyusb component.
+                    Virtual serial port to the host over USB.
+                    ESP32-S2/S3/P4: TinyUSB device stack (native USB OTG).
+                    ESP32-C3/C5/C6/H2/C61: on-chip USB Serial/JTAG (no external PHY).
+                    Do not enable ESP_CONSOLE_USB_SERIAL_JTAG on the same port;
+                    use UART for logs or disable the console on USJ.
         endchoice
 
         if ESP_FOC_BRIDGE_UART

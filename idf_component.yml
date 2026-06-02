@@ -1,7 +1,7 @@
 dependencies:
   idf: '>=5.0'
   espressif/esp_tinyusb:
-    # USB-CDC bridge (esp_foc_bridge_usbcdc.c) needs TinyUSB. Pulled in
+    # USB-CDC bridge (TinyUSB on S2/S3/P4) needs esp_tinyusb. Pulled in
     # only on USB-capable targets so esp32 stays lightweight. The
     # variable inside `if:` is `target` (NOT `idf_target`) per the
     # idf-component-manager manifest reference; using the wrong name
