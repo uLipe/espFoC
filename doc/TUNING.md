@@ -1,408 +1,196 @@
-# espFoC tuning reference
+# espFoC Tool — tuning and host protocol
 
-Complete reference for every way gains can be produced and updated in
-espFoC — complements the high-level tour in the main README. Order
-reflects the typical bring-up flow: pick a motor profile at build
-time, flash, then refine live through the TunerStudio GUI (or the
-`tunerctl` CLI for scripting).
+This document describes how to control an espFoC axis from the host using
+**espFoC Tool** (GUI) or **espfocctl** (CLI). Both use the same binary link
+layer and tuner protocol implemented in firmware (`esp_foc_link`, `esp_foc_tuner`).
 
-## Matched Pole-Zero synthesis
+---
 
-The tuner, the build-time autogen and the host `model.analysis` module
-all share the same closed-form design, assuming a first-order PMSM
-current plant `G(s) = 1 / (R + L·s)` and ZOH discretization at the
-control-loop period `Ts = decimation / f_pwm`:
-
-```
-alpha = exp(-R·Ts/L)              # discrete plant pole
-beta  = exp(-2·pi·bw_hz·Ts)       # desired closed-loop pole
-Kp    = R·(1 − beta)/(1 − alpha)
-Ki    = R·(1 − beta)/Ts
-```
-
-## Build-time autotuner
-
-Motor profiles live in `scripts/motors/*.json`. Selecting one with
-`CONFIG_ESP_FOC_MOTOR_PROFILE` runs `scripts/gen_pi_gains.py` during
-the build and emits `esp_foc_autotuned_gains.h` into the **build
-directory** (never the source tree — `.gitignore` and a path guard in
-the script keep it that way).
-
-The generated header is consumed by `esp_foc_initialize_axis()`
-unconditionally — every axis boots with the autotuned gains.
-Override at runtime with `esp_foc_axis_retune_current_pi_q16()`
-or by writing through the tuner protocol; persist the result with
-`esp_foc_calibration_save()` so subsequent boots come up already
-tuned (see *NVS calibration overlay* below).
-
-Example run on the reference gimbal profile:
-
-```
-$ python3 scripts/gen_pi_gains.py \
-      --motor scripts/motors/default.json \
-      --output build/.../gen/esp_foc_autotuned_gains.h \
-      --report build/.../gen/esp_foc_autotuned_report.txt \
-      --pwm-rate-hz 20000 --decimation 20
-espFoC PI autotuner: ...esp_foc_autotuned_gains.h generated
-                     (Kp=1.4610 V/A, Ki=659.17 V/(A*s), PM_delay=36.7 deg)
-```
-
-The script aborts the build when the result would be unsafe:
-
-- `exit 4` — requested bandwidth above Nyquist (`bw·Ts ≥ 0.5`);
-- `exit 5` — phase margin below the profile's `min_phase_margin_deg`.
-
-A human-readable report sidecar (`...autotuned_report.txt`) records
-the design context (motor params, Ts, α/β, Kp/Ki, phase-margin
-estimates) for the CI log.
-
-## Runtime tuning API
-
-`include/espFoC/esp_foc_axis_tuning.h` exposes three primitives that
-apply atomically through a short critical section; the integrator is
-reset on every swap to keep the post-swap response well-defined:
-
-```c
-esp_foc_axis_retune_current_pi_q16(axis, R_q16, L_q16, bw_hz_q16);
-esp_foc_axis_set_current_pi_gains_q16(axis, Kp, Ki, integrator_limit);
-esp_foc_axis_get_current_pi_gains_q16(axis, &Kp, &Ki, &lim);
-```
-
-`retune` uses the same MPZ math as `gen_pi_gains.py`, implemented in
-`source/motor_control/esp_foc_design_mpz.c` with pure Q16 arithmetic.
-
-## Tuner protocol
-
-With `CONFIG_ESP_FOC_TUNER_ENABLE` the firmware links a
-transport-agnostic request handler (`esp_foc_tuner.c`) that speaks a
-compact binary protocol on top of a framing codec
-(`esp_foc_link.c` — sync byte, LE length, channel, seq, payload,
-CRC-16/CCITT). Three channels are multiplexed over one bus:
-
-- `TUNER` — request/response.
-- `SCOPE` — CSV text from `esp_foc_scope.c` (one line per sample).
-- `LOG` — reserved for future log relay.
-
-Supported operations, mapped to `esp_foc_tuner_id_t`:
-
-| Op    | Category         | IDs (hex)                                      |
-|-------|------------------|------------------------------------------------|
-| READ  | gains + state    | `0x10..0x13` (Kp, Ki, ILim, Vmax), `0x40..0x41` (state, last err) |
-| WRITE | manual gains     | `0x20..0x22`                                   |
-| WRITE | motion targets   | `0x50..0x53` (id, iq, ud, uq — only honored while override is ON) |
-| EXEC  | commands         | `0x80` RECOMPUTE_GAINS, `0xA0` OVERRIDE_ON, `0xA1` OVERRIDE_OFF    |
-
-Axis validation: every call checks an `axis->magic` field (present
-only when the tuner is compiled in) so a stale or wild pointer is
-refused immediately.
-
-Override semantics: while `OVERRIDE_ON` is active the outer loop
-still invokes the user's regulation callback but drops its writes on
-the floor, honouring only the tuner shadow targets. `OVERRIDE_OFF`
-restores user control bumplessly — no transient glitch at the swap.
-
-## Transport bridges
-
-Two bridges live under `source/drivers/`; pick one in menuconfig.
-Both implement the weak callbacks declared in `esp_foc_tuner.h` and
-`esp_foc_scope.c`, so tuner and scope share a single physical bus.
-
-- `CONFIG_ESP_FOC_BRIDGE_UART` — works on every ESP32 variant
-  (including the original ESP32 without native USB). Peripheral,
-  baud and pin map are Kconfig entries.
-- `CONFIG_ESP_FOC_BRIDGE_USBCDC` — S2/S3/P4 only. Uses the
-  `espressif/esp_tinyusb` managed component; the same cable used
-  for flashing carries the tuner traffic.
-
-## tunerctl CLI
-
-`tools/espfoc_studio/cli/tunerctl.py` is a thin argparse wrapper
-around the Python `TunerClient` — handy when scripting bring-up
-sequences or wiring the tuner into CI:
+## Prerequisites
 
 ```bash
-# axis state
-python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 axis-state
-
-# read current gains
-python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 read
-
-# recompute gains from motor params
-python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 \
-      retune --r 1.08 --l 0.0018 --bw 150
-
-# engage tuner-controlled motion
-python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 override on
-python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 set-target iq 1.5
-python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 override off
-
-# alignment + calibration round-trip
-python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 align
-python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 \
-      persist --r 1.08 --l 0.0018 --bw 150
-python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 firmware-type
-
-# read or program the per-phase current LPF cutoff (Hz)
-python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 cutoff
-python3 -m espfoc_studio.cli.tunerctl --port /dev/ttyACM0 cutoff --set 500
+pip install -r tools/espfoc_tool/requirements.txt
+export PYTHONPATH=tools   # or prefix every command with PYTHONPATH=tools
 ```
 
-Set `PYTHONPATH=tools` if you have not installed the package.
+Reference firmware: [`examples/axis_tuning`](../examples/axis_tuning). It advertises
+firmware type **`TSGX`** so auto-scan can recognise the board.
 
-## Current sense filtering
+Enable in your own project:
 
-Every phase current sample lands inside the isensor driver and is
-pushed straight through a 2nd-order Butterworth low-pass biquad
-(`include/espFoC/utils/biquad_q16.h`) before the gain conversion.
-This is the single shaping stage between the ADC counts and the
-Clarke / Park / PI pipeline: the EMA on i_q / i_d that 2.x kept
-between Park and the PI is gone, and so is the moving-average ring
-that used to sit on top of the ADC samples themselves. One filter,
-one place, no buried double smoothing.
+- `CONFIG_ESP_FOC_TUNER_ENABLE=y`
+- `CONFIG_ESP_FOC_BRIDGE_UART` or `CONFIG_ESP_FOC_BRIDGE_USBCDC`
+- `CONFIG_ESP_FOC_SCOPE=y` (for Dashboard scope plots)
 
-The biquad runs in Direct-Form-II Transposed in Q16 (5 multiplies,
-4 adds, no internal accumulator drift). Coefficients come from a
-prewarped bilinear design:
+**USB CDC** (`CONFIG_ESP_FOC_BRIDGE_USBCDC`) picks the backend per chip:
 
-```
-r  = tan(pi * fc / fs)
-a0 = 1 + sqrt(2)*r + r^2
-b0 = b2 = r^2 / a0
-b1 = 2*r^2 / a0
-a1 = 2*(r^2 - 1) / a0
-a2 = (1 - sqrt(2)*r + r^2) / a0
-```
+| Targets | Stack | Host port |
+|---------|--------|-----------|
+| ESP32-S2/S3/P4 | TinyUSB CDC-ACM | `/dev/ttyACM*` (OTG USB) |
+| ESP32-C3/C5/C6/H2/C61 | USB Serial/JTAG | `/dev/ttyACM*` (built-in USB) |
 
-DC gain is exactly unity by construction; the design places a
-perfect zero at Nyquist (Butterworth LPF has H(-1) = 0). All
-coefficients live in [-2, +2], so Q16.16 keeps ~14 bits of
-headroom for any sane fc / fs ratio.
+On ESP32-C6, `axis_tuning` defaults to USB Serial/JTAG. Use UART for
+`idf.py monitor` and leave USJ to the tuner (`CONFIG_ESP_CONSOLE_SECONDARY_NONE`).
 
-Boot precedence for the cutoff, identical to the gain pipeline:
+**Baud rate:** the host tool defaults to **921600** (same as the UART bridge).
+USB Serial/JTAG and TinyUSB CDC do not use that line rate on the wire — the
+host driver ignores it — but keeping 921600 avoids surprises when switching
+between UART and USB. Any common baud works on `/dev/ttyACM*`.
 
-1. NVS calibration overlay (when `current_filter_fc_hz != 0`).
-2. `CONFIG_ESP_FOC_CURRENT_FILTER_CUTOFF_HZ` (default 300 Hz).
+Do not run `idf.py monitor` on the same ACM port as espFoC Tool.
 
-The runtime tuner can override at any time
-(`WRITE_I_FILTER_FC_Q16` or `tunerctl cutoff --set`); persisting
-through `CMD_PERSIST_NVS` stamps the live value into the
-calibration blob so the next boot picks it back up.
+---
 
-The same biquad replaces the EMA across the rest of the library:
-the velocity estimate uses `CONFIG_ESP_FOC_VELOCITY_FILTER_CUTOFF_HZ`
-(default 50 Hz), and the PLL / KF observers swap their internal
-EMAs for biquads with the same nominal cutoffs they used before.
-Operators with hand-tuned observer cutoffs may want to revisit:
-the new filter has the same -3 dB position but a sharper roll-off
-(40 dB/decade vs 20 dB/decade) and slightly different phase.
+## Quick start (GUI)
 
-## ISR hot path (Plan #2)
-
-Set `CONFIG_ESP_FOC_ISR_HOT_PATH=y` (default) and the entire FOC
-inner loop — Park, current PI, inverse Park, SVPWM, `set_voltages`
-— runs inside the MCPWM timer ISR at the full PWM rate (40 kHz
-default). The user `regulation_callback` keeps running on its
-FreeRTOS task at `pwm_rate / ESP_FOC_LOW_SPEED_DOWNSAMPLING`
-(2 kHz default), so user code rate is unchanged. The current PI's
-sample rate climbs from 2 kHz to 40 kHz: a ~20x bandwidth headroom
-for free, no faster ADC needed.
-
-Three pieces work together:
-
-* **ADC ISR** (`source/drivers/current_sensor_adc.c` and the P4
-  one-shot variant): every fresh sample goes through the per-phase
-  Butterworth biquad, then the driver applies offset + gain +
-  Clarke and atomic-writes `i_alpha` / `i_beta` into the
-  axis-supplied sinks via the new `set_publish_targets()` interface
-  method. The PWM ISR can then read both currents with a single
-  load each — no critical section, no fetch_isensors call.
-
-* **PWM ISR** (`foc_hot_isr` in
-  `source/motor_control/control_strategy/esp_foc_control_current_mode_sensored.c`):
-  reads the published currents, asks the angle predictor for a fresh
-  electrical angle, runs Park + PI + inverse Park + SVPWM, calls
-  `set_voltages`, optionally pushes a scope frame via
-  `esp_foc_scope_data_push_from_isr()`, then decrements the
-  downsample counter and notifies the outer task on rollover.
-
-* **Outer task** (renamed in spirit, same symbol
-  `do_current_mode_sensored_low_speed_loop`): waits on the ISR's
-  notification, reads the slow encoder (AS5600 over I2C, AS5048
-  over SPI, or PCNT-direct), folds the new electrical angle into
-  the predictor under critical section, runs the velocity smoothing
-  biquad, then notifies the regulator task so the user
-  `regulation_callback` can refresh the targets.
-
-The slow encoder problem is solved with an **alpha-beta angle
-tracker** (`include/espFoC/utils/angle_predictor_q16.h`):
-
-```
-predict(t_now):
-    dt = t_now - t_last
-    return wrap_2pi(theta_est + omega_est * dt)
-
-update(theta_meas, t_meas):
-    dt = t_meas - t_last
-    theta_pred = wrap_2pi(theta_est + omega_est * dt)
-    err = wrap_pi(theta_meas - theta_pred)            in (-pi, +pi]
-    theta_est = wrap_2pi(theta_pred + alpha * err)
-    omega_est += (beta / dt) * err
+```bash
+python3 -m espfoc_tool.gui
+# optional fixed port (skips USB scan):
+python3 -m espfoc_tool.gui --port /dev/ttyACM0 --baud 921600
 ```
 
-Default gains `alpha = 0.30`, `beta = 0.05` (close to critically
-damped at 2 kHz update rate; rule of thumb is
-`beta = alpha^2 / (2 - alpha)`). Override via
-`CONFIG_ESP_FOC_PREDICTOR_ALPHA_X1000` /
-`CONFIG_ESP_FOC_PREDICTOR_BETA_X1000` (stored x1000 because Kconfig
-int does not take floats). The tracker degrades gracefully when the
-encoder hangs — the unit tests assert the predicted angle drift
-stays under 0.5 rad after 50 ms with no updates at 60 Hz electrical.
+1. Wait for **CONNECTED** in the status bar (or plug the board — scan runs every 2 s).
+2. Open **Dashboard** → **Run alignment** (rotor direction + encoder zero).
+3. Enable **Manual setpoints**, set **iq** / **id** (nudge buttons optional).
+4. Open **Tune** → edit Kp/Ki/lim/filter → **Write** (RAM) → **Patch** (flash).
+5. **E-STOP** (Dashboard → Actions) or disable manual setpoints → axis stops.
 
-When the ADC sample is older than one PWM period (drop / 50 kHz cap
-on plain ESP32 with PWM > 25 kHz), the ISR reuses the latest
-published value. The PI integrates one cycle of slightly stale
-current — way milder degradation than the legacy 2 kHz loop already
-lives with.
+The GUI works **offline**: both views are navigable without a board; device
+actions stay disabled until connected.
 
-Set `CONFIG_ESP_FOC_ISR_HOT_PATH=n` to fall back to the legacy 2.x
-task-based path. Useful while a sensorless observer config that has
-not been ported to the ISR path yet is in use.
+---
 
-### Why not Plan #3 (offload sin/cos to the other core)?
+## Views
 
-Investigated and dropped:
+### Tune
 
-* `esp_ipc_isr_call` exists in IDF v5.5 but on Xtensa (ESP32 /
-  ESP32-S3) the callback must be **assembly** with no C calls
-  allowed — the LUT-based `q16_sin/cos` in `iq31_sin/cos` cannot
-  run there.
-* The API offers only `_call` (busy-wait until the other core
-  starts) and `_call_blocking` (busy-wait until it finishes); no
-  asynchronous "done" callback back to the originating core, so
-  the desired `PWM ISR -> dispatch -> sincos done IRQ -> hot path`
-  pipeline cannot be assembled from the public IDF surface.
-* `q16_sin + q16_cos` together are a few hundred cycles (LUT 8192
-  + IQ31 conversions). The IPI round-trip would dwarf that.
+| Area | Purpose |
+|------|---------|
+| Left | Live gains, manual editor, **Apply gains** / **Apply filter**, serial log |
+| Center | Device vs pending diff; flash badge (stored / empty) |
+| Right | Motor **R**, **L**, **bandwidth**; MPZ step/Bode/pole-zero/root locus |
 
-Documented for the record so we do not revisit it without new
-information.
+**Flash actions** (center column):
 
-## Alignment with natural-direction probe
+| Button | Action |
+|--------|--------|
+| **Read** | Load Kp, Ki, lim, filter cutoff from device RAM into the editor |
+| **Write** | Push only fields that differ from live RAM |
+| **Patch** | Write dirty fields, then **store calibration** to NVS (firmware RMW) |
 
-`esp_foc_align_axis()` parks the rotor at electrical 0, zeroes the
-encoder, then drives a short positive `Vq` pulse (≈30 % of `V_max`
-for 300 ms) and watches the raw encoder count to decide which way
-the motor turned:
+**Apply gains** under the MPZ plots writes synthesized Kp/Ki/lim from the motor model.
+Pole pairs can be changed in the plot toolbar; persist with **Patch**.
 
-* delta ≥ +50 raw counts → `natural_direction = CW`
-* delta ≤ −50 raw counts → `natural_direction = CCW`
-* anything in between → keep the value passed in `settings`,
-  log a warning. A stuck rotor (mechanical brake, open phase,
-  dead encoder) lands here.
+NVS **store** only writes tuning fields that changed relative to the blob
+(`esp_foc_calibration_axis_tuner_store` on device). Align data in NVS is not
+edited from the tool in this release.
 
-The probe is always on; the `settings.natural_direction` field
-becomes a hint used only when the probe is inconclusive. Progress
-shows up on the `LOG` link channel as
-`alignment: started` → `alignment: complete (direction = ...)`,
-which the TunerStudio Tuning panel echoes in its log viewer and
-the CLI surfaces through `axis-state`.
+### Dashboard
 
-## NVS calibration overlay
+| Area | Purpose |
+|------|---------|
+| Left — Motion | Manual setpoints, id/iq spinboxes + nudge |
+| Left — Actions | **Run alignment**, **E-STOP**, **Autoset** (SVM/scope reset) |
+| Right — top | SVPWM hexagon (pu) beside three-phase waveforms (scope ch 10–12) |
+| Right — bottom | Rolling plots for all scope channels (`axis_tuning` map) |
 
-Once the loop is dialled in, persist the gains:
+**E-STOP** sequence: id/iq → 0, `stop` axis (also calls `inverter.disable` via
+`park_inverter_safe`).
 
-```c
-#include "espFoC/esp_foc_calibration.h"
+Scope streaming starts automatically on connect.
 
-esp_foc_calibration_data_t cal = {
-    .kp = my_kp_q16, .ki = my_ki_q16,
-    .integrator_limit = my_lim_q16,
-    .motor_r_ohm = q16_from_float(R),
-    .motor_l_h   = q16_from_float(L),
-    .bandwidth_hz = q16_from_float(BW),
-};
-esp_foc_calibration_save(0 /* axis_id */, &cal);
+---
+
+## Scope channel map (`axis_tuning`)
+
+| Ch | Signal |
+|----|--------|
+| 0 | id target |
+| 1 | id measured |
+| 2 | iq target |
+| 3 | iq measured |
+| 4 | ud |
+| 5 | uq |
+| 6 | θ_meas mech |
+| 7 | θ_est mech |
+| 8 | ω_est mech |
+| 9 | PLL error |
+| 10 | iu |
+| 11 | iv |
+| 12 | iα |
+| 13 | FOC hot-path µs |
+
+Other examples may use different maps; only `axis_tuning` is the contract for espFoC Tool.
+
+---
+
+## espfocctl (CLI)
+
+Interactive:
+
+```bash
+python3 -m espfoc_tool.cli.espfocctl --port /dev/ttyACM0 -i
 ```
 
-Or click **Save to NVS** in TunerStudio, or run
-`tunerctl persist --r ... --l ... --bw ...`.
+One-shot:
 
-Every blob is tagged with a *profile hash*:
-
-```
-profile_hash = FNV-1a("<CONFIG_ESP_FOC_MOTOR_PROFILE>:<CONFIG_ESP_FOC_PROFILE_VERSION>")
+```bash
+python3 -m espfoc_tool.cli.espfocctl --port /dev/ttyACM0 align
+python3 -m espfoc_tool.cli.espfocctl --port /dev/ttyACM0 estop
 ```
 
-`esp_foc_initialize_axis()` loads the overlay at boot only when the
-stored hash matches the build's hash. Bumping
-`CONFIG_ESP_FOC_PROFILE_VERSION` invalidates every persisted blob —
-the guard rail that prevents loading gimbal calibration on a
-scooter motor by accident.
+| Command | Description |
+|---------|-------------|
+| `connect` / `disconnect` | Link session |
+| `status` | Heartbeat + axis state flags |
+| `read` | Kp, Ki, Kd, Kff, ILim, Vmax |
+| `write --kp … --ki …` | Write gains |
+| `align` | Rotor alignment |
+| `run` / `stop` | Start / stop FOC loop |
+| `set-target id\|iq VALUE` | Current references (A) |
+| `store` / `erase` | NVS calibration |
+| `cutoff [--set HZ]` | Current LPF |
+| `scope-start` / `scope-stop` | Scope stream |
+| `firmware-type` | FourCC (expect `TSGX` on axis_tuning) |
+| `estop` | id/iq=0 + stop |
 
-The on-flash format is documented in
-`source/motor_control/esp_foc_calibration.c`:
+---
 
-```
-[magic=0xE5F0CC11][version=1][reserved][profile_hash:u32]
-[crc32:u32][payload_len:u16][pad][payload bytes]
-```
+## Environment variables
 
-## TunerStudio target firmware
+| Variable | Effect |
+|----------|--------|
+| `ESPFOC_TOOL_NO_GL=1` | Disable OpenGL plot rendering |
+| `ESPFOC_TOOL_SCOPE_CSV=1` | Decode legacy CSV scope (if firmware built with legacy CSV) |
+| `QT_QPA_PLATFORM=offscreen` | Headless CI / smoke tests |
 
-`examples/tuner_studio_target` is a service-mode firmware that does
-nothing except host TunerStudio: it boots, parks the motor at zero
-current, attaches the axis to the runtime tuner and waits. It also
-overrides the weak `esp_foc_tuner_firmware_type()` hook to return
-`'TSGX'` so the GUI can detect the target on connect and surface
-the **Generate App** tab.
+---
 
-Pin map lives entirely in `Kconfig.projbuild`:
+## Host tests
 
-```
-TUNER_TARGET_PWM_U_HI / V_HI / W_HI    high-side pins
-TUNER_TARGET_PWM_U_LO / V_LO / W_LO    low-side pins
-TUNER_TARGET_PWM_FREQ_HZ               PWM rate
-TUNER_TARGET_DC_LINK_V                 link voltage
-TUNER_TARGET_ENC_SDA / SCL             AS5600 I2C
-TUNER_TARGET_POLE_PAIRS                motor identity
-```
-
-USB-CDC is the default transport on S2 / S3 / P4; switch to UART
-under `Component config → espFoC Settings → Tuner transport bridge`
-when targeting plain ESP32.
-
-## Generate App from TunerStudio
-
-The **Hardware** and **Generate App** tabs together turn a
-TunerStudio session into a production-ready IDF project. Workflow:
-
-1. Connect to the bring-up board running `tuner_studio_target`.
-2. Use the Tuning + Analysis tabs to dial Kp/Ki/integrator_limit in.
-3. Click **Save to NVS** so the bring-up board itself remembers
-   the calibration (handy if you keep iterating).
-4. Open the **Hardware** tab and fill in the production pin map.
-5. Open the **Generate App** tab, type a project name, optionally
-   override the output directory, click **Generate**.
-
-The generator under `tools/espfoc_studio/codegen/sensored_app.py`
-walks the `templates/sensored_app/*.tmpl` tree, substitutes the
-live gains + Hardware values, and writes a self-contained IDF
-project plus, when `nvs_partition_gen.py` is on `$IDF_PATH`, a
-bit-exact `nvs_calibration.bin` you can flash into the production
-NVS partition. The generated app keeps the runtime tuner enabled
-so the operator can re-tune later without rebuilding firmware.
-
-## Cross-validation Python ↔ C
-
-`test/golden_motors.json` is the single source of truth for the
-regression table. `scripts/verify_goldens.py` checks both that the
-Python math agrees with the JSON and that the C mirror in
-`test/test_design_mpz.c` matches byte-for-byte:
-
-```
-$ python3 scripts/verify_goldens.py
-All 5 goldens agree across JSON, Python math, and C mirror.
+```bash
+QT_QPA_PLATFORM=offscreen ESPFOC_TOOL_NO_GL=1 PYTHONPATH=tools \
+  python3 -m pytest tools/espfoc_tool/tests/ -v
 ```
 
-Any drift in either side breaks the check immediately so the two
-implementations cannot diverge silently.
+`FakeTunerLoopback` is for unit tests only — not exposed in the GUI.
+
+---
+
+## Troubleshooting
+
+| Symptom | Check |
+|---------|--------|
+| Stuck on SCANNING | Cable, driver, correct port; firmware must expose bridge + `TSGX` |
+| NO LINK after connect | Heartbeat / baud (default 921600); another app holding the port |
+| Align fails | Motor wiring, pole pairs, sensor; see serial log on **Tune** |
+| Scope flat | `CONFIG_ESP_FOC_SCOPE`, scope started, PWM loop running |
+| Plots slow on VM | `ESPFOC_TOOL_NO_GL=1` or smaller window |
+
+---
+
+## FITL builds
+
+Firmware built with `CONFIG_ESP_FOC_FITL` simulates plant + sensors in software.
+espFoC Tool treats it like a normal target (`TSGX`); use **axis_tuning** without
+FITL when validating real hardware.

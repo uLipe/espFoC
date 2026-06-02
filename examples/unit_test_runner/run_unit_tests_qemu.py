@@ -2,13 +2,21 @@
 # SPDX-License-Identifier: MIT
 """
 Run espFoC unit tests in QEMU and exit with 0 if all pass, 1 otherwise.
-Use from examples/unit_test_runner with IDF environment sourced:
+
+CI and local use:
   . $IDF_PATH/export.sh
+  cd examples/unit_test_runner
+  idf.py set-target esp32
+  idf.py -D TEST_COMPONENTS=espFoC build
   python run_unit_tests_qemu.py
 """
+from __future__ import annotations
+
 import os
 import re
+import signal
 import sys
+import time
 
 try:
     import pexpect
@@ -16,48 +24,121 @@ except ImportError:
     print("run_unit_tests_qemu.py requires pexpect. Install with: pip install pexpect")
     sys.exit(2)
 
+RESULT_RE = re.compile(r"(\d+) Tests (\d+) Failures")
+MENU_PROMPT = "Enter test for running"
+BOOT_PROMPT = "Press ENTER to see the list of tests."
+# Run only espFoC-tagged cases (same as typing [espFoC] in the Unity menu).
+TEST_FILTER = "[espFoC]"
+
+
+def _spawn_idf_qemu(cwd: str) -> pexpect.spawn:
+    """Start idf.py qemu; prefer a new session so SIGTERM reaches QEMU too."""
+    common = dict(
+        timeout=30,
+        encoding="utf-8",
+        codec_errors="replace",
+        cwd=cwd,
+    )
+    try:
+        return pexpect.spawn(
+            "idf.py --no-hints qemu",
+            start_new_session=True,
+            **common,
+        )
+    except (TypeError, PermissionError):
+        try:
+            return pexpect.spawn(
+                "idf.py --no-hints qemu",
+                preexec_fn=os.setsid,
+                **common,
+            )
+        except PermissionError:
+            return pexpect.spawn("idf.py --no-hints qemu", **common)
+
+
+def _signal_process_tree(pid: int, sig: int) -> None:
+    try:
+        os.killpg(os.getpgid(pid), sig)
+    except (ProcessLookupError, OSError):
+        try:
+            os.kill(pid, sig)
+        except (ProcessLookupError, OSError):
+            pass
+
+
+def _wait_dead(child: pexpect.spawn, seconds: float) -> None:
+    deadline = time.monotonic() + seconds
+    while child.isalive() and time.monotonic() < deadline:
+        time.sleep(0.1)
+
+
+def _teardown(child: pexpect.spawn) -> None:
+    """Stop idf.py and the QEMU child even when Unity returns to the interactive menu."""
+    if child.closed:
+        return
+    if child.isalive():
+        try:
+            child.sendcontrol("c")
+            child.expect(pexpect.TIMEOUT, timeout=2)
+        except (pexpect.TIMEOUT, pexpect.EOF, OSError):
+            pass
+        _signal_process_tree(child.pid, signal.SIGTERM)
+        _wait_dead(child, 8.0)
+        if child.isalive():
+            _signal_process_tree(child.pid, signal.SIGKILL)
+            _wait_dead(child, 3.0)
+    child.close(force=True)
+
 
 def main() -> int:
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
-    # Run idf.py qemu; it will build first if needed
-    child = pexpect.spawn("idf.py qemu", timeout=300, encoding="utf-8",
-                          codec_errors="replace", cwd=script_dir)
-    child.logfile = sys.stdout
+
+    child = None
+    exit_code = 1
 
     try:
-        child.expect("Press ENTER to see the list of tests.", timeout=120)
-    except (pexpect.TIMEOUT, pexpect.EOF) as e:
-        print(f"Failed to get Unity menu: {e}")
-        return 1
+        child = _spawn_idf_qemu(script_dir)
+        child.logfile = sys.stdout
+        try:
+            child.expect(BOOT_PROMPT, timeout=180)
+        except (pexpect.TIMEOUT, pexpect.EOF) as exc:
+            print(f"Failed to reach Unity boot prompt: {exc}")
+            return 1
 
-    # Press Enter to print the menu, then wait for Unity's input prompt
-    # before sending "*". Doing them back-to-back is race-prone under CI
-    # I/O buffering and Unity silently discards the "*" if it arrives
-    # before the menu prompt is ready.
-    child.sendline("")
-    try:
-        child.expect("Enter test for running", timeout=60)
-    except (pexpect.TIMEOUT, pexpect.EOF):
-        print("Unity menu prompt never appeared")
-        return 1
-    child.sendline("*")
+        child.sendline("")
+        try:
+            child.expect(MENU_PROMPT, timeout=60)
+        except (pexpect.TIMEOUT, pexpect.EOF):
+            print("Unity menu prompt never appeared")
+            return 1
 
-    # Match "0 Failures" in the summary line (success). QEMU runs
-    # tests serially; ~200 tests need comfortably more than two minutes
-    # on a loaded CI runner, so we budget five.
-    try:
-        child.expect(re.compile(r"\d+ Tests 0 Failures"), timeout=300)
-    except pexpect.TIMEOUT:
-        print("Timeout waiting for test results or tests failed (non-zero failures).")
-        return 1
-    except pexpect.EOF:
-        print("Process ended before test results.")
-        return 1
+        child.sendline(TEST_FILTER)
 
-    print("All unit tests passed.")
-    child.close(force=True)
-    return 0
+        try:
+            child.expect(RESULT_RE, timeout=120)
+        except pexpect.TIMEOUT:
+            print("Timeout waiting for Unity summary (tests still running or hung).")
+            return 1
+        except pexpect.EOF:
+            print("QEMU/idf.py exited before Unity printed the summary.")
+            return 1
+
+        total = int(child.match.group(1))
+        failures = int(child.match.group(2))
+        if total == 0:
+            print("Warning: Unity ran 0 tests — rebuild with: idf.py -D TEST_COMPONENTS=espFoC build")
+        if failures == 0:
+            print(f"All unit tests passed ({total} tests).")
+            exit_code = 0
+        else:
+            print(f"Unity reported {failures} failure(s) out of {total} tests.")
+            exit_code = 1
+    finally:
+        if child is not None:
+            _teardown(child)
+
+    return exit_code
 
 
 if __name__ == "__main__":

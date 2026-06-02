@@ -30,8 +30,14 @@ typedef int32_t q16_t;
 /** -1.0 */
 #define Q16_MINUS_ONE ((q16_t)-65536)
 
-/** 2*pi radians (for angle helpers) */
+/** Literal 2π rad in Q16 (filter/design math only — not electrical angle storage). */
 #define Q16_TWO_PI ((q16_t)411775)
+#define Q16_INV_TWO_PI ((q16_t)10430)
+
+/** Per-unit voltage: Q16_ONE = linear SVPWM ceiling (Vdc/√3 at axis init). */
+#define ESP_FOC_VPU_ONE_Q16 Q16_ONE
+/** Industrial headroom on the voltage circle (83.3 % of VPU_ONE). */
+#define ESP_FOC_MOD_INDEX_LIMIT_Q16 ((q16_t)(((int64_t)Q16_ONE * 833) / 1000))
 
 #define Q16_K3_CLARKE ((q16_t)37837)
 #define Q16_SQRT3_OVER_2 ((q16_t)56756)
@@ -136,6 +142,23 @@ static inline q16_t q16_max(q16_t a, q16_t b)
 }
 
 /**
+ * Reciprocal 1/x for strictly positive Q16 x; x<=0 → 0.
+ * Integer-only (ISR-safe). Result is Q16 such that q16_mul(x, rec) ≈ Q16_ONE.
+ */
+static inline q16_t q16_reciprocal_positive(q16_t x)
+{
+    if (x <= 0) {
+        return 0;
+    }
+    int64_t num = (int64_t)Q16_ONE * (int64_t)Q16_ONE;
+    int64_t r = num / (int64_t)x;
+    if (r > (int64_t)INT32_MAX) {
+        return (q16_t)INT32_MAX;
+    }
+    return (q16_t)r;
+}
+
+/**
  * Elapsed interval in microseconds → Q16.16 seconds (>= 0).
  * Integer-only: seconds ≈ us * Q16_ONE / 1e6.
  */
@@ -158,6 +181,19 @@ static inline q16_t q16_from_iq31_per_unit(int32_t iq31)
         return (q16_t)INT32_MIN;
     }
     return (q16_t)x;
+}
+
+static inline int32_t iq31_from_q16_per_unit(q16_t q16)
+{
+    int64_t x = ((int64_t)q16 << 31) / Q16_ONE;
+
+    if (x > INT32_MAX) {
+        return INT32_MAX;
+    }
+    if (x < INT32_MIN) {
+        return INT32_MIN;
+    }
+    return (int32_t)x;
 }
 
 q16_t q16_sin(q16_t angle_rad_q16);

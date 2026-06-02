@@ -1,6 +1,6 @@
 # espFoC unit test runner
 
-Minimal app that runs the Unity test menu for espFoC unit tests. Default target for automated runs is **QEMU** (no hardware); you can also run on a real device.
+Minimal app that runs the Unity test menu for espFoC unit tests. Default target for automated runs is **QEMU** on esp32 (no hardware); **esp32c6** is the reference build target for examples.
 
 ## Build
 
@@ -48,4 +48,4 @@ pytest pytest_espfoc_unittest.py -m generic -v
 
 ## CI
 
-The workflow job `unit_tests` builds for esp32, installs Espressif QEMU (`idf_tools.py install qemu-xtensa`), and runs `python run_unit_tests_qemu.py`. Pass/fail is taken from the script exit code (0 = all tests passed). An optional step runs tests on a real device via `pytest -m generic` when using a self-hosted runner with `ESPPORT` set (`continue-on-error: true` when no device is present).
+The workflow job `unit_tests` builds for esp32, installs Espressif QEMU (`idf_tools.py install qemu-xtensa`), and runs `python run_unit_tests_qemu.py`. The runner always tears down the `idf.py qemu` process group after Unity prints its summary so CI does not hang on the interactive menu. Pass/fail is taken from the script exit code (0 = all tests passed). An optional step runs tests on a real device via `pytest -m generic` when using a self-hosted runner with `ESPPORT` set (`continue-on-error: true` when no device is present).

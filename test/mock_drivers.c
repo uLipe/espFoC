@@ -27,16 +27,16 @@ static void mock_set_inverter_callback(esp_foc_inverter_t *self,
 static q16_t mock_get_dc_link_voltage(esp_foc_inverter_t *self)
 {
     mock_inverter_t *m = MOCK_INVERTER_FROM_SELF(self);
-    return q16_from_float(m->dc_link_pu);
+    return q16_from_float(m->dc_link_volts);
 }
 
-static void mock_set_voltages(esp_foc_inverter_t *self, q16_t v_u, q16_t v_v, q16_t v_w)
+static void mock_set_duties(esp_foc_inverter_t *self, q16_t duty_a, q16_t duty_b, q16_t duty_c)
 {
     mock_inverter_t *m = MOCK_INVERTER_FROM_SELF(self);
-    m->set_voltages_count++;
-    m->last_v_u = v_u;
-    m->last_v_v = v_v;
-    m->last_v_w = v_w;
+    m->set_duties_count++;
+    m->last_duty_a = duty_a;
+    m->last_duty_b = duty_b;
+    m->last_duty_c = duty_c;
 }
 
 static uint32_t mock_get_inverter_pwm_rate(esp_foc_inverter_t *self)
@@ -57,14 +57,14 @@ static void mock_disable(esp_foc_inverter_t *self)
     m->disable_count++;
 }
 
-void mock_inverter_init(mock_inverter_t *m, float dc_link_pu, float pwm_rate_hz)
+void mock_inverter_init(mock_inverter_t *m, float dc_link_volts, float pwm_rate_hz)
 {
     memset(m, 0, sizeof(*m));
-    m->dc_link_pu = dc_link_pu;
+    m->dc_link_volts = dc_link_volts;
     m->pwm_rate_hz = pwm_rate_hz;
     m->interface.set_inverter_callback = mock_set_inverter_callback;
     m->interface.get_dc_link_voltage = mock_get_dc_link_voltage;
-    m->interface.set_voltages = mock_set_voltages;
+    m->interface.set_duties = mock_set_duties;
     m->interface.get_inverter_pwm_rate = mock_get_inverter_pwm_rate;
     m->interface.enable = mock_enable;
     m->interface.disable = mock_disable;
@@ -100,7 +100,10 @@ static q16_t mock_rotor_read_counts(esp_foc_rotor_sensor_t *self)
 {
     mock_rotor_sensor_t *m = MOCK_ROTOR_FROM_SELF(self);
     m->read_counts_count++;
-    m->last_angle_q16 = q16_from_float(m->counts / m->counts_per_rev);
+    if (m->scripted_counts_idx < m->scripted_counts_count) {
+        m->counts = m->scripted_counts_reads[m->scripted_counts_idx++];
+    }
+    m->last_angle_q16 = q16_from_float(m->counts);
     return m->last_angle_q16;
 }
 
@@ -114,6 +117,27 @@ static int64_t mock_rotor_read_accumulated_i64(esp_foc_rotor_sensor_t *self)
         m->last_accum_i64 = (int64_t)llroundf(m->accumulated);
     }
     return m->last_accum_i64;
+}
+
+void mock_rotor_sensor_script_counts(mock_rotor_sensor_t *m,
+                                    const float *seq, int n)
+{
+    if (m == NULL || seq == NULL) {
+        return;
+    }
+    if (n < 0) {
+        n = 0;
+    }
+    int cap = (int)(sizeof(m->scripted_counts_reads) /
+                    sizeof(m->scripted_counts_reads[0]));
+    if (n > cap) {
+        n = cap;
+    }
+    for (int i = 0; i < n; ++i) {
+        m->scripted_counts_reads[i] = seq[i];
+    }
+    m->scripted_counts_count = n;
+    m->scripted_counts_idx = 0;
 }
 
 void mock_rotor_sensor_script_accumulated(mock_rotor_sensor_t *m,

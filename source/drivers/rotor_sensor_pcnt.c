@@ -1,5 +1,4 @@
 #include "espFoC/utils/esp_foc_q16.h"
-#include "espFoC/driver_iq31_local.h"
 #include "espFoC/rotor_sensor_pcnt.h"
 #include "driver/pulse_cnt.h"
 #include "esp_err.h"
@@ -64,7 +63,14 @@ static q16_t read_counts(esp_foc_rotor_sensor_t *self)
 
     int32_t rc = (int32_t)raw_count;
     uint32_t absv = (uint32_t)(rc < 0 ? -rc : rc);
-    return esp_foc_q16_from_counts_mod(absv, obj->ppr_u32 ? obj->ppr_u32 : 1u);
+    uint32_t cpr = obj->ppr_u32 ? obj->ppr_u32 : 1u;
+    if (cpr == 0u) {
+        return 0;
+    }
+    if ((cpr & (cpr - 1u)) == 0u) {
+        return q16_from_int((int32_t)(absv & (cpr - 1u)));
+    }
+    return q16_from_int((int32_t)(absv % cpr));
 }
 
 static void set_simulation_count(esp_foc_rotor_sensor_t *self, q16_t increment_normalized)

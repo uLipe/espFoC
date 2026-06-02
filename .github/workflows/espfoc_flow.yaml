@@ -50,31 +50,13 @@ jobs:
       run: |
         ./idf/install.sh
         . ./idf/export.sh
-        pushd examples/axis_sensored
-        idf.py set-target esp32s3
-        idf.py build
-        idf.py set-target esp32p4
-        idf.py build
-        popd
-        pushd examples/tuner_demo
-        idf.py set-target esp32
-        idf.py build
-        popd
-        pushd examples/tuner_studio_target
-        # Default sdkconfig drives USB-CDC; valid on S3/P4. We exercise
-        # all three paths so a CDC-only or UART-only regression on any
-        # target is caught — and so the ESP32-P4 one-shot ADC current
-        # sensor branch also sees compiler eyes on every PR.
-        # The ESP32-specific overrides live in sdkconfig.defaults.esp32
-        # (auto-loaded by IDF on set-target esp32).
+        pushd examples/axis_tuning
         idf.py set-target esp32s3
         idf.py build
         rm -rf build sdkconfig
-        idf.py set-target esp32p4
+        idf.py set-target esp32c6
         idf.py build
         rm -rf build sdkconfig
-        idf.py set-target esp32
-        idf.py build
         popd
         pushd examples/test_drivers/test_current_sense
         idf.py set-target esp32s3
@@ -94,7 +76,7 @@ jobs:
         popd
 
   python_tests:
-    name: TunerStudio host tests
+    name: espFoC Tool host tests
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
@@ -110,18 +92,20 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y libegl1 libxkbcommon0 libdbus-1-3
         python -m pip install --upgrade pip
-        pip install -r tools/espfoc_studio/requirements.txt
+        pip install -r tools/espfoc_tool/requirements.txt
 
     - name: Run host test suite
       env:
         QT_QPA_PLATFORM: offscreen
         PYTHONPATH: ${{ github.workspace }}/tools
+        ESPFOC_TOOL_NO_GL: "1"
       run: |
-        python -m pytest tools/espfoc_studio/tests/ -v --tb=short
+        python -m pytest tools/espfoc_tool/tests/ -v --tb=short
 
   unit_tests:
     name: Unit tests (build and run on QEMU)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -164,6 +148,7 @@ jobs:
         idf.py -D TEST_COMPONENTS=espFoC build
 
     - name: Run unit tests on QEMU
+      timeout-minutes: 15
       env:
         IDF_PATH: ${{ github.workspace }}/idf
       run: |
@@ -171,6 +156,13 @@ jobs:
         pip install pexpect
         cd examples/unit_test_runner
         python run_unit_tests_qemu.py
+
+    - name: Build unit test runner (esp32c6 compile check)
+      run: |
+        . ./idf/export.sh
+        cd examples/unit_test_runner
+        idf.py set-target esp32c6
+        idf.py -D TEST_COMPONENTS=espFoC build
 
     # Optional: run on real device on self-hosted runner (ESPPORT set).
     - name: Run unit tests on device

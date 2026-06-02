@@ -24,10 +24,18 @@
 
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 typedef void (*foc_loop_runner) (void *axis);
 typedef void*  esp_foc_event_handle_t;
 
-int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority);
+int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority,
+                          void **out_task_handle);
+bool esp_foc_runner_is_alive(void *task_handle);
+void esp_foc_runner_wake(void *task_handle);
+bool esp_foc_in_task_context(void);
 void esp_foc_sleep_ms(int sleep_ms);
 void esp_foc_runner_yield(void);
 uint64_t esp_foc_now_useconds(void);
@@ -40,3 +48,19 @@ void esp_foc_send_notification(esp_foc_event_handle_t handle);
 int esp_foc_debug_pin_init(int debug_pin);
 int esp_foc_debug_pin_set(void);
 int esp_foc_debug_pin_clear(void);
+
+void esp_foc_runner_delete_self(void);
+
+uint32_t esp_foc_ms_to_wait_ticks(unsigned ms);
+
+int esp_foc_task_spawn(foc_loop_runner fn, void *arg, size_t stack_bytes,
+                       int freertos_priority, void **out_task_handle_opt);
+
+typedef void (*esp_foc_timer_callback_t)(void *arg);
+typedef struct esp_foc_timer esp_foc_timer_t;
+
+int esp_foc_timer_create(esp_foc_timer_callback_t cb, void *arg, esp_foc_timer_t **out);
+void esp_foc_timer_destroy(esp_foc_timer_t *t);
+int esp_foc_timer_arm_oneshot_us(esp_foc_timer_t *t, uint64_t period_us);
+int esp_foc_timer_arm_periodic_us(esp_foc_timer_t *t, uint64_t period_us);
+void esp_foc_timer_cancel(esp_foc_timer_t *t);

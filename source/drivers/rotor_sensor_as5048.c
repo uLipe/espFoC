@@ -25,7 +25,6 @@
 #include <math.h>
 #include <string.h>
 #include "espFoC/utils/esp_foc_q16.h"
-#include "espFoC/driver_iq31_local.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -220,7 +219,7 @@ static q16_t read_counts(esp_foc_rotor_sensor_t *self)
     esp_foc_critical_leave();
 
     uint32_t cm = (uint32_t)((raw - obj->zero_offset) & AS5048_DATA_MASK);
-    return esp_foc_q16_from_counts_mod(cm, AS5048_CPR_UINT);
+    return q16_from_int((int32_t)cm);
 }
 
 static int64_t read_accumulated_counts_i64(esp_foc_rotor_sensor_t *self)

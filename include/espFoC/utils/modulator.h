@@ -14,23 +14,23 @@
 extern "C" {
 #endif
 
-static inline void esp_foc_modulate_dq_voltage(q16_t sin,
-                                               q16_t cos,
-                                               q16_t v_d,
-                                               q16_t v_q,
-                                               q16_t *v_alpha,
-                                               q16_t *v_beta,
-                                               q16_t *v_u,
-                                               q16_t *v_v,
-                                               q16_t *v_w,
-                                               q16_t vmax,
-                                               q16_t normalization_scale)
+/** Inverse Park + SVPWM: Vdq/αβ in pu, duties in [0, Q16_ONE]. */
+static inline void esp_foc_modulate_dq_to_duties(q16_t sin,
+                                                 q16_t cos,
+                                                 q16_t v_d,
+                                                 q16_t v_q,
+                                                 q16_t *v_alpha,
+                                                 q16_t *v_beta,
+                                                 q16_t *duty_a,
+                                                 q16_t *duty_b,
+                                                 q16_t *duty_c,
+                                                 q16_t vmax_pu)
 {
     q16_t vd = v_d;
     q16_t vq = v_q;
-    esp_foc_limit_voltage_q16(&vd, &vq, vmax);
+    esp_foc_limit_voltage_q16(&vd, &vq, vmax_pu);
     q16_inverse_park(sin, cos, vd, vq, v_alpha, v_beta);
-    esp_foc_svm_set(*v_alpha, *v_beta, normalization_scale, v_u, v_v, v_w);
+    esp_foc_svm_set(*v_alpha, *v_beta, Q16_ONE, duty_a, duty_b, duty_c);
 }
 
 static inline void esp_foc_get_dq_currents(q16_t sin,

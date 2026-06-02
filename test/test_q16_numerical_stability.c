@@ -76,7 +76,7 @@ TEST_CASE("q16_sin_cos: sin^2 + cos^2 = 1 across full range", "[espFoC][q16][sta
 {
     const int steps = 256;
     for (int i = 0; i < steps; i++) {
-        q16_t angle = q16_from_float(2.0f * (float)M_PI * (float)i / (float)steps);
+        q16_t angle = q16_from_float((float)i / (float)steps);
         q16_t s = q16_sin(angle);
         q16_t c = q16_cos(angle);
         float sf = q16_to_float(s);
@@ -96,10 +96,11 @@ TEST_CASE("q16_sin_cos: zero angle", "[espFoC][q16][stability]")
 
 TEST_CASE("q16_sin_cos: negative angle wraps correctly", "[espFoC][q16][stability]")
 {
-    q16_t angle = q16_from_float(-1.0f);
+    const float turns = -0.25f;
+    q16_t angle = q16_from_float(turns);
     q16_t s = q16_sin(angle);
     float sf = q16_to_float(s);
-    float ref = sinf(-1.0f);
+    float ref = sinf(turns * 2.0f * (float)M_PI);
     TEST_ASSERT_FLOAT_WITHIN(0.05f, ref, sf);
 }
 
@@ -128,7 +129,7 @@ TEST_CASE("q16 Clarke/Park roundtrip: large signals", "[espFoC][q16][stability]"
     q16_t alpha, beta;
     q16_clarke(u, v, w, &alpha, &beta);
 
-    q16_t angle = q16_from_float(1.2f);
+    q16_t angle = q16_from_float(1.2f / (2.0f * (float)M_PI));
     q16_t st = q16_sin(angle);
     q16_t ct = q16_cos(angle);
 
@@ -151,13 +152,12 @@ TEST_CASE("q16 limit_voltage: zero magnitude is no-op", "[espFoC][q16][stability
     TEST_ASSERT_EQUAL_INT32(0, vq);
 }
 
-TEST_CASE("q16 limit_voltage: zero dc is no-op", "[espFoC][q16][stability]")
+TEST_CASE("q16 limit_voltage: zero dc clamps vector to zero", "[espFoC][q16][stability]")
 {
     q16_t vd = Q16_ONE, vq = Q16_ONE;
-    q16_t vd_before = vd, vq_before = vq;
     esp_foc_limit_voltage_q16(&vd, &vq, 0);
-    TEST_ASSERT_EQUAL_INT32(vd_before, vd);
-    TEST_ASSERT_EQUAL_INT32(vq_before, vq);
+    TEST_ASSERT_EQUAL_INT32(0, vd);
+    TEST_ASSERT_EQUAL_INT32(0, vq);
 }
 
 TEST_CASE("q16 limit_voltage: within limit unchanged", "[espFoC][q16][stability]")
@@ -172,9 +172,9 @@ TEST_CASE("q16 limit_voltage: within limit unchanged", "[espFoC][q16][stability]
 
 TEST_CASE("q16 limit_voltage: exceeds limit is scaled", "[espFoC][q16][stability]")
 {
-    q16_t vd = q16_from_float(8.0f);
-    q16_t vq = q16_from_float(8.0f);
-    q16_t vdc = q16_from_float(5.0f);
+    q16_t vd = q16_from_float(0.8f);
+    q16_t vq = q16_from_float(0.8f);
+    q16_t vdc = q16_from_float(0.5f);
     esp_foc_limit_voltage_q16(&vd, &vq, vdc);
     float mag = sqrtf(q16_to_float(vd) * q16_to_float(vd) + q16_to_float(vq) * q16_to_float(vq));
     TEST_ASSERT_FLOAT_WITHIN(0.5f, q16_to_float(vdc), mag);
@@ -185,9 +185,10 @@ TEST_CASE("q16 limit_voltage: exceeds limit is scaled", "[espFoC][q16][stability
 TEST_CASE("PID q16: sustained zero-error stays zero", "[espFoC][q16][stability]")
 {
     esp_foc_pid_controller_t pid = {0};
-    esp_foc_pid_init_from_float(&pid, 1.0f, 10.0f, 0.0f, 0.001f, -10.0f, 10.0f, 5.0f);
+    esp_foc_pid_init_from_float(&pid, 1.0f, 10.0f, 0.0f, 0.0f, 1.0f, 0.001f, -10.0f, 10.0f, 5.0f);
     for (int i = 0; i < 10000; i++) {
-        q16_t out = esp_foc_pid_update(&pid, q16_from_float(1.0f), q16_from_float(1.0f));
+        q16_t ref = q16_from_float(1.0f);
+        q16_t out = esp_foc_pid_update(&pid, ref, ref);
         TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, q16_to_float(out));
     }
 }
@@ -196,7 +197,7 @@ TEST_CASE("PID q16: integrator windup clamped", "[espFoC][q16][stability]")
 {
     esp_foc_pid_controller_t pid = {0};
     const float int_lim = 2.0f;
-    esp_foc_pid_init_from_float(&pid, 0.0f, 100.0f, 0.0f, 0.01f, -100.0f, 100.0f, int_lim);
+    esp_foc_pid_init_from_float(&pid, 0.0f, 100.0f, 0.0f, 0.0f, 0.0f, 0.01f, -100.0f, 100.0f, int_lim);
     for (int i = 0; i < 5000; i++) {
         esp_foc_pid_update(&pid, Q16_ONE, 0);
     }
@@ -207,7 +208,7 @@ TEST_CASE("PID q16: integrator windup clamped", "[espFoC][q16][stability]")
 TEST_CASE("PID q16: output saturation prevents runaway", "[espFoC][q16][stability]")
 {
     esp_foc_pid_controller_t pid = {0};
-    esp_foc_pid_init_from_float(&pid, 100.0f, 0.0f, 0.0f, 0.001f, -0.5f, 0.5f, 10.0f);
+    esp_foc_pid_init_from_float(&pid, 100.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.001f, -0.5f, 0.5f, 10.0f);
     q16_t out = esp_foc_pid_update(&pid, q16_from_float(100.0f), 0);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.5f, q16_to_float(out));
 }
@@ -215,7 +216,7 @@ TEST_CASE("PID q16: output saturation prevents runaway", "[espFoC][q16][stabilit
 TEST_CASE("PID q16: alternating sign error stays bounded", "[espFoC][q16][stability]")
 {
     esp_foc_pid_controller_t pid = {0};
-    esp_foc_pid_init_from_float(&pid, 1.0f, 5.0f, 0.01f, 0.001f, -10.0f, 10.0f, 5.0f);
+    esp_foc_pid_init_from_float(&pid, 1.0f, 5.0f, 0.01f, 0.0f, 0.0f, 0.001f, -10.0f, 10.0f, 5.0f);
     for (int i = 0; i < 2000; i++) {
         float ref = (i & 1) ? 0.5f : -0.5f;
         q16_t out = esp_foc_pid_update(&pid, q16_from_float(ref), 0);
@@ -254,20 +255,20 @@ TEST_CASE("full pipeline q16: 10000 steps bounded and deterministic", "[espFoC][
     esp_foc_biquad_q16_t filt_d, filt_q;
 
     const float dt = 1.0f / 20000.0f;
-    esp_foc_pid_init_from_float(&pid_d, 0.4f, 60.0f, 0.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
-    esp_foc_pid_init_from_float(&pid_q, 0.4f, 60.0f, 0.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
+    esp_foc_pid_init_from_float(&pid_d, 0.4f, 60.0f, 0.0f, 0.0f, 1.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
+    esp_foc_pid_init_from_float(&pid_q, 0.4f, 60.0f, 0.0f, 0.0f, 1.0f, dt, -0.7f, 0.7f, 0.7f / 60.0f);
     esp_foc_biquad_butterworth_lpf_design_q16(&filt_d, 60.0f, 20000.0f);
     esp_foc_biquad_butterworth_lpf_design_q16(&filt_q, 60.0f, 20000.0f);
 
     const int N = 10000;
     const q16_t vmax = q16_from_float(0.7f);
-    const q16_t norm = q16_from_float(0.5f);
 
     for (int k = 0; k < N; k++) {
         float t = (float)k / (float)N;
         float angle = 2.0f * (float)M_PI * t * 10.0f;
-        q16_t sq = q16_sin(q16_from_float(angle));
-        q16_t cq = q16_cos(q16_from_float(angle));
+        float angle_turns = 10.0f * t;
+        q16_t sq = q16_sin(q16_from_float(angle_turns));
+        q16_t cq = q16_cos(q16_from_float(angle_turns));
 
         q16_t iu = q16_from_float(0.3f * sinf(angle));
         q16_t iv = q16_from_float(0.3f * sinf(angle - 2.0f * (float)M_PI / 3.0f));
@@ -281,12 +282,12 @@ TEST_CASE("full pipeline q16: 10000 steps bounded and deterministic", "[espFoC][
         q16_t ud = esp_foc_pid_update(&pid_d, 0,
                                        esp_foc_biquad_q16_update(&filt_d, id));
 
-        q16_t ua, ub, du, dv, dw;
-        esp_foc_modulate_dq_voltage(sq, cq, ud, uq, &ua, &ub, &du, &dv, &dw, vmax, norm);
+        q16_t ua, ub, da, db, dc;
+        esp_foc_modulate_dq_to_duties(sq, cq, ud, uq, &ua, &ub, &da, &db, &dc, vmax);
 
-        TEST_ASSERT_TRUE(q16_to_float(du) >= 0.0f && q16_to_float(du) <= 1.0f);
-        TEST_ASSERT_TRUE(q16_to_float(dv) >= 0.0f && q16_to_float(dv) <= 1.0f);
-        TEST_ASSERT_TRUE(q16_to_float(dw) >= 0.0f && q16_to_float(dw) <= 1.0f);
+        TEST_ASSERT_TRUE(q16_to_float(da) >= 0.0f && q16_to_float(da) <= 1.0f);
+        TEST_ASSERT_TRUE(q16_to_float(db) >= 0.0f && q16_to_float(db) <= 1.0f);
+        TEST_ASSERT_TRUE(q16_to_float(dc) >= 0.0f && q16_to_float(dc) <= 1.0f);
     }
 }
 
@@ -305,20 +306,17 @@ TEST_CASE("q16_from_iq31_per_unit: roundtrip consistency", "[espFoC][q16][stabil
 
 /* ----- angle normalization edge cases ----- */
 
-TEST_CASE("q16_normalize_angle_rad: multiple wraps", "[espFoC][q16][stability]")
+TEST_CASE("q16_normalize_angle: multiple wraps (per-unit turns)", "[espFoC][q16][stability]")
 {
-    q16_t three_pi = q16_from_float(3.0f * (float)M_PI);
-    q16_t norm = q16_normalize_angle_rad(three_pi);
-    float f = q16_to_float(norm);
-    float expected = fmodf(3.0f * (float)M_PI, 2.0f * (float)M_PI);
-    TEST_ASSERT_FLOAT_WITHIN(0.05f, expected, f);
+    q16_t one_point_five_turns = q16_from_float(1.5f);
+    q16_t norm = q16_normalize_angle(one_point_five_turns);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, q16_to_float(norm));
 }
 
-TEST_CASE("q16_normalize_angle_rad: large negative", "[espFoC][q16][stability]")
+TEST_CASE("q16_normalize_angle: large negative turns", "[espFoC][q16][stability]")
 {
-    q16_t neg = q16_from_float(-5.0f * (float)M_PI);
-    q16_t norm = q16_normalize_angle_rad(neg);
+    q16_t neg = q16_from_float(-2.5f);
+    q16_t norm = q16_normalize_angle(neg);
     float f = q16_to_float(norm);
-    TEST_ASSERT_TRUE(f >= 0.0f);
-    TEST_ASSERT_TRUE(f < q16_to_float(Q16_TWO_PI) + 0.1f);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, f);
 }

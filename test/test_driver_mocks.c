@@ -8,21 +8,21 @@
 
 #define FLOAT_TOL 1e-5f
 
-TEST_CASE("mock inverter: set_voltages records args", "[espFoC][driver_mock]")
+TEST_CASE("mock inverter: set_duties records args", "[espFoC][driver_mock]")
 {
     mock_inverter_t inv;
-    mock_inverter_init(&inv, 1.0f, 20000.0f);
+    mock_inverter_init(&inv, 48.0f, 20000.0f);
     esp_foc_inverter_t *iface = mock_inverter_interface(&inv);
 
     q16_t u = q16_from_float(0.5f);
     q16_t v = q16_from_float(0.25f);
-    q16_t w = q16_from_float(-0.25f);
-    iface->set_voltages(iface, u, v, w);
+    q16_t w = q16_from_float(0.0f);
+    iface->set_duties(iface, u, v, w);
 
-    TEST_ASSERT_EQUAL(1, inv.set_voltages_count);
-    TEST_ASSERT_EQUAL(u, inv.last_v_u);
-    TEST_ASSERT_EQUAL(v, inv.last_v_v);
-    TEST_ASSERT_EQUAL(w, inv.last_v_w);
+    TEST_ASSERT_EQUAL(1, inv.set_duties_count);
+    TEST_ASSERT_EQUAL(u, inv.last_duty_a);
+    TEST_ASSERT_EQUAL(v, inv.last_duty_b);
+    TEST_ASSERT_EQUAL(w, inv.last_duty_c);
 }
 
 TEST_CASE("mock inverter: get_dc_link_voltage and get_pwm_rate", "[espFoC][driver_mock]")
@@ -79,7 +79,7 @@ TEST_CASE("mock rotor: read_counts and get_counts_per_rev", "[espFoC][driver_moc
 
     TEST_ASSERT_EQUAL(4096u, iface->get_counts_per_revolution(iface));
     q16_t ang = iface->read_counts(iface);
-    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 1024.0f / 4096.0f, q16_to_float(ang));
+    TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 1024.0f, q16_to_float(ang));
     TEST_ASSERT_EQUAL(1, rot.read_counts_count);
 }
 

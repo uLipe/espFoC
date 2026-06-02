@@ -14,15 +14,19 @@ position loops live in the application's regulation callback; the
 library stays focused and the hot path runs without floating-point
 math. Gains can be synthesised at build time, retuned live from the
 firmware API, persisted to NVS, or dialled in interactively through
-the bundled TunerStudio GUI.
+the bundled **espFoC Tool** desktop GUI.
 
-Targets: ESP32, ESP32-S3, ESP32-P4 (ESP-IDF v5+).
+Targets: ESP32, **ESP32-C6**, ESP32-S3, ESP32-P4 (ESP-IDF v5+). The
+reference bring-up target is **ESP32-C6** (fixed-point hot path sized for
+smaller MCUs).
 
 > **3.0 is a breaking release.** The legacy continuous-time PI
 > formula and the `motor_resistance / motor_inductance / motor_inertia`
 > fields are gone — gains come from the build-time autotuner or the
-> runtime tuner. The 3-PWM LEDC driver and the WIP `axis_sensorless`
-> example were also dropped. See [`changelog.txt`](changelog.txt) for
+> runtime tuner. The 3-PWM LEDC driver was also dropped. The former
+> `esp_foc_controls.h` tunables are Kconfig options (`CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING`,
+> `CONFIG_ESP_FOC_ISENSOR_CALIBRATION_ROUNDS`). The motor regulation callback
+> is three arguments only (`id_ref`, `iq_ref`). See [`changelog.txt`](changelog.txt) for
 > the full migration list.
 
 ---
@@ -32,7 +36,7 @@ Targets: ESP32, ESP32-S3, ESP32-P4 (ESP-IDF v5+).
 Via the IDF component registry:
 
 ```bash
-idf.py add-dependency "ulipe/espfoc^2.0.0"
+idf.py add-dependency "ulipe/espfoc^3.0.0"
 ```
 
 Or clone the repo and add it to your project:
@@ -44,10 +48,12 @@ set(EXTRA_COMPONENT_DIRS "path/to/espFoC")
 Then pick an example as a starting point:
 
 ```bash
-cd examples/axis_sensored
-idf.py set-target esp32s3
+cd examples/axis_tuning
+idf.py set-target esp32c6    # reference target (UART bridge)
 idf.py build flash monitor
 ```
+
+Also supported: `esp32s3` (UART), `esp32p4` (USB-CDC via TinyUSB).
 
 ---
 
@@ -56,93 +62,103 @@ idf.py build flash monitor
 ![espFoC architecture](doc/images/architecture.png)
 
 Each axis owns one inverter, one rotor sensor and (optionally) one
-current sensor. The application sets Id/Iq references in a
-regulation callback; espFoC handles Clarke/Park transforms, the PI
-current loop, SVPWM modulation and the PWM duty outputs. Control
-timing is driven by the PWM peripheral — the ADC samples are
-PWM-synchronised and the Id/Iq loop runs in a deterministic task.
+current sensor. You implement a **regulation callback** that updates
+`id_ref` / `iq_ref` each outer-loop tick; espFoC runs Clarke/Park, the
+current PIs, inverse Park, SVPWM and PWM updates. The inner current loop
+and modulation run in the **PWM ISR** at carrier frequency; a dedicated
+task reads the encoder (~2 kHz by default) and feeds an **encoder PLL**
+(`esp_foc_estimator_q16`) that integrates mechanical angle at **PWM rate**
+(20 kHz). Only the PWM ISR writes `rotor_elec_angle`; your regulation
+callback runs on the slow task at roughly **PWM rate ÷
+`CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING`** (see *espFoC Settings → Control
+loop* in `menuconfig`). Platform primitives (tasks, critical sections,
+timers) go through **`include/espFoC/osal/os_interface.h`** so motor code
+does not depend on FreeRTOS headers.
 
 Inverter and rotor drivers are pluggable:
 
 - Inverters: 3-PWM MCPWM, 6-PWM MCPWM (hardware dead-time).
-- Rotor sensors: AS5600, AS5048A, quadrature via PCNT, open-loop.
+- Rotor sensors: AS5600, AS5048A, quadrature via PCNT, simulated rotor (`rotor_sensor_simu` + optional `rotor_sensor_simu_wire_ud_uq` for open-loop bring-up).
 - Current sensing: ADC shunt (continuous or one-shot).
 
 ---
 
-## Tuning
+## Tuning (espFoC Tool)
 
-![TunerStudio demo](doc/images/tuner_studio.gif)
+![espFoC Tool](doc/images/espfoc_tool_logo.svg)
 
-espFoC ships with **TunerStudio**, a PySide6 + pyqtgraph desktop app
-that speaks the runtime tuner protocol over UART or USB-CDC. In a
-single window you get:
+**espFoC Tool** is a PySide6 + pyqtgraph control app over UART/USB-CDC.
+It opens without a board connected (USB auto-scan) and exposes four views:
 
-- live axis state and gain readout with in-place editing;
-- MPZ recompute from motor R/L/bandwidth on the fly;
-- one-click rotor alignment with auto-detected natural direction;
-- save / load / erase calibration to NVS so the next boot comes up
-  already tuned;
-- predicted step response, Bode, pole-zero and root-locus plots;
-- firmware scope stream with per-channel colour, toggle and cursor;
-- SVPWM hexagon with the three phase projections and the resultant
-  voltage vector rotating as the motor is driven;
-- a Hardware tab plus a Generate App tab that turn the live tuning
-  state into a ready-to-build IDF project for production.
+| View | Purpose |
+|------|---------|
+| **Config** | Live gains, editor vs device diff, write dirty fields, NVS RMW store/erase |
+| **Current** | Motor R/L/bw + MPZ plots (step, Bode, pole-zero, root locus) |
+| **Control** | id/iq targets, align, E-stop, SVPWM hexagon |
+| **States** | Named scope channels ([axis_tuning](examples/axis_tuning) wire map) |
 
-### Try it without hardware
+OpenGL plot rendering is enabled by default; set `ESPFOC_TOOL_NO_GL=1` to disable.
+Full workflow: [`doc/TUNING.md`](doc/TUNING.md).
+
+### Launch espFoC Tool
 
 ```bash
-pip install -r tools/espfoc_studio/requirements.txt
-PYTHONPATH=tools python3 -m espfoc_studio.gui --demo
+pip install -r tools/espfoc_tool/requirements.txt
+PYTHONPATH=tools python3 -m espfoc_tool.gui
+# optional fixed port:
+PYTHONPATH=tools python3 -m espfoc_tool.gui --port /dev/ttyACM0
 ```
-
-`--demo` embeds a simulated firmware so the whole pipeline — tuner
-protocol, scope stream, hexagon — exercises end-to-end with zero
-boards attached.
 
 ### Talk to a real target
 
-Two paths:
+**`axis_tuning`** is the reference bring-up firmware: it boots, auto-loads
+NVS calibration when present, attaches the tuner, and waits for the host
+(`align` → `run` → tune → `store` → `stop`). It advertises `TSGX` for host
+identification.
 
-1. **`tuner_studio_target` (recommended for bring-up).** A dedicated
-   service-mode firmware that boots, parks the motor, and waits for
-   the GUI. Advertises a `TSGX` firmware-type so the Generate App tab
-   lights up automatically.
+```bash
+cd examples/axis_tuning
+idf.py set-target esp32c6    # USB Serial/JTAG CDC (sdkconfig.defaults.esp32c6)
+idf.py menuconfig            # pin map + AS5600 vs rotor_sensor_simu
+idf.py build flash monitor
+```
 
-   ```bash
-   cd examples/tuner_studio_target
-   idf.py set-target esp32s3        # USB-CDC default
-   idf.py menuconfig                # adjust the pin map
-   idf.py build flash monitor
-   ```
+On ESP32-S3, use `idf.py set-target esp32s3`. On ESP32-P4, USB-CDC via
+`sdkconfig.defaults.esp32p4`.
 
-2. **Your own firmware.** Enable a transport bridge in `menuconfig`
-   (`CONFIG_ESP_FOC_BRIDGE_UART` for plain ESP32,
-   `CONFIG_ESP_FOC_BRIDGE_USBCDC` for S2/S3/P4) and set
-   `CONFIG_ESP_FOC_TUNER_ENABLE=y`.
+For your own firmware, enable a transport bridge in `menuconfig`
+(`CONFIG_ESP_FOC_BRIDGE_UART` or `CONFIG_ESP_FOC_BRIDGE_USBCDC`) and set
+`CONFIG_ESP_FOC_TUNER_ENABLE=y`.
 
 Then:
 
 ```bash
-PYTHONPATH=tools python3 -m espfoc_studio.gui --port /dev/ttyACM0
+PYTHONPATH=tools python3 -m espfoc_tool.gui --port /dev/ttyACM0
 ```
 
-### Scripted tuning
+### Scripted control
 
-A companion CLI (`tunerctl`) lets you drive the same protocol from
-scripts and CI jobs. Build-time autotuning from motor profiles, the
-runtime C API, the wire-level protocol and the CLI commands are
-covered in [`doc/TUNING.md`](doc/TUNING.md).
+**espfocctl** drives align, run, stop, E-stop, gain writes, id/iq targets,
+and NVS store/erase from scripts:
+
+```bash
+PYTHONPATH=tools python3 -m espfoc_tool.cli.espfocctl --port /dev/ttyACM0 -i
+# one-shot E-stop:
+PYTHONPATH=tools python3 -m espfoc_tool.cli.espfocctl --port /dev/ttyACM0 estop
+```
 
 ---
 
 ## Minimal example
 
-Sensored current mode with a 6-PWM MCPWM inverter, an AS5600 encoder
-and an ADC shunt. PI gains come from the build-time autotuner for the
-motor profile selected via `CONFIG_ESP_FOC_MOTOR_PROFILE`; the runtime
-tuner / TunerStudio can rewrite them later.
+Encoder-based current mode with a 6-PWM MCPWM inverter, an AS5600 encoder
+and an ADC shunt. PI gains default to bypass at init; NVS or the runtime
+tuner can supply tuned values.
+
+The snippet below is **illustrative** (placeholders for pins and ADC
+config will not compile until you fill them in). For a **complete,
+buildable** wiring and init sequence, use
+[`examples/axis_tuning/main/main.c`](examples/axis_tuning/main/main.c).
 
 ```c
 #include "esp_log.h"
@@ -162,13 +178,9 @@ static esp_foc_motor_control_settings_t settings = {
 
 static void regulation_callback(esp_foc_axis_t *axis_cb,
                                 esp_foc_d_current_q16_t *id_ref,
-                                esp_foc_q_current_q16_t *iq_ref,
-                                esp_foc_d_voltage_q16_t *ud_ff,
-                                esp_foc_q_voltage_q16_t *uq_ff)
+                                esp_foc_q_current_q16_t *iq_ref)
 {
     (void)axis_cb;
-    ud_ff->raw = 0;
-    uq_ff->raw = 0;
     id_ref->raw = 0;
     iq_ref->raw = q16_from_float(2.0f);
 }
@@ -186,15 +198,15 @@ void app_main(void)
 }
 ```
 
+At init, shunt calibration uses **`CONFIG_ESP_FOC_ISENSOR_CALIBRATION_ROUNDS`**
+averages (same *Control loop* menu as downsampling).
+
 ---
 
 ## Examples
 
-- `examples/axis_sensored` — reference bring-up (sensored current mode).
-- `examples/tuner_studio_target` — service-mode firmware for live
-  tuning + Generate App.
-- `examples/tuner_demo` — runs in QEMU, exercises autogen gains,
-  runtime retune, the tuner protocol and signal injection.
+- `examples/axis_tuning` — reference firmware for live tuning (tuner +
+  scope + NVS; AS5600 or `rotor_sensor_simu`).
 - `examples/unit_test_runner` — Unity suite for CI / QEMU.
 - `examples/test_drivers` — inverter / encoder / shunt bring-up.
 
@@ -204,7 +216,7 @@ void app_main(void)
 
 Q16.16 fixed-point (`q16_t`) is used everywhere in the hot path:
 currents, voltages, angles, PID, filters, SVPWM. A Q1.31 (IQ31) LUT
-backs sin/cos and the observers. Float is reserved for setup-time
+backs sin/cos for Park transforms. Float is reserved for setup-time
 conversions via `q16_from_float()` / `q16_to_float()`; the control
 loop contains no floating-point operations.
 
@@ -215,21 +227,19 @@ loop contains no floating-point operations.
 ```
 espFoC/
 ├── doc/
-│   ├── images/         # architecture, TunerStudio screenshot, demo gif
-│   └── TUNING.md       # deep dive: autogen, runtime API, protocol, CLI
-├── examples/           # axis_sensored / tuner_studio_target /
-│                       # tuner_demo / unit_test_runner / ...
+│   ├── images/         # architecture, espFoC Tool logo, demo gifs
+│   └── TUNING.md       # espFoC Tool + espfocctl workflow and scope map
+├── examples/           # axis_tuning / unit_test_runner / test_drivers
 ├── include/espFoC/     # public API
-├── scripts/
-│   ├── gen_pi_gains.py # build-time MPZ autotuner
-│   └── motors/*.json   # motor profiles consumed by the autotuner
+├── scripts/            # gen_iq31_sin_lut.py, build_samples.sh
 ├── source/
-│   ├── drivers/        # platform drivers (inverters, encoders, shunts)
-│   ├── motor_control/  # axis core, MPZ design, calibration, tuner,
-│   │                   # injection, link codec
-│   └── osal/           # OS abstraction
+│   ├── calibration/    # NVS calibration format and axis helpers
+│   ├── drivers/        # inverters, encoders, shunts, tuner bridges
+│   ├── gui_link/       # binary link codec, scope, tuner reactor
+│   ├── motor_control/  # axis core (FOC ISR + slow loop), MPZ, Q16 helpers
+│   └── osal/           # OS abstraction (tasks, critical sections, esp_timer)
 ├── test/               # Unity unit tests (run via examples/unit_test_runner)
-└── tools/espfoc_studio # PySide6 + pyqtgraph GUI, CLI, codegen, templates
+└── tools/espfoc_tool    # PySide6 GUI (espFoC Tool), espfocctl, host protocol
 ```
 
 ---

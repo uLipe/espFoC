@@ -5,6 +5,7 @@
 
 #include "espFoC/utils/esp_foc_q16.h"
 
+/* Voltages on the hot path: per-unit (Q16_ONE = Vdc/√3). Duties use same Q16 [0,1]. */
 typedef struct { q16_t raw; } esp_foc_q_voltage_q16_t;
 typedef struct { q16_t raw; } esp_foc_d_voltage_q16_t;
 typedef struct { q16_t raw; } esp_foc_alpha_voltage_q16_t;
