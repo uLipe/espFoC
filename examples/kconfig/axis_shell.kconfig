@@ -1,0 +1,168 @@
+menu "espFoC axis_shell"
+
+    choice AXIS_SHELL_PLANT
+        prompt "Motor plant"
+        default AXIS_SHELL_PLANT_FITL
+        help
+            FITL: full simulated inverter, shunts, and rotor (no GPIO).
+            Hardware: MCPWM + ADC shunts + encoder/simulator on real pins.
+
+        config AXIS_SHELL_PLANT_FITL
+            bool "FOC-in-the-loop (simulated plant)"
+            select ESP_FOC_FITL
+
+        config AXIS_SHELL_PLANT_HARDWARE
+            bool "Hardware drivers (MCPWM, ADC, encoder)"
+    endchoice
+
+    menu "Motor"
+        config AXIS_TUNING_POLE_PAIRS
+            int "Pole pairs"
+            range 1 64
+            default FOC_ITL_DEFAULT_POLE_PAIRS if ESP_FOC_FITL
+            default 13
+
+        config AXIS_TUNING_DC_LINK_V
+            int "DC link voltage [V]"
+            range 1 60
+            default 12
+    endmenu
+
+    if ESP_FOC_FITL
+
+        comment ""
+        comment "FITL plant R/L/J, inertia, PWM tick: espFoC Settings -> FOC-in-the-loop"
+        comment "Scope + shell work on the console UART; stream on the bridge port."
+
+    endif
+
+    if !ESP_FOC_FITL
+
+        menu "Inverter (MCPWM 6-PWM)"
+            comment "Six complementary PWM outputs + optional gate-enable GPIO."
+
+            config AXIS_TUNING_PWM_U_HI
+                int "Phase U high-side GPIO"
+                range 0 54
+                default 5
+
+            config AXIS_TUNING_PWM_V_HI
+                int "Phase V high-side GPIO"
+                range 0 54
+                default 20
+
+            config AXIS_TUNING_PWM_W_HI
+                int "Phase W high-side GPIO"
+                range 0 54
+                default 7
+
+            config AXIS_TUNING_PWM_U_LO
+                int "Phase U low-side GPIO"
+                range 0 54
+                default 6
+
+            config AXIS_TUNING_PWM_V_LO
+                int "Phase V low-side GPIO"
+                range 0 54
+                default 21
+
+            config AXIS_TUNING_PWM_W_LO
+                int "Phase W low-side GPIO"
+                range 0 54
+                default 8
+
+            config AXIS_TUNING_PWM_EN_PIN
+                int "Gate driver enable GPIO (-1 = not used)"
+                range -1 54
+                default 47
+
+            config AXIS_TUNING_PWM_EN_ACT_LOW
+                bool "Enable pin is active-low"
+                default y
+                depends on AXIS_TUNING_PWM_EN_PIN >= 0
+        endmenu
+
+        choice AXIS_SHELL_ROTOR_SENSOR
+            prompt "Rotor sensor"
+            default AXIS_SHELL_ROTOR_AS5600
+            help
+                AS5600: I2C magnetic encoder.
+                Simulated: electrical model fed from applied Ud/Uq (bench / no magnet).
+
+            config AXIS_SHELL_ROTOR_AS5600
+                bool "AS5600 (I2C)"
+
+            config AXIS_SHELL_ROTOR_SIMU
+                bool "Open-loop rotor simulator"
+        endchoice
+
+        config AXIS_TUNING_ROTOR_AS5600
+            bool
+            default y if AXIS_SHELL_ROTOR_AS5600
+            default n
+
+        config AXIS_TUNING_ROTOR_SIMU
+            bool
+            default y if AXIS_SHELL_ROTOR_SIMU
+            default n
+
+        menu "AS5600 encoder pins"
+            depends on AXIS_SHELL_ROTOR_AS5600
+
+            config AXIS_TUNING_ENC_SDA
+                int "I2C SDA GPIO"
+                range 0 54
+                default 25
+
+            config AXIS_TUNING_ENC_SCL
+                int "I2C SCL GPIO"
+                range 0 54
+                default 24
+        endmenu
+
+        menu "Rotor simulator parameters"
+            depends on AXIS_SHELL_ROTOR_SIMU
+
+            config AXIS_TUNING_SIMU_R_MILLIOHM
+                int "Phase resistance [mΩ]"
+                range 1 1000000
+                default 1000
+
+            config AXIS_TUNING_SIMU_L_MICROHENRY
+                int "Phase inductance [µH]"
+                range 1 1000000
+                default 2000
+        endmenu
+
+        menu "Current sense (ADC shunt)"
+            comment "Two-shunt U/V; phase W is reconstructed. Gain ×100 (5000 = 50 V/V)."
+
+            config AXIS_TUNING_ISENSE_ADC_UNIT
+                int "ADC unit (1 or 2)"
+                range 1 2
+                default 1
+
+            config AXIS_TUNING_ISENSE_CH_U
+                int "ADC channel — phase U shunt"
+                range 0 9
+                default 6
+
+            config AXIS_TUNING_ISENSE_CH_V
+                int "ADC channel — phase V shunt"
+                range 0 9
+                default 7
+
+            config AXIS_TUNING_ISENSE_AMP_GAIN_X100
+                int "Current amplifier gain [V/V × 100]"
+                range 1 100000
+                default 5000
+
+            config AXIS_TUNING_ISENSE_SHUNT_MOHM
+                int "Shunt resistance [mΩ]"
+                range 1 10000
+                default 10
+        endmenu
+
+    endif
+
+endmenu

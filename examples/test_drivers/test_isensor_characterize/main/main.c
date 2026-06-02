@@ -3,26 +3,15 @@
  *
  * Copyright (c) 2021 Felipe Neves
  *
- * Locked-rotor current-sense characterization: open-loop Vq at fixed theta,
- * isensor + inverter on a bench axis exposed to the link layer (tuner/scope).
- *
- * Workflow:
- *   1. Mechanically lock the rotor.
- *   2. Flash this firmware and connect espFoC Studio / tunerctl on UART.
- *   3. CONNECT → RUN (arms bench, enables inverter) → ramp WRITE UQ.
- *   4. SCOPE_START to plot Uq, Iq, Iu, Iv vs time.
- *   5. CALISENSOR to re-run DC offset calibration at zero torque.
- *
- * No encoder and no FOC alignment — the electrical angle is fixed in firmware
- * (default 0 rad, tunable via WRITE BENCH_THETA).
+ * Locked-rotor current-sense characterization — bench axis + ESPF scope.
+ * Control via espfoc_shell on console UART (when enabled in axis_shell-style builds).
  */
 
 #include "esp_log.h"
 #include "esp_err.h"
 
 #include "espFoC/esp_foc.h"
-#include "espFoC/gui_link/esp_foc_tuner.h"
-#include "espFoC/gui_link/esp_foc_link_session.h"
+#include "espFoC/stream/esp_foc_scope.h"
 #include "espFoC/inverter_6pwm_mcpwm.h"
 #include "espFoC/current_sensor_adc.h"
 #include "soc/soc_caps.h"
@@ -33,11 +22,6 @@ static const char *TAG = "isensor_char";
 static esp_foc_axis_t s_axis;
 static esp_foc_inverter_t *s_inverter;
 static esp_foc_isensor_t *s_shunts;
-
-uint32_t esp_foc_tuner_firmware_type(void)
-{
-    return ESP_FOC_TUNER_FIRMWARE_TYPE_ISCHAR;
-}
 
 static int pwm_enable_gpio(void)
 {
@@ -63,18 +47,10 @@ static void wire_scope_channels(void)
     esp_foc_scope_add_channel(&s_axis.i_v, 5);
     esp_foc_scope_add_channel(&s_axis.latest_i_alpha, 6);
     esp_foc_scope_add_channel(&s_axis.latest_i_beta, 7);
+    esp_foc_scope_bind_axis(&s_axis);
     esp_foc_scope_initalize();
 #endif
 }
-
-#if defined(CONFIG_ESP_FOC_SCOPE)
-static void pump_scope_idle(void)
-{
-    for (int n = 0; n < CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE; n++) {
-        esp_foc_scope_data_push();
-    }
-}
-#endif
 
 static void bench_task(void *arg)
 {
@@ -83,13 +59,16 @@ static void bench_task(void *arg)
         if (s_axis.state == ESP_FOC_AXIS_STATE_BENCH) {
             esp_foc_bench_step(&s_axis);
         }
+#if defined(CONFIG_ESP_FOC_SCOPE)
+        esp_foc_scope_data_push();
+#endif
         esp_foc_sleep_ms(1);
     }
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "isensor characterization — lock rotor, connect host, arm bench, ramp Uq");
+    ESP_LOGI(TAG, "isensor characterization — lock rotor, arm bench via shell, scope on USB");
 
     s_inverter = inverter_6pwm_mpcwm_new(
         CONFIG_AXIS_TUNING_PWM_U_HI,
@@ -144,27 +123,15 @@ void app_main(void)
     }
 
     wire_scope_channels();
-#if defined(CONFIG_ESP_FOC_SCOPE)
-    pump_scope_idle();
-#endif
-
-    ESP_ERROR_CHECK(esp_foc_link_attach_axis(0, &s_axis));
 
     if (esp_foc_task_spawn(bench_task, NULL, 4096, 5, NULL) != 0) {
         ESP_LOGE(TAG, "bench task spawn failed");
         return;
     }
 
-    ESP_LOGW(TAG,
-             ">>> LOCK the rotor mechanically. Connect Studio/UART. "
-             "RUN=arm bench, write UQ to stress the windings, SCOPE for I vs U.");
+    ESP_LOGI(TAG, "lock rotor; arm bench (shell: 0 run); scope when BENCH active");
 
     while (1) {
-#if defined(CONFIG_ESP_FOC_SCOPE)
-        if (s_axis.state != ESP_FOC_AXIS_STATE_BENCH) {
-            pump_scope_idle();
-        }
-#endif
-        esp_foc_sleep_ms(200);
+        esp_foc_sleep_ms(500);
     }
 }
