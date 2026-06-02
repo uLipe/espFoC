@@ -519,6 +519,10 @@ void esp_foc_tuner_dispatch_link_frame(uint8_t seq,
         uint8_t axis_id = payload[3];
         const uint8_t *cmd_payload = payload + 4;
         size_t cmd_len = payload_len - 4;
+        if (cmd_len > ESP_FOC_LINK_MAX_PAYLOAD) {
+            send_response_frame(seq, (int8_t)ESP_FOC_ERR_INVALID_ARG, NULL, 0);
+            return;
+        }
         uint8_t resp_buf[16];
         size_t resp_len = sizeof(resp_buf);
         esp_foc_err_t err = esp_foc_tuner_handle_request(
