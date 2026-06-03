@@ -225,6 +225,29 @@ TEST_CASE("reactor: corrupt CRC produces no response",
     TEST_ASSERT_EQUAL_UINT(0, s_capture_len);
 }
 
+TEST_CASE("reactor: oversized cmd_len returns INVALID_ARG",
+          "[espFoC][reactor]")
+{
+    setup_axis();
+    /* Call dispatch_link_frame directly with a payload large enough that
+     * cmd_len = payload_len - 4 exceeds ESP_FOC_LINK_MAX_PAYLOAD (256).
+     * The link encoder itself caps frames at 256 bytes, so this path is
+     * only reachable via a malicious/buggy transport — exactly what the
+     * bounds check guards against. */
+    uint8_t fake_payload[ESP_FOC_LINK_MAX_PAYLOAD + 5];
+    memset(fake_payload, 0, sizeof(fake_payload));
+    fake_payload[0] = (uint8_t)ESP_FOC_TUNER_OP_READ;
+    fake_payload[1] = 0x10;  /* id lo: KP */
+    fake_payload[2] = 0x00;  /* id hi */
+    fake_payload[3] = 0;     /* axis_id */
+
+    s_capture_len = 0;
+    esp_foc_tuner_dispatch_link_frame(0x77, fake_payload, sizeof(fake_payload));
+
+    TEST_ASSERT_EQUAL(ESP_FOC_ERR_INVALID_ARG,
+                      decode_response(0x77, NULL, NULL));
+}
+
 TEST_CASE("reactor: read kff returns axis Kff through link frame",
           "[espFoC][reactor]")
 {
