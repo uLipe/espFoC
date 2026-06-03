@@ -90,12 +90,12 @@ esp_foc_err_t esp_foc_itl_tick_start(esp_foc_itl_tick_cb_t cb, void *arg, uint32
 
 void esp_foc_itl_tick_stop(void)
 {
+    s_cb = NULL;
+    s_cb_arg = NULL;
     if (s_timer != NULL) {
         mcpwm_timer_start_stop(s_timer, MCPWM_TIMER_STOP_EMPTY);
         mcpwm_timer_disable(s_timer);
         mcpwm_del_timer(s_timer);
         s_timer = NULL;
     }
-    s_cb = NULL;
-    s_cb_arg = NULL;
 }

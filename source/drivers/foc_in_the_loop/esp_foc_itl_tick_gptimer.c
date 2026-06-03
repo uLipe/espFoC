@@ -100,12 +100,12 @@ esp_foc_err_t esp_foc_itl_tick_start(esp_foc_itl_tick_cb_t cb, void *arg, uint32
 
 void esp_foc_itl_tick_stop(void)
 {
+    s_cb = NULL;
+    s_cb_arg = NULL;
     if (s_timer != NULL) {
         gptimer_stop(s_timer);
         gptimer_disable(s_timer);
         gptimer_del_timer(s_timer);
         s_timer = NULL;
     }
-    s_cb = NULL;
-    s_cb_arg = NULL;
 }

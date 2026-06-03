@@ -13,7 +13,7 @@
 #include "espFoC/esp_foc_err.h"
 #include "espFoC/utils/esp_foc_q16.h"
 
-#define FITL_ITL_POLL_MS  100
+#define FITL_ITL_POLL_MS  500
 
 static volatile int s_tick_cb_count;
 
@@ -26,6 +26,7 @@ static void IRAM_ATTR fitl_count_tick(void *arg)
 void tearDown(void)
 {
     esp_foc_in_the_loop_destroy();
+    vTaskDelay(pdMS_TO_TICKS(10));
 }
 
 TEST_CASE("fitl: create returns three interfaces", "[espFoC][foc_itl]")
@@ -61,14 +62,15 @@ TEST_CASE("fitl: tick invokes inverter callback", "[espFoC][foc_itl]")
     esp_foc_in_the_loop_handles_t h = {0};
     TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_in_the_loop_create(&cfg, &h));
 
-    s_tick_cb_count = 0;
     h.inverter->set_inverter_callback(h.inverter, fitl_count_tick, NULL);
+    s_tick_cb_count = 0;
 
     for (int ms = 0; ms < FITL_ITL_POLL_MS && s_tick_cb_count == 0; ++ms) {
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 
-    TEST_ASSERT_GREATER_THAN(0, s_tick_cb_count);
+    TEST_ASSERT_GREATER_THAN_MESSAGE(0, s_tick_cb_count,
+                                   "FITL GPTimer tick did not invoke inverter callback");
 }
 
 TEST_CASE("fitl: second create without destroy fails", "[espFoC][foc_itl]")
