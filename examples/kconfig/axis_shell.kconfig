@@ -25,7 +25,10 @@ menu "espFoC axis_shell"
         config AXIS_TUNING_DC_LINK_V
             int "DC link voltage [V]"
             range 1 60
+            default 24 if ESP_FOC_FITL
             default 12
+            help
+                FITL default 24 V matches QBL4208-61-04-013 rated bus.
     endmenu
 
     if ESP_FOC_FITL
