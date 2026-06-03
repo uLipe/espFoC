@@ -4,6 +4,9 @@
  * Copyright (c) 2021 Felipe Neves
  *
  * Discretized PMSM plant (dq state, abc terminal voltages). Hot path is Q16-only.
+ *
+ * State vector: [i_d, i_q, ω_m, θ_m]. Inputs: phase voltages v_u,v_v,v_w from
+ * inverter duties. ψ_f = k_t / (1.5·p) links torque constant to PM flux.
  */
 #pragma once
 

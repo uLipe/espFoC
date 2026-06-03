@@ -129,9 +129,11 @@ static void plant_task_fn(void *arg)
         q16_t vu;
         q16_t vv;
         q16_t vw;
+        /* One RK step per notification: duties → phase volts → plant ODE. */
         esp_foc_itl_plant_duties_to_phase_volts(du, dv, dw, &ctx->plant, &vu, &vv, &vw);
         esp_foc_itl_plant_step(&ctx->plant, vu, vv, vw);
 
+        /* Sensor path: LPF on i_u/i_v, Clarke publish mimics ADC ISR pipeline. */
         const q16_t iu = esp_foc_biquad_q16_update(&ctx->bq_u, ctx->plant.iu_q16);
         const q16_t iv = esp_foc_biquad_q16_update(&ctx->bq_v, ctx->plant.iv_q16);
         publish_currents(ctx, iu, iv);
@@ -145,6 +147,7 @@ static void plant_task_fn(void *arg)
 
 static uint32_t fitl_plant_hz(uint32_t pwm_hz)
 {
+    /* Plant dt = 1/plant_hz; ISR still runs at pwm_hz for FOC callback timing. */
     if (FOC_ITL_PLANT_DECIM <= 1u) {
         return pwm_hz;
     }
