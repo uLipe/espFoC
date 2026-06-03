@@ -20,6 +20,8 @@ Dialog {
     function syncFromBackend() {
         draftSampleRate = scope.plotSampleRateHz
         draftMaxPoints = scope.plotMaxPoints
+        rateSpin.value = draftSampleRate
+        pointsSpin.value = draftMaxPoints
     }
 
     onAboutToShow: syncFromBackend()
@@ -51,6 +53,8 @@ Dialog {
             SpinBox {
                 id: rateSpin
                 Layout.fillWidth: true
+                editable: true
+                inputMethodHints: Qt.ImhDigitsOnly
                 from: 1
                 to: 1000
                 stepSize: 1
@@ -74,6 +78,8 @@ Dialog {
             SpinBox {
                 id: pointsSpin
                 Layout.fillWidth: true
+                editable: true
+                inputMethodHints: Qt.ImhDigitsOnly
                 from: 10
                 to: scope.plotPointsAbsoluteMax
                 stepSize: 10
@@ -103,7 +109,7 @@ Dialog {
                 highlighted: true
                 Material.background: Theme.primary
                 onClicked: {
-                    scope.applyPlotSettings(root.draftSampleRate, root.draftMaxPoints)
+                    scope.applyPlotSettings(rateSpin.value, pointsSpin.value)
                     root.accept()
                 }
             }
