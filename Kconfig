@@ -223,8 +223,11 @@ menu "espFoC Settings"
                 default n
 
             config FOC_ITL_MOTOR_DELTA
-                bool "Motor windings: delta (D1 star-equivalent conversion)"
-                default n
+                bool "Motor windings: delta (QBL4208 default)"
+                default y
+                help
+                    QBL4208 series uses delta coil topology. Scales terminal
+                    voltages by 1/sqrt(3) for wye-equivalent phase drive.
 
             choice FOC_ITL_TICK_SOURCE
                 prompt "PWM tick backend"
@@ -242,18 +245,18 @@ menu "espFoC Settings"
             config FOC_ITL_DEFAULT_R_MILLIOHM
                 int "Default phase R [milli-ohm]"
                 range 1 1000000
-                default 360
+                default 720
                 help
-                    Per-phase resistance (wye). Default: QBL4208-61-04-013
-                    R_LL=0.72 ohm → R_phase=360 mohm.
+                    Per-phase resistance (delta: R_LL from datasheet).
+                    Default: QBL4208-61-04-013 R_LL=0.72 ohm.
 
             config FOC_ITL_DEFAULT_L_UH
                 int "Default phase L [micro-henry]"
                 range 1 1000000
-                default 600
+                default 1200
                 help
-                    Per-phase inductance (wye). Default: QBL4208-61-04-013
-                    L_LL=1.2 mH → L_phase=600 uH.
+                    Per-phase inductance (delta: L_LL from datasheet).
+                    Default: QBL4208-61-04-013 L_LL=1.2 mH.
 
             config FOC_ITL_DEFAULT_J_X1E7
                 int "Default inertia J * 1e7 [kg·m²]"

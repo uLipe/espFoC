@@ -240,7 +240,7 @@ static void plant_build_coeff(esp_foc_itl_plant_t *plant, const esp_foc_itl_plan
     plant->c.i_max_q16 = q16_from_float(params->i_max_a);
     plant->c.vdc_q16 = q16_from_float(params->vdc_volts);
     plant->c.half_vdc_q16 = q16_mul(plant->c.vdc_q16, Q16_HALF);
-    /* Delta: line-neutral drive scaled by 1/√3 to match wye-equivalent phase voltage. */
+    /* Delta: terminal L-L values are per-phase; scale drive by 1/√3. */
     plant->c.delta_scale_q16 = params->delta_connection ? ESP_FOC_ITL_INV_SQRT3_Q16 : Q16_ONE;
 }
 

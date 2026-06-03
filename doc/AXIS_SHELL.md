@@ -9,7 +9,7 @@ espFoC axis_shell
   Motor plant          → FOC-in-the-loop (default) | Hardware drivers
   Motor                → pole pairs, DC link [V]
   (FITL)               → plant R/L/J under espFoC Settings → FOC-in-the-loop
-                         (defaults: QBL4208-61-04-013, 24 V, wye R/L)
+                         (defaults: QBL4208-61-04-013, delta, 24 V)
   (HW) Inverter        → MCPWM 6-PWM GPIOs + enable
   (HW) Rotor sensor    → AS5600 I2C | open-loop simulator
   (HW) Current sense   → ADC unit, U/V channels, gain ×100, shunt mΩ
