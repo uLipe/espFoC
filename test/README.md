@@ -11,6 +11,7 @@ Unity-based unit tests for the espFoC component. They cover logic that does not 
 - **test_driver_q16_api.c**: Additional mock tests (overlaps part of **test_driver_mocks.c**)
 - **test_axis_flow.c**: Axis flow with mocks — init, align, `set_regulation_callback`, `run`; checks that the regulation callback runs and `set_voltages` receives FOC output
 - **test_estimator_q16.c**: encoder PLL snap, wrap error, convergence, omega clamp, theta_elec scaling.
+- **test_esp_foc_scope.c**: scope daemon init (idempotent), axis init wires 17 channels (`CONFIG_ESP_FOC_SCOPE`).
 
 ## Building and running
 

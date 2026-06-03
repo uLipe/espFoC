@@ -9,11 +9,15 @@ This file is used to generate GitHub releases. All versions from 2.0.0 onward ar
 ### Added
 
 - **ESPF scope stream** — TX-only binary frames (`ESPF` magic, fixed channel count); `esp_foc_stream_bridge` (UART / USB Serial-JTAG / TinyUSB CDC).
+- **`esp_foc_scope_wire_axis()`** — standard 17ch map wired from `esp_foc_initialize_axis()`; `esp_foc_scope_is_initialized()` for tests.
+- **`esp_foc_notify_runner()`** — task notify from task or ISR without separate push paths.
+- **`CONFIG_ESP_FOC_SCOPE_DAEMON_PRIORITY`** — scope runner priority (default 3) so the daemon is not starved by FOC/FITL tasks.
 - **espfoc_shell** — console REPL on the monitor UART (`align`, `run`, `stop`, `set iq/id`, `store`, `list axis`); parser in `espfoc_shell_parse.c` with Unity tests.
 - **espFoC Tool (passive viewer)** — PySide6/QML Material 3 scope GUI; decodes ESPF only, no host commands. Catalog `axis_shell_17ch.py`.
 - **`examples/axis_shell`** — reference app: FITL default, 17ch scope, shell + stream on separate ports (C6: UART monitor + USJ).
 - **Debug scripts** — `scripts/esp_foc_debug.py`, `scripts/run_shell_qemu.py` (FITL shell smoke on QEMU).
 - **Docs** — `doc/PIVOT_SCOPE_SHELL.md`, `doc/SHELL.md`, `doc/AXIS_SHELL.md`, `doc/SCOPE_CHANNELS.md`, `doc/SCOPE_TOOL.md` (app ↔ tool integration guide).
+- **Unity** — `test_esp_foc_scope.c` (scope init + 17ch wire via axis init).
 
 ### Removed
 
@@ -23,9 +27,11 @@ This file is used to generate GitHub releases. All versions from 2.0.0 onward ar
 
 ### Changed
 
-- **espFoC Tool** is RX-only (scope viewer); motor control via firmware shell, not host writes.
+- **espFoC Tool** is RX-only (scope viewer); motor control via firmware shell, not host writes. Plot grid reflows to the window and scrolls when needed.
 - **CI** — builds `axis_shell` (esp32s3/esp32c6); host pytest; Unity on QEMU + shell smoke test.
-- **Scope daemon** — explicit TX bank; `SCOPE_BUFFER_SIZE=8` in axis_shell.
+- **Scope daemon** — init before high-priority runners; owns notify handle via `esp_foc_create_runner`; explicit TX bank; `SCOPE_BUFFER_SIZE=8` in axis_shell.
+- **FITL plant** — decimated by `CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING` so the 20 kHz ISR does not starve FOC/shell; MCPWM tick uses UP count mode.
+- **USJ stream bridge** — non-blocking TX, no hot-path logs (drops frames silently when the host buffer is full).
 
 ### Archived (squashed commit)
 
