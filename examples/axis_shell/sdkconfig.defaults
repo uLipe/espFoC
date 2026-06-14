@@ -1,11 +1,6 @@
-# axis_shell — scope stream (USJ) + console shell; no tuner/link.
+# axis_shell — console shell; FITL plant by default.
 
 CONFIG_ESP_TASK_WDT_EN=n
-
-CONFIG_ESP_FOC_SCOPE=y
-CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS=17
-CONFIG_ESP_FOC_SCOPE_BUFFER_SIZE=8
-CONFIG_ESP_FOC_SCOPE_DAEMON_PRIORITY=3
 
 CONFIG_ESP_FOC_CALIBRATION_NVS=y
 CONFIG_ESPFOC_SHELL=y

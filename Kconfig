@@ -39,11 +39,11 @@ menu "espFoC Settings"
 
     menu "Optional hardware drivers"
         config ESP_FOC_ENABLE_PCNT_DRIVER
-            bool "Build PCNT-based rotor sensor driver (encoder pulse counting)"
+            bool "Build PCNT-based encoder driver (encoder pulse counting)"
             default n
     endmenu
 
-    menu "Rotor sensor simulation (open-loop)"
+    menu "Encoder simulation (open-loop)"
         config ESP_FOC_ROTOR_SIMU_DEFAULT_J_X1E7
             int "Default mechanical inertia J * 1e7 [kg·m²]"
             range 1 1000000
@@ -104,6 +104,10 @@ menu "espFoC Settings"
             range 1 10000
             default 100
 
+        config ESP_FOC_CALIBRATION_NVS
+            bool "Persist calibration to NVS"
+            default y
+
     endmenu
 
     menu "Diagnostics"
@@ -121,83 +125,12 @@ menu "espFoC Settings"
 
     endmenu
 
-    menu "Scope stream"
-        config ESP_FOC_SCOPE
-            bool "Enable scope channel capture and ESPF streaming"
-            default n
-
-        config ESP_FOC_SCOPE_NUM_CHANNELS
-            int "Scope channels per frame (fixed on wire)"
-            depends on ESP_FOC_SCOPE
-            default 17
-
-        config ESP_FOC_SCOPE_BUFFER_SIZE
-            int "Scope ring buffer (frames per half-buffer)"
-            depends on ESP_FOC_SCOPE
-            default 8 if ESP_FOC_SCOPE_NUM_CHANNELS = 17
-            default 8 if ESP_FOC_SCOPE_NUM_CHANNELS = 14
-            default 4096 if ESP_FOC_SCOPE_NUM_CHANNELS = 8
-            default 8
-
-        config ESP_FOC_SCOPE_DAEMON_PRIORITY
-            int "Scope daemon runner priority (esp_foc_create_runner arg)"
-            depends on ESP_FOC_SCOPE
-            range 1 10
-            default 3
-            help
-                Lower number = higher FreeRTOS priority (same scale as FOC outer
-                loop). Default 3 → RT priority 22 on IDF (below plant/FOC at 23–24).
-
-        config ESP_FOC_SCOPE_TX_ALWAYS
-            bool "Stream without RUNNING gate (test / bring-up only)"
-            depends on ESP_FOC_SCOPE
-            default n
-
-        choice ESP_FOC_STREAM_BRIDGE
-            prompt "Scope stream physical interface (TX only)"
-            depends on ESP_FOC_SCOPE
-            default ESP_FOC_STREAM_BRIDGE_USBCDC if IDF_TARGET_ESP32C6
-            default ESP_FOC_STREAM_BRIDGE_UART
-            help
-                Separate from the console UART used for logs and espfoc_shell.
-                ESP32-C6: use USB Serial/JTAG for espFoC Tool; UART for monitor.
-
-            config ESP_FOC_STREAM_BRIDGE_UART
-                bool "Dedicated UART"
-
-            config ESP_FOC_STREAM_BRIDGE_USBCDC
-                bool "USB CDC / Serial-JTAG"
-                depends on SOC_USB_OTG_SUPPORTED || SOC_USB_SERIAL_JTAG_SUPPORTED
-        endchoice
-
-        if ESP_FOC_STREAM_BRIDGE_UART
-            config ESP_FOC_STREAM_UART_NUM
-                int "Scope UART port index"
-                range 0 2
-                default 1
-            config ESP_FOC_STREAM_UART_BAUD
-                int "Scope UART baud"
-                default 921600
-            config ESP_FOC_STREAM_UART_TX_PIN
-                int "Scope UART TX GPIO"
-                default 17
-            config ESP_FOC_STREAM_UART_RX_PIN
-                int "Scope UART RX GPIO (unused for TX-only)"
-                default 18
-        endif
-
-        config ESP_FOC_CALIBRATION_NVS
-            bool "Persist calibration to NVS"
-            default y
-    endmenu
-
     menu "espfoc_shell (console REPL)"
         config ESPFOC_SHELL
             bool "Console command shell on ESP_CONSOLE UART"
             default y
             help
                 Line-oriented REPL on the main serial console (idf monitor).
-                Not on the scope stream port.
     endmenu
 
     menu "FOC-in-the-loop (simulated plant)"
