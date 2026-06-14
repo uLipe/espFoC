@@ -25,32 +25,32 @@ TEST_CASE("mock inverter: set_duties records Q16 args", "[espFoC][driver_mock]")
     TEST_ASSERT_EQUAL(c, inv.last_duty_c);
 }
 
-TEST_CASE("mock isensor: fetch_isensors returns Q16 values", "[espFoC][driver_mock]")
+TEST_CASE("mock inverter: fetch_isensors returns Q16 values", "[espFoC][driver_mock]")
 {
-    mock_isensor_t isen;
-    mock_isensor_init(&isen);
-    isen.values.iu_axis_0 = q16_from_float(0.25f);
-    isen.values.iv_axis_0 = q16_from_float(-0.25f);
-    isen.values.iw_axis_0 = q16_from_float(0.0f);
-    isen.values.iu_axis_1 = q16_from_float(0.1f);
-    isen.values.iv_axis_1 = q16_from_float(0.1f);
-    isen.values.iw_axis_1 = q16_from_float(-0.2f);
-    esp_foc_isensor_t *iface = mock_isensor_interface(&isen);
+    mock_inverter_t inv;
+    mock_inverter_init(&inv, 12.0f, 20000.0f);
+    inv.isensor_values.iu_axis_0 = q16_from_float(0.25f);
+    inv.isensor_values.iv_axis_0 = q16_from_float(-0.25f);
+    inv.isensor_values.iw_axis_0 = q16_from_float(0.0f);
+    inv.isensor_values.iu_axis_1 = q16_from_float(0.1f);
+    inv.isensor_values.iv_axis_1 = q16_from_float(0.1f);
+    inv.isensor_values.iw_axis_1 = q16_from_float(-0.2f);
+    esp_foc_inverter_t *iface = mock_inverter_interface(&inv);
 
-    isensor_values_t q;
+    esp_foc_inverter_isensor_values_t q;
     iface->fetch_isensors(iface, &q);
-    TEST_ASSERT_EQUAL(1, isen.fetch_count);
+    TEST_ASSERT_EQUAL(1, inv.fetch_count);
     TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, 0.25f, q16_to_float(q.iu_axis_0));
     TEST_ASSERT_FLOAT_WITHIN(FLOAT_TOL, -0.25f, q16_to_float(q.iv_axis_0));
 }
 
 TEST_CASE("mock rotor: read_counts and accumulated i64", "[espFoC][driver_mock]")
 {
-    mock_rotor_sensor_t rot;
-    mock_rotor_sensor_init(&rot, 4096.0f);
+    mock_encoder_t rot;
+    mock_encoder_init(&rot, 4096.0f);
     rot.counts = 2048.0f;
     rot.accumulated = 5000.4f;
-    esp_foc_rotor_sensor_t *iface = mock_rotor_sensor_interface(&rot);
+    esp_foc_encoder_t *iface = mock_encoder_interface(&rot);
 
     q16_t ang = iface->read_counts(iface);
     TEST_ASSERT_EQUAL(1, rot.read_counts_count);
@@ -63,9 +63,9 @@ TEST_CASE("mock rotor: read_counts and accumulated i64", "[espFoC][driver_mock]"
 
 TEST_CASE("mock rotor: set_simulation_count scales by counts_per_rev", "[espFoC][driver_mock]")
 {
-    mock_rotor_sensor_t rot;
-    mock_rotor_sensor_init(&rot, 1000.0f);
-    esp_foc_rotor_sensor_t *iface = mock_rotor_sensor_interface(&rot);
+    mock_encoder_t rot;
+    mock_encoder_init(&rot, 1000.0f);
+    esp_foc_encoder_t *iface = mock_encoder_interface(&rot);
 
     iface->set_simulation_count(iface, q16_from_float(0.25f));
     TEST_ASSERT_EQUAL(1, rot.set_simulation_count_count);

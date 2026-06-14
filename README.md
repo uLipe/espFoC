@@ -13,12 +13,9 @@ sensing, rotor feedback and the Id/Iq torque loop. Velocity and
 position loops live in the application's regulation callback; the
 library stays focused and the hot path runs without floating-point
 math. Gains can be synthesised at build time, retuned live from the
-firmware API, persisted to NVS, or dialled in interactively through
-the bundled **espFoC Tool** desktop GUI.
+firmware API, persisted to NVS, or dialled in via the console shell.
 
-Targets: ESP32, **ESP32-C6**, ESP32-S3, ESP32-P4 (ESP-IDF v5+). The
-reference bring-up target is **ESP32-C6** (fixed-point hot path sized for
-smaller MCUs).
+Targets: ESP32, **ESP32-C6**, ESP32-S3, ESP32-P4 (ESP-IDF v5+, MCPWM required).
 
 > **3.0 is a breaking release.** The legacy continuous-time PI
 > formula and the `motor_resistance / motor_inductance / motor_inertia`
@@ -49,11 +46,11 @@ Then pick an example as a starting point:
 
 ```bash
 cd examples/axis_shell
-idf.py set-target esp32c6    # scope on USB Serial/JTAG
+idf.py set-target esp32c6
 idf.py build flash monitor
 ```
 
-Also supported: `esp32s3` (UART), `esp32p4` (USB-CDC via TinyUSB).
+Also supported: `esp32s3`, `esp32p4`.
 
 ---
 
@@ -61,8 +58,8 @@ Also supported: `esp32s3` (UART), `esp32p4` (USB-CDC via TinyUSB).
 
 ![espFoC architecture](doc/images/architecture.png)
 
-Each axis owns one inverter, one rotor sensor and (optionally) one
-current sensor. You implement a **regulation callback** that updates
+Each axis owns one **unified inverter** (PWM + current sense) and one
+**encoder**. You implement a **regulation callback** that updates
 `id_ref` / `iq_ref` each outer-loop tick; espFoC runs Clarke/Park, the
 current PIs, inverse Park, SVPWM and PWM updates. The inner current loop
 and modulation run in the **PWM ISR** at carrier frequency; a dedicated
@@ -75,36 +72,18 @@ loop* in `menuconfig`). Platform primitives (tasks, critical sections,
 timers) go through **`include/espFoC/osal/os_interface.h`** so motor code
 does not depend on FreeRTOS headers.
 
-Inverter and rotor drivers are pluggable:
+Inverter and encoder drivers are pluggable factories:
 
-- Inverters: 3-PWM MCPWM, 6-PWM MCPWM (hardware dead-time).
-- Rotor sensors: AS5600, AS5048A, quadrature via PCNT, simulated rotor (`rotor_sensor_simu` + optional `rotor_sensor_simu_wire_ud_uq` for open-loop bring-up).
-- Current sensing: ADC shunt (continuous or one-shot).
+- Inverters: `esp_foc_inverter_mcpwm_6pwm_new`, `esp_foc_inverter_mcpwm_3pwm_new` (PWM + ADC shunt, ETM wired internally).
+- Encoders: AS5600, AS5048A, quadrature via PCNT, simulated (`esp_foc_encoder_simu_new` + optional `esp_foc_encoder_simu_wire_ud_uq`).
 
 ---
-
-## Scope viewer (espFoC Tool)
-
-![espFoC Tool](doc/images/espfoc_tool_logo.svg)
-
-**espFoC Tool** is a passive scope viewer: it opens the ESPF stream port,
-decodes fixed **ESPF** frames, and plots channels in real time (OpenGL when
-available). No commands are sent to the device.
-
-See [`doc/SCOPE_TOOL.md`](doc/SCOPE_TOOL.md) and [`doc/PIVOT_SCOPE_SHELL.md`](doc/PIVOT_SCOPE_SHELL.md).
-
-```bash
-pip install -r tools/espfoc_tool/requirements.txt
-PYTHONPATH=tools python3 -m espfoc_tool.gui              # port picker
-PYTHONPATH=tools python3 -m espfoc_tool.gui --port /dev/ttyACM0
-```
 
 ### Reference firmware: `axis_shell`
 
 Motor control + **console shell** ([`doc/SHELL.md`](doc/SHELL.md), UART used by
-`idf monitor`) + **scope stream** (USB on ESP32-C6). Default build uses **FITL**
-(simulated plant); pin/ADC/encoder options in [`doc/AXIS_SHELL.md`](doc/AXIS_SHELL.md).
-After flash: `align 0`, `run 0` on the monitor, then open the tool on `ttyACM*`.
+`idf monitor`). Default build uses **FITL** (simulated plant); HW pin options in
+[`doc/AXIS_SHELL.md`](doc/AXIS_SHELL.md). After flash: `align 0`, `run 0` on the monitor.
 
 ```bash
 cd examples/axis_shell
@@ -116,8 +95,7 @@ idf.py build flash monitor
 
 ## Minimal example
 
-Encoder-based current mode with a 6-PWM MCPWM inverter, an AS5600 encoder
-and an ADC shunt. PI gains default to bypass at init; NVS or the runtime
+Unified MCPWM inverter + AS5600 encoder. PI gains default to bypass at init; NVS or the runtime
 tuner can supply tuned values.
 
 The snippet below is **illustrative** (placeholders for pins and ADC
@@ -126,13 +104,9 @@ buildable** wiring and init sequence, use
 [`examples/axis_shell/main/main.c`](examples/axis_shell/main/main.c).
 
 ```c
-#include "esp_log.h"
-#include "esp_err.h"
-#include "espFoC/inverter_6pwm_mcpwm.h"
-#include "espFoC/current_sensor_adc.h"
-#include "espFoC/rotor_sensor_as5600.h"
 #include "espFoC/esp_foc.h"
-#include "espFoC/utils/esp_foc_q16.h"
+#include "espFoC/esp_foc_inverter_mcpwm.h"
+#include "espFoC/esp_foc_encoder_as5600.h"
 
 static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {
@@ -152,11 +126,11 @@ static void regulation_callback(esp_foc_axis_t *axis_cb,
 
 void app_main(void)
 {
-    esp_foc_inverter_t     *inv    = inverter_6pwm_mpcwm_new(/* pins... */);
-    esp_foc_rotor_sensor_t *rotor  = rotor_sensor_as5600_new(/* i2c... */);
-    esp_foc_isensor_t      *shunts = /* ... ADC shunt config ... */;
+    esp_foc_inverter_t *inv = esp_foc_inverter_mcpwm_6pwm_new(
+        /* u_hi, u_lo, v_hi, v_lo, w_hi, w_lo, en, vdc, port, adc_u, adc_v, gain, shunt */);
+    esp_foc_encoder_t *enc = esp_foc_encoder_as5600_new(/* sda, scl, port */);
 
-    esp_foc_initialize_axis(&axis, inv, rotor, shunts, settings);
+    esp_foc_initialize_axis(&axis, inv, enc, settings);
     esp_foc_align_axis(&axis);
     esp_foc_run(&axis);
     esp_foc_set_regulation_callback(&axis, regulation_callback);
@@ -170,7 +144,7 @@ averages (same *Control loop* menu as downsampling).
 
 ## Examples
 
-- `examples/axis_shell` — reference firmware (ESPF scope + console shell + NVS).
+- `examples/axis_shell` — reference firmware (console shell + NVS).
 - `examples/unit_test_runner` — Unity suite for CI / QEMU.
 - `examples/test_drivers` — inverter / encoder / shunt bring-up.
 
@@ -191,19 +165,17 @@ loop contains no floating-point operations.
 ```
 espFoC/
 ├── doc/
-│   ├── images/         # architecture, espFoC Tool logo, demo gifs
-│   └── SCOPE_TOOL.md   # passive scope viewer
+├── doc/images/         # architecture, demo gifs
 ├── examples/           # axis_shell / unit_test_runner / test_drivers
-├── include/espFoC/     # public API
-├── scripts/            # esp_foc_debug.py, gen_iq31_sin_lut.py, build_samples.sh
+├── include/espFoC/     # public API (esp_foc_inverter, esp_foc_encoder, axis, shell)
+├── scripts/
 ├── source/
-│   ├── calibration/    # NVS calibration format and axis helpers
-│   ├── drivers/        # inverters, encoders, shunts, tuner bridges
-│   ├── stream/         # ESPF scope encoder + USB/UART bridges
-│   ├── motor_control/  # axis core (FOC ISR + slow loop), MPZ, Q16 helpers
-│   └── osal/           # OS abstraction (tasks, critical sections, esp_timer)
-├── test/               # Unity unit tests (run via examples/unit_test_runner)
-└── tools/espfoc_tool    # passive scope viewer (PySide6 QML / Material 3)
+│   ├── calibration/
+│   ├── drivers/        # MCPWM inverter, encoders, FITL tick
+│   ├── motor_control/  # axis core, FOC ISR, Q16 helpers
+│   ├── shell/          # espfoc_shell REPL
+│   └── osal/
+└── test/
 ```
 
 ---

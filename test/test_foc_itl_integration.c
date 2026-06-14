@@ -29,7 +29,7 @@ void tearDown(void)
     vTaskDelay(pdMS_TO_TICKS(10));
 }
 
-TEST_CASE("fitl: create returns three interfaces", "[espFoC][foc_itl]")
+TEST_CASE("fitl: create returns two interfaces", "[espFoC][foc_itl]")
 {
     esp_foc_in_the_loop_config_t cfg = {
         .r_ohm = 1.0f,
@@ -48,8 +48,8 @@ TEST_CASE("fitl: create returns three interfaces", "[espFoC][foc_itl]")
 
     TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_in_the_loop_create(&cfg, &h));
     TEST_ASSERT_NOT_NULL(h.inverter);
-    TEST_ASSERT_NOT_NULL(h.isensor);
-    TEST_ASSERT_NOT_NULL(h.rotor);
+    TEST_ASSERT_NOT_NULL(h.encoder);
+    TEST_ASSERT_NOT_NULL(h.inverter->fetch_isensors);
     TEST_ASSERT_EQUAL(10000u, h.inverter->get_inverter_pwm_rate(h.inverter));
 }
 
