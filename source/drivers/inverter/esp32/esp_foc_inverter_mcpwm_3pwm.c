@@ -23,8 +23,8 @@
  */
 
 #include "sdkconfig.h"
-#include "espFoC/driver_q16_local.h"
-#include "espFoC/inverter_3pwm_mcpwm.h"
+#include "driver_q16_local.h"
+#include "esp_foc_inverter_mcpwm_3pwm.h"
 #include "driver/mcpwm_prelude.h"
 #include "driver/gpio.h"
 #include "esp_err.h"
@@ -32,7 +32,7 @@
 #include "soc/soc_caps.h"
 
 #if SOC_ETM_SUPPORTED
-#include "inverter_mcpwm_etm.h"
+#include "esp_foc_inverter_mcpwm_etm.h"
 #endif
 
 typedef struct {

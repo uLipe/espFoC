@@ -24,14 +24,13 @@
 
 #include <math.h>
 #include <string.h>
+#include "espFoC/osal/os_interface.h"
 #include "espFoC/utils/esp_foc_q16.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
-
 #include "espFoC/drivers/esp_foc_encoder.h"
-#include "espFoC/drivers/esp_foc_encoder.h"
-#include "espFoC/esp_foc_encoder_as5048.h"
+#include "esp_foc_encoder_as5048.h"
 
 #define AS5048_ADDR_ANGLE          0x3FFFu
 #define AS5048_ADDR_CLEAR_ERR      0x0001u

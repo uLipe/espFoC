@@ -1,5 +1,6 @@
 #include "espFoC/utils/esp_foc_q16.h"
-#include "espFoC/esp_foc_encoder_pcnt.h"
+#include "espFoC/osal/os_interface.h"
+#include "esp_foc_encoder_pcnt.h"
 #include "driver/pulse_cnt.h"
 #include "esp_err.h"
 #include "esp_log.h"

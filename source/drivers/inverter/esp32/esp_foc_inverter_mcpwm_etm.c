@@ -9,12 +9,12 @@
 
 #if SOC_ETM_SUPPORTED
 
-#include "inverter_mcpwm_etm.h"
+#include "esp_foc_inverter_mcpwm_etm.h"
 
 #include "driver/mcpwm_etm.h"
 #include "esp_check.h"
 #include "esp_log.h"
-#include "isensor_adc_internal.h"
+#include "esp_foc_inverter_internal.h"
 
 static const char *TAG = "inverter_mcpwm_etm";
 

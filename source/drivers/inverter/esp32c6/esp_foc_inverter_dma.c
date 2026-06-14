@@ -17,7 +17,7 @@
 #include "hal/gdma_types.h"
 #include "soc/gdma_periph.h"
 #include "soc/lldesc.h"
-#include "isensor_adc_internal.h"
+#include "esp_foc_inverter_internal.h"
 
 #define ISENSOR_ADC_GDMA_GROUP   0
 #define ISENSOR_ADC_GDMA_PAIR    2

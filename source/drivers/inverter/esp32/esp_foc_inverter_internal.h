@@ -11,7 +11,7 @@
 #include "esp_err.h"
 #include "hal/dma_types.h"
 #include "soc/soc_caps.h"
-#include "espFoC/isensor_adc_private.h"
+#include "esp_foc_isensor_adc_private.h"
 
 #define ESP_FOC_ISENSOR_ADC_PATTERN_HZ      80000
 #define ESP_FOC_ISENSOR_ADC_NUM_CHANNELS    2

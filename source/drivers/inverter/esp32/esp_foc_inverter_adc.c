@@ -28,10 +28,12 @@
 #include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/utils/biquad_q16.h"
 #include "espFoC/utils/foc_math_q16.h"
-#include "espFoC/driver_q16_local.h"
-#include "espFoC/isensor_adc_private.h"
+#include "driver_q16_local.h"
+#include "esp_foc_isensor_adc_private.h"
 #include "espFoC/esp_foc_adc_cali_lut.h"
-#include "isensor_adc_internal.h"
+#include "esp_foc_inverter_internal.h"
+#include "espFoC/osal/os_interface.h"
+#include "espFoC/esp_foc.h"
 
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
 #include "esp_cache.h"
@@ -48,6 +50,11 @@
 #define ISENSOR_ADC_DMA_DESC_ALIGN  4
 #define ISENSOR_ADC_FRAME_BYTES     (ESP_FOC_ISENSOR_ADC_NUM_CHANNELS * SOC_ADC_DIGI_RESULT_BYTES)
 #define ISENSOR_ADC_CONVERT_LIMIT   2
+
+typedef enum {
+    ESP_FOC_ISENSOR_ADC_TRIG_SOFTWARE = 0,
+    ESP_FOC_ISENSOR_ADC_TRIG_ETM,
+} esp_foc_isensor_adc_trigger_t;
 
 static const char *TAG = "ESP_FOC_ISENSOR";
 
@@ -80,11 +87,6 @@ typedef struct {
     void *user_data;
     bool started;
 } isensor_adc_t;
-
-typedef enum {
-    ESP_FOC_ISENSOR_ADC_TRIG_SOFTWARE = 0,
-    ESP_FOC_ISENSOR_ADC_TRIG_ETM,
-} esp_foc_isensor_adc_trigger_t;
 
 DRAM_ATTR static isensor_adc_t s_isensor;
 static bool s_adc_initialized;

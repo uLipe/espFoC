@@ -15,7 +15,7 @@
 #include "esp_heap_caps.h"
 #include "esp_private/etm_interface.h"
 #include "soc/soc_etm_source.h"
-#include "isensor_adc_internal.h"
+#include "esp_foc_inverter_internal.h"
 
 #if SOC_ETM_SUPPORTED
 

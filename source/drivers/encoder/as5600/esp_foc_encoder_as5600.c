@@ -5,8 +5,9 @@
  */
 
 #include <string.h>
+#include "espFoC/osal/os_interface.h"
 #include "espFoC/utils/esp_foc_q16.h"
-#include "espFoC/esp_foc_encoder_as5600.h"
+#include "esp_foc_encoder_as5600.h"
 #include "driver/gpio.h"
 #include "driver/i2c.h"
 #include "esp_err.h"

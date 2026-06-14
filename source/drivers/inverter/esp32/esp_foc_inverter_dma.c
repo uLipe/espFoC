@@ -14,7 +14,7 @@
 #include "hal/adc_hal.h"
 #include "soc/i2s_periph.h"
 #include "esp_private/i2s_platform.h"
-#include "isensor_adc_internal.h"
+#include "esp_foc_inverter_internal.h"
 
 #define ADC_DMA_I2S_HOST    ADC_HAL_DMA_I2S_HOST
 #define ADC_DMA_INTR_MASK   BIT(9)

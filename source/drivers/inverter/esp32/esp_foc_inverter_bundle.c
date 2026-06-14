@@ -5,15 +5,15 @@
  */
 
 #include "sdkconfig.h"
-#include "espFoC/esp_foc_inverter_mcpwm.h"
-#include "espFoC/inverter_6pwm_mcpwm.h"
-#include "espFoC/inverter_3pwm_mcpwm.h"
-#include "espFoC/isensor_adc_private.h"
+#include "espFoC/drivers/esp_foc_inverter_mcpwm.h"
+#include "esp_foc_inverter_mcpwm_6pwm.h"
+#include "esp_foc_inverter_mcpwm_3pwm.h"
+#include "esp_foc_isensor_adc_private.h"
 #include "esp_log.h"
 #include "soc/soc_caps.h"
 
 #if SOC_ETM_SUPPORTED
-#include "inverter_mcpwm_etm.h"
+#include "esp_foc_inverter_mcpwm_etm.h"
 #endif
 
 static const char *TAG = "esp_foc_inv_mcpwm";
@@ -204,7 +204,7 @@ esp_foc_inverter_t *esp_foc_inverter_mcpwm_6pwm_new(int gpio_u_high, int gpio_u_
                                                     float shunt_resistance)
 {
     esp_foc_inverter_t *pwm = inverter_6pwm_mpcwm_new(gpio_u_high, gpio_u_low, gpio_v_high,
-                                                      gpio_v_low, gpio_w_high, gpio_w_lo,
+                                                      gpio_v_low, gpio_w_high, gpio_w_low,
                                                       gpio_enable, dc_link_voltage, port);
     if (pwm == NULL) {
         return NULL;

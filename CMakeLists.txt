@@ -33,19 +33,41 @@ if(CONFIG_ESP_FOC_FITL)
     endif()
 else()
     list(APPEND requires esp_driver_uart esp_driver_pcnt esp_driver_gpio esp_driver_mcpwm)
-    list(APPEND includes "source/drivers" "source/drivers/cali")
-    list(APPEND srcs    "source/drivers/inverter_3pwm_mcpwm.c"
-                        "source/drivers/inverter_6pwm_mcpwm.c"
-                        "source/drivers/esp_foc_inverter_mcpwm.c"
-                        "source/drivers/esp_foc_encoder_as5600.c"
-                        "source/drivers/esp_foc_encoder_as5048.c"
-                        "source/drivers/esp_foc_encoder_pcnt.c"
-                        "source/drivers/esp_foc_encoder_simu.c"
-                        "source/drivers/current_sensor_adc.c"
-                        "source/drivers/esp_foc_adc_cali_lut.c"
-                        "source/drivers/cali/esp_foc_adc_cali_curve.c"
-                        "source/drivers/cali/esp_foc_adc_range_extend.c"
-                        "source/osal/os_interface_idf.c")
+    list(APPEND includes "source/drivers"
+                         "source/drivers/cali"
+                         "source/drivers/encoder/as5600"
+                         "source/drivers/encoder/as5048"
+                         "source/drivers/encoder/pcnt"
+                         "source/drivers/encoder/simu")
+
+    if(target STREQUAL "esp32")
+        set(FOC_INVERTER_SOC esp32)
+    elseif(target STREQUAL "esp32c6")
+        set(FOC_INVERTER_SOC esp32c6)
+    elseif(target STREQUAL "esp32s3")
+        set(FOC_INVERTER_SOC esp32s3)
+    elseif(target STREQUAL "esp32p4")
+        set(FOC_INVERTER_SOC esp32p4)
+    else()
+        set(FOC_INVERTER_SOC esp32c6)
+    endif()
+
+    set(FOC_INV_DIR "source/drivers/inverter/${FOC_INVERTER_SOC}")
+    list(APPEND includes "${FOC_INV_DIR}")
+
+    list(APPEND srcs "${FOC_INV_DIR}/esp_foc_inverter_mcpwm_3pwm.c"
+                     "${FOC_INV_DIR}/esp_foc_inverter_mcpwm_6pwm.c"
+                     "${FOC_INV_DIR}/esp_foc_inverter_adc.c"
+                     "${FOC_INV_DIR}/esp_foc_inverter_dma.c"
+                     "${FOC_INV_DIR}/esp_foc_inverter_bundle.c"
+                     "source/drivers/encoder/as5600/esp_foc_encoder_as5600.c"
+                     "source/drivers/encoder/as5048/esp_foc_encoder_as5048.c"
+                     "source/drivers/encoder/pcnt/esp_foc_encoder_pcnt.c"
+                     "source/drivers/encoder/simu/esp_foc_encoder_simu.c"
+                     "source/drivers/esp_foc_adc_cali_lut.c"
+                     "source/drivers/cali/esp_foc_adc_cali_curve.c"
+                     "source/drivers/cali/esp_foc_adc_range_extend.c"
+                     "source/osal/os_interface_idf.c")
 
     if(target STREQUAL "esp32")
         list(APPEND srcs "source/drivers/cali/esp_foc_adc_cali_line_esp32.c")
@@ -56,15 +78,13 @@ else()
     endif()
 
     if(CONFIG_SOC_ETM_SUPPORTED)
-        list(APPEND srcs "source/drivers/isensor_adc_etm.c"
-                         "source/drivers/inverter_mcpwm_etm.c")
+        list(APPEND srcs "${FOC_INV_DIR}/esp_foc_inverter_adc_etm.c"
+                         "${FOC_INV_DIR}/esp_foc_inverter_mcpwm_etm.c")
     endif()
 
     if(target STREQUAL "esp32")
-        list(APPEND srcs "source/drivers/isensor_adc_dma_esp32.c")
         list(APPEND requires esp_driver_i2s)
     else()
-        list(APPEND srcs "source/drivers/isensor_adc_dma_gdma.c")
         list(APPEND requires esp_mm)
     endif()
 endif()

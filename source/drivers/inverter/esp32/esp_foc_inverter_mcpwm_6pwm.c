@@ -24,8 +24,8 @@
 
 #include <string.h>
 #include "sdkconfig.h"
-#include "espFoC/driver_q16_local.h"
-#include "espFoC/inverter_6pwm_mcpwm.h"
+#include "driver_q16_local.h"
+#include "esp_foc_inverter_mcpwm_6pwm.h"
 #include "espFoC/drivers/esp_foc_inverter.h"
 #include "driver/mcpwm_prelude.h"
 #include "driver/gpio.h"
@@ -34,7 +34,7 @@
 #include "soc/soc_caps.h"
 
 #if SOC_ETM_SUPPORTED
-#include "inverter_mcpwm_etm.h"
+#include "esp_foc_inverter_mcpwm_etm.h"
 #endif
 
 /*

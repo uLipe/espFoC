@@ -3,7 +3,7 @@
  */
 #pragma once
 
-#include "espFoC/drivers/encoder_interface.h"
+#include "espFoC/drivers/esp_foc_encoder.h"
 
 #ifdef __cplusplus
 extern "C" {
