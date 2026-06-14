@@ -22,7 +22,6 @@
  * SOFTWARE.
  */
 
-#include <sys/cdefs.h>
 #include "sdkconfig.h"
 #include "espFoC/driver_q16_local.h"
 #include "espFoC/inverter_3pwm_mcpwm.h"
@@ -30,6 +29,11 @@
 #include "driver/gpio.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "soc/soc_caps.h"
+
+#if SOC_ETM_SUPPORTED
+#include "inverter_mcpwm_etm.h"
+#endif
 
 typedef struct {
     int enable_gpio;
@@ -43,6 +47,9 @@ typedef struct {
     q16_t dc_link_q16;
     esp_foc_inverter_callback_t notifier;
     void *arg;
+#if SOC_ETM_SUPPORTED
+    inverter_mcpwm_etm_t etm;
+#endif
     esp_foc_inverter_t interface;
 
 }esp_foc_mcpwm_inverter_t;
@@ -230,6 +237,15 @@ esp_foc_inverter_t *inverter_3pwm_mpcwm_new(int gpio_u, int gpio_v, int gpio_w, 
                                                         MCPWM_GEN_ACTION_HIGH),
                             MCPWM_GEN_COMPARE_EVENT_ACTION_END());
     }
+
+#if SOC_ETM_SUPPORTED
+    if (inverter_mcpwm_etm_init(&mcpwms[port].etm, mcpwms[port].operators[0],
+                                (uint32_t)MCPWM_PERIOD_TOP) == ESP_OK) {
+        inverter_mcpwm_etm_register(&mcpwms[port].interface, &mcpwms[port].etm);
+    } else {
+        ESP_LOGW(TAG, "MCPWM ETM trigger init failed");
+    }
+#endif
 
     mcpwm_timer_register_event_callbacks(mcpwms[port].timer, &driver_cb, &mcpwms[port]);
     mcpwm_timer_enable(mcpwms[port].timer);

@@ -29,9 +29,9 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 
-#include "espFoC/esp_foc.h"
-#include "espFoC/drivers/rotor_sensor_interface.h"
-#include "espFoC/rotor_sensor_as5048.h"
+#include "espFoC/drivers/esp_foc_encoder.h"
+#include "espFoC/drivers/esp_foc_encoder.h"
+#include "espFoC/esp_foc_encoder_as5048.h"
 
 #define AS5048_ADDR_ANGLE          0x3FFFu
 #define AS5048_ADDR_CLEAR_ERR      0x0001u
@@ -56,7 +56,7 @@ typedef struct {
     spi_device_handle_t dev;
     spi_host_device_t host;
 
-    esp_foc_rotor_sensor_t interface;
+    esp_foc_encoder_t interface;
 } esp_foc_as5048_t;
 
 static esp_foc_as5048_t rotor_sensors[CONFIG_NOOF_AXIS];
@@ -183,13 +183,13 @@ static uint16_t read_angle_raw(esp_foc_as5048_t *obj)
     return data;
 }
 
-static uint32_t get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
+static uint32_t get_counts_per_revolution(esp_foc_encoder_t *self)
 {
     (void)self;
     return AS5048_CPR_UINT;
 }
 
-static void set_to_zero(esp_foc_rotor_sensor_t *self)
+static void set_to_zero(esp_foc_encoder_t *self)
 {
     esp_foc_as5048_t *obj = __containerof(self, esp_foc_as5048_t, interface);
     uint16_t raw = read_angle_raw(obj);
@@ -197,7 +197,7 @@ static void set_to_zero(esp_foc_rotor_sensor_t *self)
     ESP_LOGI(tag, "Setting %u [ticks] as offset.", (unsigned)obj->zero_offset);
 }
 
-static q16_t read_counts(esp_foc_rotor_sensor_t *self)
+static q16_t read_counts(esp_foc_encoder_t *self)
 {
     esp_foc_as5048_t *obj = __containerof(self, esp_foc_as5048_t, interface);
 
@@ -222,20 +222,20 @@ static q16_t read_counts(esp_foc_rotor_sensor_t *self)
     return q16_from_int((int32_t)cm);
 }
 
-static int64_t read_accumulated_counts_i64(esp_foc_rotor_sensor_t *self)
+static int64_t read_accumulated_counts_i64(esp_foc_encoder_t *self)
 {
     esp_foc_as5048_t *obj = __containerof(self, esp_foc_as5048_t, interface);
     return obj->accum_i64 + (int64_t)obj->prev_raw_iq;
 }
 
-static void set_simulation_count(esp_foc_rotor_sensor_t *self, q16_t increment_normalized)
+static void set_simulation_count(esp_foc_encoder_t *self, q16_t increment_normalized)
 {
     esp_foc_as5048_t *obj = __containerof(self, esp_foc_as5048_t, interface);
     int64_t dt = ((int64_t)increment_normalized * (int64_t)AS5048_CPR_UINT) >> 31;
     obj->accum_i64 += dt;
 }
 
-esp_foc_rotor_sensor_t *rotor_sensor_as5048_new(int pin_mosi,
+esp_foc_encoder_t *esp_foc_encoder_as5048_new(int pin_mosi,
                                                 int pin_miso,
                                                 int pin_sclk,
                                                 int pin_cs,

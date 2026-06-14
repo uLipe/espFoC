@@ -6,7 +6,7 @@
 
 #include <string.h>
 #include "espFoC/utils/esp_foc_q16.h"
-#include "espFoC/rotor_sensor_as5600.h"
+#include "espFoC/esp_foc_encoder_as5600.h"
 #include "driver/gpio.h"
 #include "driver/i2c.h"
 #include "esp_err.h"
@@ -26,7 +26,7 @@ typedef struct {
     int i2c_port;
     int32_t prev_raw_iq;
     int64_t accum_i64;
-    esp_foc_rotor_sensor_t interface;
+    esp_foc_encoder_t interface;
 } esp_foc_as5600_t;
 
 static bool i2c_bus_configured = false;
@@ -62,7 +62,7 @@ static uint16_t read_angle_sensor(int i2c_port, q16_t last_read)
     return raw;
 }
 
-static void set_to_zero(esp_foc_rotor_sensor_t *self)
+static void set_to_zero(esp_foc_encoder_t *self)
 {
     esp_foc_as5600_t *obj = __containerof(self, esp_foc_as5600_t, interface);
     uint16_t raw = read_angle_sensor(obj->i2c_port, 0) & AS5600_READING_MASK;
@@ -70,7 +70,7 @@ static void set_to_zero(esp_foc_rotor_sensor_t *self)
     ESP_LOGI(tag, "Setting %d [ticks] as offset.", obj->zero_offset);
 }
 
-static void set_zero_offset_raw_12b(esp_foc_rotor_sensor_t *self,
+static void set_zero_offset_raw_12b(esp_foc_encoder_t *self,
                                     uint16_t raw_angle)
 {
     esp_foc_as5600_t *obj = __containerof(self, esp_foc_as5600_t, interface);
@@ -78,19 +78,19 @@ static void set_zero_offset_raw_12b(esp_foc_rotor_sensor_t *self,
     ESP_LOGI(tag, "Restored %u [ticks] as zero offset (NVS).", obj->zero_offset);
 }
 
-static uint16_t get_zero_offset_12b(esp_foc_rotor_sensor_t *self)
+static uint16_t get_zero_offset_12b(esp_foc_encoder_t *self)
 {
     esp_foc_as5600_t *obj = __containerof(self, esp_foc_as5600_t, interface);
     return (uint16_t)(obj->zero_offset & (uint16_t)AS5600_READING_MASK);
 }
 
-static uint32_t get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
+static uint32_t get_counts_per_revolution(esp_foc_encoder_t *self)
 {
     (void)self;
     return AS5600_CPR_UINT;
 }
 
-static q16_t read_counts(esp_foc_rotor_sensor_t *self)
+static q16_t read_counts(esp_foc_encoder_t *self)
 {
     esp_foc_as5600_t *obj = __containerof(self, esp_foc_as5600_t, interface);
 
@@ -116,20 +116,20 @@ static q16_t read_counts(esp_foc_rotor_sensor_t *self)
     return q16_from_int((int32_t)cm);
 }
 
-static int64_t read_accumulated_counts_i64(esp_foc_rotor_sensor_t *self)
+static int64_t read_accumulated_counts_i64(esp_foc_encoder_t *self)
 {
     esp_foc_as5600_t *obj = __containerof(self, esp_foc_as5600_t, interface);
     return obj->accum_i64 + (int64_t)obj->prev_raw_iq;
 }
 
-static void set_simulation_count(esp_foc_rotor_sensor_t *self, q16_t increment_normalized)
+static void set_simulation_count(esp_foc_encoder_t *self, q16_t increment_normalized)
 {
     esp_foc_as5600_t *obj = __containerof(self, esp_foc_as5600_t, interface);
     int64_t dt = ((int64_t)increment_normalized * (int64_t)AS5600_CPR_UINT) >> 31;
     obj->accum_i64 += dt;
 }
 
-esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
+esp_foc_encoder_t *esp_foc_encoder_as5600_new(int pin_sda,
                                                 int pin_scl,
                                                 int port)
 {

@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include "espFoC/esp_foc.h"
+#include "espFoC/drivers/esp_foc_inverter.h"
 
 /**
  * @param gpio_enable     Same as inverter_6pwm_mpcwm_new(): -1 skip; >=0 active-high EN; <-1 GPIO active-low.

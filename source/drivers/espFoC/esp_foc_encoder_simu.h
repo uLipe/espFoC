@@ -3,7 +3,7 @@
  */
 #pragma once
 
-#include "espFoC/drivers/rotor_sensor_interface.h"
+#include "espFoC/drivers/encoder_interface.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,17 +15,17 @@ extern "C" {
  *        viscous load. Exposes the same counts contract as a 4096 CPR
  *        absolute encoder (AS5600-like).
  *
- * Call rotor_sensor_simu_wire_ud_uq() with pointers to the axis u_d/u_q
+ * Call esp_foc_encoder_simu_wire_ud_uq() with pointers to the axis u_d/u_q
  * (e.g. &axis->u_d.raw) so read_counts() snapshots them under a short
  * critical section before each slow-loop step.
  */
-esp_foc_rotor_sensor_t *rotor_sensor_simu_new(int port,
+esp_foc_encoder_t *esp_foc_encoder_simu_new(int port,
                                               int motor_pole_pairs,
                                               float r_ohm,
                                               float l_henry,
                                               q16_t vdc_q16);
 
-void rotor_sensor_simu_wire_ud_uq(esp_foc_rotor_sensor_t *self,
+void esp_foc_encoder_simu_wire_ud_uq(esp_foc_encoder_t *self,
                                   q16_t *ud_raw,
                                   q16_t *uq_raw);
 

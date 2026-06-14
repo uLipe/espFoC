@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include "espFoC/esp_foc.h"
+#include "espFoC/drivers/esp_foc_encoder.h"
 
 /**
  * AS5048A (SPI) rotor sensor driver.
@@ -38,7 +38,7 @@
  * @param host      SPI host (e.g. SPI2_HOST / SPI3_HOST)
  * @param port      Axis index (0..CONFIG_NOOF_AXIS-1)
  */
-esp_foc_rotor_sensor_t *rotor_sensor_as5048_new(int pin_mosi,
+esp_foc_encoder_t *esp_foc_encoder_as5048_new(int pin_mosi,
                                                 int pin_miso,
                                                 int pin_sclk,
                                                 int pin_cs,

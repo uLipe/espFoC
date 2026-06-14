@@ -1,5 +1,5 @@
 #include "espFoC/utils/esp_foc_q16.h"
-#include "espFoC/rotor_sensor_pcnt.h"
+#include "espFoC/esp_foc_encoder_pcnt.h"
 #include "driver/pulse_cnt.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -12,7 +12,7 @@ typedef struct {
     int64_t accum_i64;
     uint32_t ppr_u32;
     uint32_t pcnt_unit;
-    esp_foc_rotor_sensor_t interface;
+    esp_foc_encoder_t interface;
 } esp_foc_pcnt_t;
 
 static bool pcnt_configured = false;
@@ -31,7 +31,7 @@ static void pcnt_overflow_handler(void *arg)
     }
 }
 
-static int64_t read_accumulated_counts_i64(esp_foc_rotor_sensor_t *self)
+static int64_t read_accumulated_counts_i64(esp_foc_encoder_t *self)
 {
     int16_t raw_count;
     esp_foc_pcnt_t *obj = __containerof(self, esp_foc_pcnt_t, interface);
@@ -42,19 +42,19 @@ static int64_t read_accumulated_counts_i64(esp_foc_rotor_sensor_t *self)
     return obj->accum_i64 + (int64_t)absv;
 }
 
-static void set_to_zero(esp_foc_rotor_sensor_t *self)
+static void set_to_zero(esp_foc_encoder_t *self)
 {
     esp_foc_pcnt_t *obj = __containerof(self, esp_foc_pcnt_t, interface);
     pcnt_counter_clear(obj->pcnt_unit);
 }
 
-static uint32_t get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
+static uint32_t get_counts_per_revolution(esp_foc_encoder_t *self)
 {
     esp_foc_pcnt_t *obj = __containerof(self, esp_foc_pcnt_t, interface);
     return obj->ppr_u32 ? obj->ppr_u32 : 1u;
 }
 
-static q16_t read_counts(esp_foc_rotor_sensor_t *self)
+static q16_t read_counts(esp_foc_encoder_t *self)
 {
     int16_t raw_count;
     esp_foc_pcnt_t *obj = __containerof(self, esp_foc_pcnt_t, interface);
@@ -73,14 +73,14 @@ static q16_t read_counts(esp_foc_rotor_sensor_t *self)
     return q16_from_int((int32_t)(absv % cpr));
 }
 
-static void set_simulation_count(esp_foc_rotor_sensor_t *self, q16_t increment_normalized)
+static void set_simulation_count(esp_foc_encoder_t *self, q16_t increment_normalized)
 {
     esp_foc_pcnt_t *obj = __containerof(self, esp_foc_pcnt_t, interface);
     int64_t dt = ((int64_t)increment_normalized * (int64_t)obj->ppr_u32) >> 31;
     obj->accum_i64 += dt;
 }
 
-esp_foc_rotor_sensor_t *rotor_sensor_pcnt_new(int pin_a,
+esp_foc_encoder_t *esp_foc_encoder_pcnt_new(int pin_a,
                                             int pin_b,
                                             int port,
                                             int16_t pulses_per_revolution)
@@ -138,7 +138,7 @@ esp_foc_rotor_sensor_t *rotor_sensor_pcnt_new(int pin_a,
     return &rotor_sensors[port].interface;
 }
 #else
-esp_foc_rotor_sensor_t *rotor_sensor_pcnt_new(int pin_a,
+esp_foc_encoder_t *esp_foc_encoder_pcnt_new(int pin_a,
     int pin_b,
     int port,
     int16_t pulses_per_revolution)

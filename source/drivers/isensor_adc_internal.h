@@ -11,7 +11,7 @@
 #include "esp_err.h"
 #include "hal/dma_types.h"
 #include "soc/soc_caps.h"
-#include "espFoC/current_sensor_adc.h"
+#include "espFoC/isensor_adc_private.h"
 
 #define ESP_FOC_ISENSOR_ADC_PATTERN_HZ      80000
 #define ESP_FOC_ISENSOR_ADC_NUM_CHANNELS    2
@@ -40,7 +40,8 @@ typedef enum {
 } esp_foc_isensor_adc_state_t;
 
 #if SOC_ETM_SUPPORTED
-esp_err_t isensor_adc_etm_connect(const esp_foc_isensor_adc_etm_config_t *cfg);
+#include "esp_etm.h"
+esp_err_t isensor_adc_etm_connect(esp_etm_event_handle_t mcpwm_event);
 esp_err_t isensor_adc_etm_enable(bool enable);
 void isensor_adc_etm_disconnect(void);
 #endif

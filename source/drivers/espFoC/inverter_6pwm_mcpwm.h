@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include "espFoC/esp_foc.h"
+#include "espFoC/drivers/esp_foc_inverter.h"
 
 /**
  * @brief 6-PWM inverter driver using MCPWM (ESP-IDF MCPWM prelude API).

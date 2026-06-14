@@ -26,10 +26,16 @@
 #include "sdkconfig.h"
 #include "espFoC/driver_q16_local.h"
 #include "espFoC/inverter_6pwm_mcpwm.h"
+#include "espFoC/drivers/esp_foc_inverter.h"
 #include "driver/mcpwm_prelude.h"
 #include "driver/gpio.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "soc/soc_caps.h"
+
+#if SOC_ETM_SUPPORTED
+#include "inverter_mcpwm_etm.h"
+#endif
 
 /*
  * Notes:
@@ -52,6 +58,10 @@ typedef struct {
 
     esp_foc_inverter_callback_t notifier;
     void *arg;
+
+#if SOC_ETM_SUPPORTED
+    inverter_mcpwm_etm_t etm;
+#endif
 
     esp_foc_inverter_t interface;
 } esp_foc_mcpwm6_inverter_t;
@@ -301,6 +311,14 @@ esp_foc_inverter_t *inverter_6pwm_mpcwm_new(int gpio_u_high, int gpio_u_low,
             ESP_LOGW(TAG, "Dead-time config failed on phase %d (err=%d). Continuing without dead-time.", i, (int)err);
         }
     }
+
+#if SOC_ETM_SUPPORTED
+    if (inverter_mcpwm_etm_init(&obj->etm, obj->operators[0], (uint32_t)MCPWM_PERIOD_TOP) == ESP_OK) {
+        inverter_mcpwm_etm_register(&obj->interface, &obj->etm);
+    } else {
+        ESP_LOGW(TAG, "MCPWM ETM trigger init failed");
+    }
+#endif
 
     mcpwm_timer_event_callbacks_t driver_cb = {
         .on_full = inverter_isr,

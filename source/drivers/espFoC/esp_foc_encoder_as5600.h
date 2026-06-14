@@ -24,8 +24,8 @@
  
 #pragma once 
 
-#include "espFoC/esp_foc.h"
+#include "espFoC/drivers/esp_foc_encoder.h"
 
-esp_foc_rotor_sensor_t *rotor_sensor_as5600_new(int pin_sda,
+esp_foc_encoder_t *esp_foc_encoder_as5600_new(int pin_sda,
                                                 int pin_scl,
                                                 int port);

@@ -5,7 +5,7 @@
 #include <string.h>
 #include <stddef.h>
 #include "sdkconfig.h"
-#include "espFoC/rotor_sensor_simu.h"
+#include "espFoC/esp_foc_encoder_simu.h"
 #include "espFoC/osal/os_interface.h"
 #include "espFoC/utils/esp_foc_q16.h"
 #include "esp_log.h"
@@ -18,7 +18,7 @@
 static const char *TAG = "ROTOR_SIMU";
 
 typedef struct {
-    esp_foc_rotor_sensor_t interface;
+    esp_foc_encoder_t interface;
     q16_t *u_d;
     q16_t *u_q;
     q16_t vdc_q16;
@@ -39,12 +39,12 @@ typedef struct {
 
 static esp_foc_rotor_simu_t s_sensors[CONFIG_NOOF_AXIS];
 
-static esp_foc_rotor_simu_t *sim_from_iface(esp_foc_rotor_sensor_t *self)
+static esp_foc_rotor_simu_t *sim_from_iface(esp_foc_encoder_t *self)
 {
     return __containerof(self, esp_foc_rotor_simu_t, interface);
 }
 
-static void set_to_zero(esp_foc_rotor_sensor_t *self)
+static void set_to_zero(esp_foc_encoder_t *self)
 {
     esp_foc_rotor_simu_t *o = sim_from_iface(self);
     o->id_a = 0.0f;
@@ -55,7 +55,7 @@ static void set_to_zero(esp_foc_rotor_sensor_t *self)
     ESP_LOGI(TAG, "sim rotor: mechanical + electrical state cleared");
 }
 
-static uint32_t get_counts_per_revolution(esp_foc_rotor_sensor_t *self)
+static uint32_t get_counts_per_revolution(esp_foc_encoder_t *self)
 {
     (void)self;
     return CPR_SIMU;
@@ -92,7 +92,7 @@ static void sim_step(esp_foc_rotor_simu_t *o, q16_t ud_raw, q16_t uq_raw)
     }
 }
 
-static q16_t read_counts(esp_foc_rotor_sensor_t *self)
+static q16_t read_counts(esp_foc_encoder_t *self)
 {
     esp_foc_rotor_simu_t *o = sim_from_iface(self);
     q16_t ud = 0;
@@ -109,7 +109,7 @@ static q16_t read_counts(esp_foc_rotor_sensor_t *self)
     return q16_from_int(tick);
 }
 
-static int64_t read_accumulated_counts_i64(esp_foc_rotor_sensor_t *self)
+static int64_t read_accumulated_counts_i64(esp_foc_encoder_t *self)
 {
     esp_foc_rotor_simu_t *o = sim_from_iface(self);
     int32_t tick = (int32_t)((o->theta_m_rad / TWO_PI_F) * (float)CPR_SIMU);
@@ -117,7 +117,7 @@ static int64_t read_accumulated_counts_i64(esp_foc_rotor_sensor_t *self)
     return o->accum_ticks_i64 + (int64_t)tick;
 }
 
-static void set_simulation_count(esp_foc_rotor_sensor_t *self, q16_t increment_normalized)
+static void set_simulation_count(esp_foc_encoder_t *self, q16_t increment_normalized)
 {
     esp_foc_rotor_simu_t *o = sim_from_iface(self);
     int64_t dt = ((int64_t)increment_normalized * (int64_t)CPR_SIMU) >> 31;
@@ -132,7 +132,7 @@ static void set_simulation_count(esp_foc_rotor_sensor_t *self, q16_t increment_n
     }
 }
 
-void rotor_sensor_simu_wire_ud_uq(esp_foc_rotor_sensor_t *self,
+void esp_foc_encoder_simu_wire_ud_uq(esp_foc_encoder_t *self,
                                   q16_t *ud_raw,
                                   q16_t *uq_raw)
 {
@@ -144,7 +144,7 @@ void rotor_sensor_simu_wire_ud_uq(esp_foc_rotor_sensor_t *self,
     o->u_q = uq_raw;
 }
 
-esp_foc_rotor_sensor_t *rotor_sensor_simu_new(int port,
+esp_foc_encoder_t *esp_foc_encoder_simu_new(int port,
                                               int motor_pole_pairs,
                                               float r_ohm,
                                               float l_henry,

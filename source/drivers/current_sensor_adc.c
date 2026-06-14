@@ -29,7 +29,7 @@
 #include "espFoC/utils/biquad_q16.h"
 #include "espFoC/utils/foc_math_q16.h"
 #include "espFoC/driver_q16_local.h"
-#include "espFoC/current_sensor_adc.h"
+#include "espFoC/isensor_adc_private.h"
 #include "espFoC/esp_foc_adc_cali_lut.h"
 #include "isensor_adc_internal.h"
 
@@ -79,10 +79,12 @@ typedef struct {
     isensor_callback_t callback;
     void *user_data;
     bool started;
-#if SOC_ETM_SUPPORTED
-    esp_foc_isensor_adc_etm_config_t etm_cfg;
-#endif
 } isensor_adc_t;
+
+typedef enum {
+    ESP_FOC_ISENSOR_ADC_TRIG_SOFTWARE = 0,
+    ESP_FOC_ISENSOR_ADC_TRIG_ETM,
+} esp_foc_isensor_adc_trigger_t;
 
 DRAM_ATTR static isensor_adc_t s_isensor;
 static bool s_adc_initialized;
@@ -177,20 +179,11 @@ static void isensor_adc_rearm(isensor_adc_t *isensor)
 static esp_foc_err_t isensor_adc_apply_trigger_mode(isensor_adc_t *obj)
 {
     if (obj->trigger == ESP_FOC_ISENSOR_ADC_TRIG_ETM) {
-        esp_err_t err = isensor_adc_etm_connect(&obj->etm_cfg);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "ETM connect failed: %d", err);
-            return ESP_FOC_ERR_UNKNOWN;
-        }
-        err = isensor_adc_etm_enable(true);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "ETM enable failed: %d", err);
-            return ESP_FOC_ERR_UNKNOWN;
-        }
         adc_hal_digi_enable(false);
     } else {
         isensor_adc_etm_enable(false);
         isensor_adc_etm_disconnect();
+        adc_hal_digi_enable(true);
     }
     return ESP_FOC_OK;
 }
@@ -516,8 +509,8 @@ static void set_publish_targets(esp_foc_isensor_t *self,
     esp_foc_critical_leave();
 }
 
-esp_foc_err_t esp_foc_isensor_adc_set_trigger(esp_foc_isensor_t *isensor,
-                                              esp_foc_isensor_adc_trigger_t mode)
+static esp_foc_err_t isensor_adc_set_trigger_mode(esp_foc_isensor_t *isensor,
+                                                  esp_foc_isensor_adc_trigger_t mode)
 {
     if (isensor == NULL) {
         return ESP_FOC_ERR_INVALID_ARG;
@@ -542,24 +535,15 @@ esp_foc_err_t esp_foc_isensor_adc_set_trigger(esp_foc_isensor_t *isensor,
     return ESP_FOC_OK;
 }
 
-#if SOC_ETM_SUPPORTED
-esp_foc_err_t esp_foc_isensor_adc_set_etm_source(esp_foc_isensor_t *isensor,
-                                                 const esp_foc_isensor_adc_etm_config_t *cfg)
+void isensor_adc_set_software_trigger(esp_foc_isensor_t *isensor)
 {
-    if (isensor == NULL || cfg == NULL) {
-        return ESP_FOC_ERR_INVALID_ARG;
-    }
-    if (cfg->mcpwm_timer >= SOC_MCPWM_TIMERS_PER_GROUP) {
-        return ESP_FOC_ERR_INVALID_ARG;
-    }
-    isensor_adc_t *obj = __containerof(isensor, isensor_adc_t, interface);
-    obj->etm_cfg = *cfg;
-    if (obj->trigger == ESP_FOC_ISENSOR_ADC_TRIG_ETM) {
-        return isensor_adc_apply_trigger_mode(obj);
-    }
-    return ESP_FOC_OK;
+    (void)isensor_adc_set_trigger_mode(isensor, ESP_FOC_ISENSOR_ADC_TRIG_SOFTWARE);
 }
-#endif
+
+void isensor_adc_set_etm_trigger(esp_foc_isensor_t *isensor)
+{
+    (void)isensor_adc_set_trigger_mode(isensor, ESP_FOC_ISENSOR_ADC_TRIG_ETM);
+}
 
 esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
 {
@@ -586,10 +570,6 @@ esp_foc_isensor_t *isensor_adc_new(esp_foc_isensor_adc_config_t *config)
     s_isensor.channels[1] = config->channels[1];
     s_isensor.trigger = ESP_FOC_ISENSOR_ADC_TRIG_SOFTWARE;
     s_isensor.state = ESP_FOC_ISENSOR_ADC_STATE_IDLE;
-#if SOC_ETM_SUPPORTED
-    s_isensor.etm_cfg.mcpwm_timer = 0;
-    s_isensor.etm_cfg.event = ESP_FOC_ISENSOR_ADC_MCPWM_EVT_TIMER_TEZ;
-#endif
 
     s_isensor.adc_to_current_scale = adc_to_volts * (1.0f / (config->amp_gain * config->shunt_resistance));
     s_isensor.adc_to_current_scale_q16 = q16_from_float(2048.0f * s_isensor.adc_to_current_scale);
