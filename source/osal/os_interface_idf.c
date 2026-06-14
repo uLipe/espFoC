@@ -7,6 +7,7 @@
 #include <sys/cdefs.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include "espFoC/osal/os_interface.h"
 #include "espFoC/esp_foc.h"
 #include "esp_err.h"
 #include "esp_system.h"

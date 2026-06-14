@@ -97,7 +97,7 @@ void esp_foc_calibration_axis_boot_apply(
                  (int)cale);
         return;
     }
-    const bool gset = (axis->rotor_sensor_driver->set_zero_offset_raw_12b
+    const bool gset = (axis->encoder_driver->set_zero_offset_raw_12b
                       != NULL);
     bool off_applied = false;
     for (int i = 0; i < 2; ++i) {
@@ -121,8 +121,8 @@ void esp_foc_calibration_axis_boot_apply(
             axis->natural_direction = nat_d;
         }
         if ((aflags & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) != 0u && gset) {
-            axis->rotor_sensor_driver->set_zero_offset_raw_12b(
-                axis->rotor_sensor_driver, enc0);
+            axis->encoder_driver->set_zero_offset_raw_12b(
+                axis->encoder_driver, enc0);
             off_applied = true;
         }
     }
@@ -145,7 +145,7 @@ void esp_foc_calibration_axis_align_apply_stored_hints(
     bool *skip_dir_probe)
 {
     esp_foc_calibration_data_t cal;
-    const bool gset = (axis->rotor_sensor_driver->set_zero_offset_raw_12b
+    const bool gset = (axis->encoder_driver->set_zero_offset_raw_12b
                       != NULL);
 
     *skip_dir_probe = false;
@@ -164,8 +164,8 @@ void esp_foc_calibration_axis_align_apply_stored_hints(
         *skip_dir_probe = true;
     }
     if ((aflags & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) != 0u && gset) {
-        axis->rotor_sensor_driver->set_zero_offset_raw_12b(
-            axis->rotor_sensor_driver, enc0);
+        axis->encoder_driver->set_zero_offset_raw_12b(
+            axis->encoder_driver, enc0);
     }
     ESP_LOGD(
         TAG,
@@ -190,10 +190,10 @@ void esp_foc_calibration_axis_align_persist_snapshot(esp_foc_axis_t *axis)
     uint8_t aflags = 0;
     uint16_t z = 0;
 
-    if (axis->rotor_sensor_driver->get_zero_offset_12b != NULL) {
+    if (axis->encoder_driver->get_zero_offset_12b != NULL) {
         aflags |= ESP_FOC_CAL_ALIGN_FLAG_OFFSET;
-        z = axis->rotor_sensor_driver->get_zero_offset_12b(
-            axis->rotor_sensor_driver);
+        z = axis->encoder_driver->get_zero_offset_12b(
+            axis->encoder_driver);
     }
     if (axis->natural_direction == Q16_ONE ||
         axis->natural_direction == Q16_MINUS_ONE) {
