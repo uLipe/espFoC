@@ -1,6 +1,6 @@
 # axis_shell example
 
-Reference firmware: **console shell** on the monitor UART. No tuner/link.
+Reference firmware: **console shell** on the monitor UART.
 
 ## menuconfig
 

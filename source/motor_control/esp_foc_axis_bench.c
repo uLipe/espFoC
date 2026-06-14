@@ -45,10 +45,6 @@ esp_foc_err_t esp_foc_initialize_axis_bench(esp_foc_axis_t *axis,
     float dt_f = (pwm_rate_hz_f > 1e-9f) ? (1.0f / pwm_rate_hz_f) : 0.0f;
     float loop_fs_hz = (dt_f > 1e-9f) ? (1.0f / dt_f) : 0.0f;
 
-#if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
-    axis->magic = ESP_FOC_AXIS_MAGIC;
-#endif
-
     axis->mode = ESP_FOC_AXIS_MODE_BENCH;
     axis->bench_theta_e = config->bench_theta_e;
     axis->state = ESP_FOC_AXIS_STATE_IDLE;

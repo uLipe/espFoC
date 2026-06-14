@@ -1,9 +1,6 @@
 # Disable task watchdog so unity_run_menu() (waiting for serial input) does not trigger it
 CONFIG_ESP_TASK_WDT_EN=n
 
-# Enable tuner backend for unit tests
-CONFIG_ESP_FOC_TUNER_ENABLE=y
-
 # Enable NVS calibration overlay for unit tests
 CONFIG_ESP_FOC_CALIBRATION_NVS=y
 
@@ -11,7 +8,3 @@ CONFIG_ESP_FOC_CALIBRATION_NVS=y
 CONFIG_ESP_FOC_FITL=y
 # CONFIG_FOC_ITL_TICK_MCPWM is not set
 CONFIG_FOC_ITL_TICK_GPTIMER=y
-
-# Scope daemon + ESPF stream (unit tests)
-CONFIG_ESP_FOC_SCOPE=y
-CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS=17

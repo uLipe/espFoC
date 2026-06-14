@@ -29,7 +29,7 @@ menu "espFoC Settings"
                 Used by MCPWM inverter get_dc_link_voltage() when the constructor
                 dc_link_voltage argument is <= 0. Ud/Uq and SVPWM math assume the
                 same volt basis as this nominal rail; wrong values make small
-                tuner voltage commands map to the wrong modulation depth (e.g.
+                shell Ud/Uq commands map to the wrong modulation depth (e.g.
                 Q16_ONE=1 V treated as full bus made 0.1 V look like 10% PWM).
 
         config ESP_FOC_CUSTOM_MATH

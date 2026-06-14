@@ -558,7 +558,7 @@ static void shell_exec_tokens(int argc, char **argv)
             esp_foc_axis_t *axis = shell_require_axis(axis_id);
             if (axis != NULL) {
                 shell_printf("%s\n",
-                              err_str(esp_foc_calibration_axis_tuner_store(axis)));
+                              err_str(esp_foc_calibration_axis_store_live(axis)));
             }
             return;
         }

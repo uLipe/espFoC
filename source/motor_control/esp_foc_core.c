@@ -276,10 +276,6 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
-#if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
-    axis->magic = ESP_FOC_AXIS_MAGIC;
-#endif
-
     axis->state = ESP_FOC_AXIS_STATE_IDLE;
     axis->mode = ESP_FOC_AXIS_MODE_FOC;
     axis->bench_theta_e = 0;

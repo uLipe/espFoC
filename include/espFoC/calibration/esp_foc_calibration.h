@@ -68,9 +68,7 @@ void esp_foc_calibration_axis_align_apply_stored_hints(
 void esp_foc_calibration_axis_align_persist_snapshot(esp_foc_axis_t *axis);
 
 /** Write live tuning fields to NVS only when they differ from the stored blob. */
-esp_foc_err_t esp_foc_calibration_axis_tuner_store(esp_foc_axis_t *axis);
-
-void esp_foc_calibration_axis_tuner_clear_cache(esp_foc_axis_t *axis);
+esp_foc_err_t esp_foc_calibration_axis_store_live(esp_foc_axis_t *axis);
 
 #ifdef __cplusplus
 }

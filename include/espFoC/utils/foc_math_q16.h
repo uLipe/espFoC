@@ -109,7 +109,7 @@ static inline void esp_foc_apply_bias_q16(q16_t *v_alpha, q16_t *v_beta)
     *v_beta = q16_add(q16_mul(*v_beta, Q16_HALF), Q16_HALF);
 }
 
-/* Whole microseconds on the scope wire as Q16 float (host: raw/65536). Integer-only
+/* Whole microseconds as Q16 float (host: raw/65536). Integer-only
  * so PWM ISR paths never touch the FPU (Xtensa saves FP context elsewhere). */
 static inline q16_t hot_path_us_elapsed_to_q16(uint64_t el_us)
 {

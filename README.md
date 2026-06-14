@@ -19,8 +19,8 @@ Targets: ESP32, **ESP32-C6**, ESP32-S3, ESP32-P4 (ESP-IDF v5+, MCPWM required).
 
 > **3.0 is a breaking release.** The legacy continuous-time PI
 > formula and the `motor_resistance / motor_inductance / motor_inertia`
-> fields are gone — gains come from the build-time autotuner or the
-> runtime tuner. The 3-PWM LEDC driver was also dropped. The former
+> fields are gone — gains come from build-time synthesis, NVS calibration,
+> or the console shell. The 3-PWM LEDC driver was also dropped.
 > `esp_foc_controls.h` tunables are Kconfig options (`CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING`,
 > `CONFIG_ESP_FOC_ISENSOR_CALIBRATION_ROUNDS`). The motor regulation callback
 > is three arguments only (`id_ref`, `iq_ref`). See [`changelog.txt`](changelog.txt) for
@@ -95,8 +95,8 @@ idf.py build flash monitor
 
 ## Minimal example
 
-Unified MCPWM inverter + AS5600 encoder. PI gains default to bypass at init; NVS or the runtime
-tuner can supply tuned values.
+Unified MCPWM inverter + AS5600 encoder. PI gains default to bypass at init; NVS calibration
+or the shell `store` command can persist tuned values.
 
 The snippet below is **illustrative** (placeholders for pins and ADC
 config will not compile until you fill them in). For a **complete,
@@ -105,8 +105,8 @@ buildable** wiring and init sequence, use
 
 ```c
 #include "espFoC/esp_foc.h"
-#include "espFoC/esp_foc_inverter_mcpwm.h"
-#include "espFoC/esp_foc_encoder_as5600.h"
+#include "espFoC/drivers/esp_foc_inverter_mcpwm.h"
+#include "esp_foc_encoder_as5600.h"
 
 static esp_foc_axis_t axis;
 static esp_foc_motor_control_settings_t settings = {

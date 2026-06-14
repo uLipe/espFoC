@@ -13,8 +13,6 @@
 #include "espFoC/drivers/esp_foc_encoder.h"
 #include "espFoC/osal/os_interface.h"
 
-#define ESP_FOC_AXIS_MAGIC ((uint32_t)0xF0CA1515)
-
 typedef struct esp_foc_axis_s esp_foc_axis_t;
 
 typedef void (*esp_foc_motor_regulation_callback_t)(
@@ -33,10 +31,6 @@ typedef struct {
 } esp_foc_motor_control_settings_t;
 
 struct esp_foc_axis_s {
-#if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
-    uint32_t magic;
-#endif
-
     q16_t i_u;
     q16_t i_v;
     q16_t i_w;

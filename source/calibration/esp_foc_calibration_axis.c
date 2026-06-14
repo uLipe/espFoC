@@ -220,7 +220,7 @@ void esp_foc_calibration_axis_align_persist_snapshot(esp_foc_axis_t *axis)
     }
 }
 
-static bool tuner_tuning_fields_equal(const esp_foc_calibration_data_t *a,
+static bool calib_tuning_fields_equal(const esp_foc_calibration_data_t *a,
                                       const esp_foc_calibration_data_t *b)
 {
     return a->kp == b->kp && a->ki == b->ki && a->kd == b->kd &&
@@ -230,7 +230,7 @@ static bool tuner_tuning_fields_equal(const esp_foc_calibration_data_t *a,
            esp_foc_calibration_get_pole_pairs(b);
 }
 
-static void tuner_live_tuning_snapshot(esp_foc_axis_t *axis,
+static void calib_live_tuning_snapshot(esp_foc_axis_t *axis,
                                        esp_foc_calibration_data_t *out)
 {
     memset(out, 0, sizeof(*out));
@@ -241,14 +241,14 @@ static void tuner_live_tuning_snapshot(esp_foc_axis_t *axis,
         out, (int32_t)axis->motor_pole_pairs);
 }
 
-esp_foc_err_t esp_foc_calibration_axis_tuner_store(esp_foc_axis_t *axis)
+esp_foc_err_t esp_foc_calibration_axis_store_live(esp_foc_axis_t *axis)
 {
     esp_foc_calibration_data_t live;
-    tuner_live_tuning_snapshot(axis, &live);
+    calib_live_tuning_snapshot(axis, &live);
 
     esp_foc_calibration_data_t data;
     if (esp_foc_calibration_load(axis->cal.axis_id, &data) == ESP_FOC_OK) {
-        if (tuner_tuning_fields_equal(&live, &data)) {
+        if (calib_tuning_fields_equal(&live, &data)) {
             return ESP_FOC_OK;
         }
     } else {
@@ -282,15 +282,10 @@ void esp_foc_calibration_axis_align_persist_snapshot(esp_foc_axis_t *axis)
     (void)axis;
 }
 
-esp_foc_err_t esp_foc_calibration_axis_tuner_store(esp_foc_axis_t *axis)
+esp_foc_err_t esp_foc_calibration_axis_store_live(esp_foc_axis_t *axis)
 {
     (void)axis;
     return ESP_FOC_ERR_AXIS_INVALID_STATE;
 }
 
 #endif
-
-void esp_foc_calibration_axis_tuner_clear_cache(esp_foc_axis_t *axis)
-{
-    (void)axis;
-}
