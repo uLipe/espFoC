@@ -1,7 +1,0 @@
-module components
-SplashView 1.0 SplashView.qml
-PortDialog 1.0 PortDialog.qml
-MainShell 1.0 MainShell.qml
-ChannelPlotCard 1.0 ChannelPlotCard.qml
-ChannelPickerSheet 1.0 ChannelPickerSheet.qml
-PlotSettingsSheet 1.0 PlotSettingsSheet.qml

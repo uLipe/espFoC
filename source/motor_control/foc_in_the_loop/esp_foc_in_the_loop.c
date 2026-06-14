@@ -9,7 +9,8 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "espFoC/esp_foc.h"
+#include "espFoC/esp_foc_in_the_loop.h"
+#include "espFoC/osal/os_interface.h"
 #include "espFoC/utils/biquad_q16.h"
 #include "espFoC/utils/foc_math_q16.h"
 #include "esp_attr.h"
@@ -17,9 +18,6 @@
 
 #include "esp_foc_itl_plant.h"
 #include "esp_foc_itl_tick.h"
-#if defined(CONFIG_ESP_FOC_SCOPE)
-#include "espFoC/stream/esp_foc_scope.h"
-#endif
 
 static const char *TAG = "foc_itl";
 
@@ -65,8 +63,7 @@ typedef struct {
     bool alive;
 
     esp_foc_inverter_t inverter;
-    esp_foc_isensor_t isensor;
-    esp_foc_rotor_sensor_t rotor;
+    esp_foc_encoder_t encoder;
 } esp_foc_itl_ctx_t;
 
 static esp_foc_itl_ctx_t s_ctx;
@@ -221,46 +218,39 @@ static void itl_disable(esp_foc_inverter_t *self)
     (void)self;
 }
 
-static void itl_fetch_isensors(esp_foc_isensor_t *self, isensor_values_t *values)
+static void itl_fetch_isensors(esp_foc_inverter_t *self, esp_foc_inverter_isensor_values_t *values)
 {
     (void)self;
     (void)values;
 }
 
-static void itl_sample_isensors(esp_foc_isensor_t *self)
+static void itl_sample_isensors(esp_foc_inverter_t *self)
 {
     (void)self;
 }
 
-static void itl_calibrate_isensors(esp_foc_isensor_t *self, int calibration_rounds)
+static void itl_calibrate_isensors(esp_foc_inverter_t *self, int calibration_rounds)
 {
     (void)self;
     (void)calibration_rounds;
 }
 
-static void itl_set_isensor_callback(esp_foc_isensor_t *self, isensor_callback_t cb, void *param)
+static void itl_set_filter_cutoff(esp_foc_inverter_t *self, float fc_hz, float fs_hz)
 {
-    (void)self;
-    (void)cb;
-    (void)param;
-}
-
-static void itl_set_filter_cutoff(esp_foc_isensor_t *self, float fc_hz, float fs_hz)
-{
-    esp_foc_itl_ctx_t *ctx = (esp_foc_itl_ctx_t *)((char *)self - offsetof(esp_foc_itl_ctx_t, isensor));
+    esp_foc_itl_ctx_t *ctx = (esp_foc_itl_ctx_t *)((char *)self - offsetof(esp_foc_itl_ctx_t, inverter));
     esp_foc_critical_enter();
     esp_foc_biquad_butterworth_lpf_design_q16(&ctx->bq_u, fc_hz, fs_hz);
     esp_foc_biquad_butterworth_lpf_design_q16(&ctx->bq_v, fc_hz, fs_hz);
     esp_foc_critical_leave();
 }
 
-static void itl_set_publish_targets(esp_foc_isensor_t *self,
+static void itl_set_publish_targets(esp_foc_inverter_t *self,
                                     q16_t *i_alpha_target,
                                     q16_t *i_beta_target,
                                     q16_t *i_u_target,
                                     q16_t *i_v_target)
 {
-    esp_foc_itl_ctx_t *ctx = (esp_foc_itl_ctx_t *)((char *)self - offsetof(esp_foc_itl_ctx_t, isensor));
+    esp_foc_itl_ctx_t *ctx = (esp_foc_itl_ctx_t *)((char *)self - offsetof(esp_foc_itl_ctx_t, inverter));
     esp_foc_critical_enter();
     ctx->publish_alpha = (volatile q16_t *)i_alpha_target;
     ctx->publish_beta = (volatile q16_t *)i_beta_target;
@@ -269,47 +259,47 @@ static void itl_set_publish_targets(esp_foc_isensor_t *self,
     esp_foc_critical_leave();
 }
 
-static void itl_rotor_set_to_zero(esp_foc_rotor_sensor_t *self)
+static void itl_encoder_set_to_zero(esp_foc_encoder_t *self)
 {
-    esp_foc_itl_ctx_t *ctx = (esp_foc_itl_ctx_t *)((char *)self - offsetof(esp_foc_itl_ctx_t, rotor));
+    esp_foc_itl_ctx_t *ctx = (esp_foc_itl_ctx_t *)((char *)self - offsetof(esp_foc_itl_ctx_t, encoder));
     esp_foc_critical_enter();
     esp_foc_itl_plant_reset_parked(&ctx->plant);
     ctx->enc_accum = 0;
     esp_foc_critical_leave();
 }
 
-static uint32_t itl_rotor_get_cpr(esp_foc_rotor_sensor_t *self)
+static uint32_t itl_encoder_get_cpr(esp_foc_encoder_t *self)
 {
     (void)self;
     return ESP_FOC_ITL_CPR;
 }
 
-static q16_t itl_rotor_read_counts(esp_foc_rotor_sensor_t *self)
+static q16_t itl_encoder_read_counts(esp_foc_encoder_t *self)
 {
-    esp_foc_itl_ctx_t *ctx = (esp_foc_itl_ctx_t *)((char *)self - offsetof(esp_foc_itl_ctx_t, rotor));
+    esp_foc_itl_ctx_t *ctx = (esp_foc_itl_ctx_t *)((char *)self - offsetof(esp_foc_itl_ctx_t, encoder));
     const int32_t ticks = esp_foc_itl_plant_encoder_ticks(&ctx->plant);
     return q16_from_int(ticks);
 }
 
-static int64_t itl_rotor_read_accumulated(esp_foc_rotor_sensor_t *self)
+static int64_t itl_encoder_read_accumulated(esp_foc_encoder_t *self)
 {
-    esp_foc_itl_ctx_t *ctx = (esp_foc_itl_ctx_t *)((char *)self - offsetof(esp_foc_itl_ctx_t, rotor));
+    esp_foc_itl_ctx_t *ctx = (esp_foc_itl_ctx_t *)((char *)self - offsetof(esp_foc_itl_ctx_t, encoder));
     return ctx->enc_accum;
 }
 
-static void itl_rotor_set_simulation_count(esp_foc_rotor_sensor_t *self, q16_t increment)
+static void itl_encoder_set_simulation_count(esp_foc_encoder_t *self, q16_t increment)
 {
     (void)self;
     (void)increment;
 }
 
-static void itl_rotor_set_zero_offset_raw_12b(esp_foc_rotor_sensor_t *self, uint16_t raw_angle)
+static void itl_encoder_set_zero_offset_raw_12b(esp_foc_encoder_t *self, uint16_t raw_angle)
 {
     (void)self;
     (void)raw_angle;
 }
 
-static uint16_t itl_rotor_get_zero_offset_12b(esp_foc_rotor_sensor_t *self)
+static uint16_t itl_encoder_get_zero_offset_12b(esp_foc_encoder_t *self)
 {
     (void)self;
     return 0;
@@ -323,21 +313,19 @@ static void wire_vtables(esp_foc_itl_ctx_t *ctx)
     ctx->inverter.get_inverter_pwm_rate = itl_get_inverter_pwm_rate;
     ctx->inverter.enable = itl_enable;
     ctx->inverter.disable = itl_disable;
+    ctx->inverter.fetch_isensors = itl_fetch_isensors;
+    ctx->inverter.sample_isensors = itl_sample_isensors;
+    ctx->inverter.calibrate_isensors = itl_calibrate_isensors;
+    ctx->inverter.set_filter_cutoff = itl_set_filter_cutoff;
+    ctx->inverter.set_publish_targets = itl_set_publish_targets;
 
-    ctx->isensor.fetch_isensors = itl_fetch_isensors;
-    ctx->isensor.sample_isensors = itl_sample_isensors;
-    ctx->isensor.calibrate_isensors = itl_calibrate_isensors;
-    ctx->isensor.set_isensor_callback = itl_set_isensor_callback;
-    ctx->isensor.set_filter_cutoff = itl_set_filter_cutoff;
-    ctx->isensor.set_publish_targets = itl_set_publish_targets;
-
-    ctx->rotor.set_to_zero = itl_rotor_set_to_zero;
-    ctx->rotor.get_counts_per_revolution = itl_rotor_get_cpr;
-    ctx->rotor.read_counts = itl_rotor_read_counts;
-    ctx->rotor.read_accumulated_counts_i64 = itl_rotor_read_accumulated;
-    ctx->rotor.set_simulation_count = itl_rotor_set_simulation_count;
-    ctx->rotor.set_zero_offset_raw_12b = itl_rotor_set_zero_offset_raw_12b;
-    ctx->rotor.get_zero_offset_12b = itl_rotor_get_zero_offset_12b;
+    ctx->encoder.set_to_zero = itl_encoder_set_to_zero;
+    ctx->encoder.get_counts_per_revolution = itl_encoder_get_cpr;
+    ctx->encoder.read_counts = itl_encoder_read_counts;
+    ctx->encoder.read_accumulated_counts_i64 = itl_encoder_read_accumulated;
+    ctx->encoder.set_simulation_count = itl_encoder_set_simulation_count;
+    ctx->encoder.set_zero_offset_raw_12b = itl_encoder_set_zero_offset_raw_12b;
+    ctx->encoder.get_zero_offset_12b = itl_encoder_get_zero_offset_12b;
 }
 
 static esp_foc_itl_plant_params_t params_from_config(const esp_foc_in_the_loop_config_t *cfg)
@@ -400,9 +388,6 @@ esp_foc_err_t esp_foc_in_the_loop_create(const esp_foc_in_the_loop_config_t *cfg
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
-#if defined(CONFIG_ESP_FOC_SCOPE)
-    esp_foc_scope_initalize();
-#endif
 
     memset(&s_ctx, 0, sizeof(s_ctx));
     s_ctx.pwm_hz = fitl_pwm_hz_from_config(cfg->pwm_hz);
@@ -442,8 +427,7 @@ esp_foc_err_t esp_foc_in_the_loop_create(const esp_foc_in_the_loop_config_t *cfg
     }
 
     out->inverter = &s_ctx.inverter;
-    out->isensor = &s_ctx.isensor;
-    out->rotor = &s_ctx.rotor;
+    out->encoder = &s_ctx.encoder;
     s_created = true;
 
     ESP_LOGI(TAG, "FITL ready: ISR %lu Hz, plant %lu Hz (decim %lu), pp=%d, locked=%d",

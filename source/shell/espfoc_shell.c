@@ -309,11 +309,11 @@ static esp_foc_err_t field_set_float(esp_foc_axis_t *axis, const shell_field_t *
             return ESP_FOC_ERR_INVALID_ARG;
         }
         axis->current_filter_fc_hz_q16 = q16_from_float(val);
-        if (axis->isensor_driver != NULL &&
-            axis->isensor_driver->set_filter_cutoff != NULL) {
+        if (axis->inverter_driver != NULL &&
+            axis->inverter_driver->set_filter_cutoff != NULL) {
             float fs = q16_to_float(axis->current_filter_fs_hz_q16);
-            axis->isensor_driver->set_filter_cutoff(
-                axis->isensor_driver, val, fs);
+            axis->inverter_driver->set_filter_cutoff(
+                axis->inverter_driver, val, fs);
         }
         return ESP_FOC_OK;
     }
@@ -558,7 +558,7 @@ static void shell_exec_tokens(int argc, char **argv)
             esp_foc_axis_t *axis = shell_require_axis(axis_id);
             if (axis != NULL) {
                 shell_printf("%s\n",
-                              err_str(esp_foc_calibration_axis_tuner_store(axis)));
+                              err_str(esp_foc_calibration_axis_store_live(axis)));
             }
             return;
         }

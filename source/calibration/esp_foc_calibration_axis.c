@@ -97,7 +97,7 @@ void esp_foc_calibration_axis_boot_apply(
                  (int)cale);
         return;
     }
-    const bool gset = (axis->rotor_sensor_driver->set_zero_offset_raw_12b
+    const bool gset = (axis->encoder_driver->set_zero_offset_raw_12b
                       != NULL);
     bool off_applied = false;
     for (int i = 0; i < 2; ++i) {
@@ -121,8 +121,8 @@ void esp_foc_calibration_axis_boot_apply(
             axis->natural_direction = nat_d;
         }
         if ((aflags & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) != 0u && gset) {
-            axis->rotor_sensor_driver->set_zero_offset_raw_12b(
-                axis->rotor_sensor_driver, enc0);
+            axis->encoder_driver->set_zero_offset_raw_12b(
+                axis->encoder_driver, enc0);
             off_applied = true;
         }
     }
@@ -145,7 +145,7 @@ void esp_foc_calibration_axis_align_apply_stored_hints(
     bool *skip_dir_probe)
 {
     esp_foc_calibration_data_t cal;
-    const bool gset = (axis->rotor_sensor_driver->set_zero_offset_raw_12b
+    const bool gset = (axis->encoder_driver->set_zero_offset_raw_12b
                       != NULL);
 
     *skip_dir_probe = false;
@@ -164,8 +164,8 @@ void esp_foc_calibration_axis_align_apply_stored_hints(
         *skip_dir_probe = true;
     }
     if ((aflags & ESP_FOC_CAL_ALIGN_FLAG_OFFSET) != 0u && gset) {
-        axis->rotor_sensor_driver->set_zero_offset_raw_12b(
-            axis->rotor_sensor_driver, enc0);
+        axis->encoder_driver->set_zero_offset_raw_12b(
+            axis->encoder_driver, enc0);
     }
     ESP_LOGD(
         TAG,
@@ -190,10 +190,10 @@ void esp_foc_calibration_axis_align_persist_snapshot(esp_foc_axis_t *axis)
     uint8_t aflags = 0;
     uint16_t z = 0;
 
-    if (axis->rotor_sensor_driver->get_zero_offset_12b != NULL) {
+    if (axis->encoder_driver->get_zero_offset_12b != NULL) {
         aflags |= ESP_FOC_CAL_ALIGN_FLAG_OFFSET;
-        z = axis->rotor_sensor_driver->get_zero_offset_12b(
-            axis->rotor_sensor_driver);
+        z = axis->encoder_driver->get_zero_offset_12b(
+            axis->encoder_driver);
     }
     if (axis->natural_direction == Q16_ONE ||
         axis->natural_direction == Q16_MINUS_ONE) {
@@ -220,7 +220,7 @@ void esp_foc_calibration_axis_align_persist_snapshot(esp_foc_axis_t *axis)
     }
 }
 
-static bool tuner_tuning_fields_equal(const esp_foc_calibration_data_t *a,
+static bool calib_tuning_fields_equal(const esp_foc_calibration_data_t *a,
                                       const esp_foc_calibration_data_t *b)
 {
     return a->kp == b->kp && a->ki == b->ki && a->kd == b->kd &&
@@ -230,7 +230,7 @@ static bool tuner_tuning_fields_equal(const esp_foc_calibration_data_t *a,
            esp_foc_calibration_get_pole_pairs(b);
 }
 
-static void tuner_live_tuning_snapshot(esp_foc_axis_t *axis,
+static void calib_live_tuning_snapshot(esp_foc_axis_t *axis,
                                        esp_foc_calibration_data_t *out)
 {
     memset(out, 0, sizeof(*out));
@@ -241,14 +241,14 @@ static void tuner_live_tuning_snapshot(esp_foc_axis_t *axis,
         out, (int32_t)axis->motor_pole_pairs);
 }
 
-esp_foc_err_t esp_foc_calibration_axis_tuner_store(esp_foc_axis_t *axis)
+esp_foc_err_t esp_foc_calibration_axis_store_live(esp_foc_axis_t *axis)
 {
     esp_foc_calibration_data_t live;
-    tuner_live_tuning_snapshot(axis, &live);
+    calib_live_tuning_snapshot(axis, &live);
 
     esp_foc_calibration_data_t data;
     if (esp_foc_calibration_load(axis->cal.axis_id, &data) == ESP_FOC_OK) {
-        if (tuner_tuning_fields_equal(&live, &data)) {
+        if (calib_tuning_fields_equal(&live, &data)) {
             return ESP_FOC_OK;
         }
     } else {
@@ -282,15 +282,10 @@ void esp_foc_calibration_axis_align_persist_snapshot(esp_foc_axis_t *axis)
     (void)axis;
 }
 
-esp_foc_err_t esp_foc_calibration_axis_tuner_store(esp_foc_axis_t *axis)
+esp_foc_err_t esp_foc_calibration_axis_store_live(esp_foc_axis_t *axis)
 {
     (void)axis;
     return ESP_FOC_ERR_AXIS_INVALID_STATE;
 }
 
 #endif
-
-void esp_foc_calibration_axis_tuner_clear_cache(esp_foc_axis_t *axis)
-{
-    (void)axis;
-}

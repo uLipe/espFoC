@@ -11,14 +11,14 @@
 
 static esp_foc_axis_t axis;
 static mock_inverter_t mock_inv;
-static mock_rotor_sensor_t mock_rotor;
+static mock_encoder_t mock_rotor;
 static esp_foc_motor_control_settings_t settings;
 
 static void setup_sensored_mocks(void)
 {
     memset(&axis, 0, sizeof(axis));
     mock_inverter_init(&mock_inv, 1.0f, 20000.0f);
-    mock_rotor_sensor_init(&mock_rotor, 4096.0f);
+    mock_encoder_init(&mock_rotor, 4096.0f);
     mock_rotor.counts = 0.0f;
     settings.natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW;
     settings.motor_pole_pairs = 7;
@@ -32,8 +32,7 @@ TEST_CASE("axis init: inverter and rotor mocks called", "[espFoC][axis_flow]")
     esp_foc_err_t err = esp_foc_initialize_axis(
         &axis,
         mock_inverter_interface(&mock_inv),
-        mock_rotor_sensor_interface(&mock_rotor),
-        NULL,
+        mock_encoder_interface(&mock_rotor),
         settings);
 
     TEST_ASSERT_EQUAL(ESP_FOC_OK, err);
@@ -50,7 +49,7 @@ TEST_CASE("axis align: enable and set_duties sequence", "[espFoC][axis_flow]")
 {
     setup_sensored_mocks();
     esp_foc_initialize_axis(&axis, mock_inverter_interface(&mock_inv),
-                            mock_rotor_sensor_interface(&mock_rotor), NULL, settings);
+                            mock_encoder_interface(&mock_rotor), settings);
 
     int set_duties_before = mock_inv.set_duties_count;
     int enable_before = mock_inv.enable_count;
@@ -71,19 +70,19 @@ TEST_CASE("axis init: invalid args return error", "[espFoC][axis_flow]")
 
     TEST_ASSERT_EQUAL(ESP_FOC_ERR_INVALID_ARG,
                       esp_foc_initialize_axis(NULL, mock_inverter_interface(&mock_inv),
-                                              mock_rotor_sensor_interface(&mock_rotor), NULL, settings));
+                                              mock_encoder_interface(&mock_rotor), settings));
     TEST_ASSERT_EQUAL(ESP_FOC_ERR_INVALID_ARG,
                       esp_foc_initialize_axis(&axis, NULL,
-                                              mock_rotor_sensor_interface(&mock_rotor), NULL, settings));
+                                              mock_encoder_interface(&mock_rotor), settings));
     TEST_ASSERT_EQUAL(ESP_FOC_ERR_INVALID_ARG,
-                      esp_foc_initialize_axis(&axis, mock_inverter_interface(&mock_inv), NULL, NULL, settings));
+                      esp_foc_initialize_axis(&axis, mock_inverter_interface(&mock_inv), NULL, settings));
 }
 
 TEST_CASE("axis align: already aligned returns error", "[espFoC][axis_flow]")
 {
     setup_sensored_mocks();
     esp_foc_initialize_axis(&axis, mock_inverter_interface(&mock_inv),
-                            mock_rotor_sensor_interface(&mock_rotor), NULL, settings);
+                            mock_encoder_interface(&mock_rotor), settings);
     esp_foc_align_axis(&axis);
 
     esp_foc_err_t err = esp_foc_align_axis(&axis);
@@ -106,7 +105,7 @@ TEST_CASE("axis set_regulation_callback: stored and invalid args", "[espFoC][axi
 {
     setup_sensored_mocks();
     esp_foc_initialize_axis(&axis, mock_inverter_interface(&mock_inv),
-                            mock_rotor_sensor_interface(&mock_rotor), NULL, settings);
+                            mock_encoder_interface(&mock_rotor), settings);
     esp_foc_align_axis(&axis);
 
     axis_test_regulator_called = 0;
@@ -135,7 +134,7 @@ TEST_CASE("axis run: regulator runs and set_duties receives FOC output", "[espFo
 {
     setup_sensored_mocks();
     esp_foc_initialize_axis(&axis, mock_inverter_interface(&mock_inv),
-                            mock_rotor_sensor_interface(&mock_rotor), NULL, settings);
+                            mock_encoder_interface(&mock_rotor), settings);
     esp_foc_align_axis(&axis);
     axis_run_regulator_called_count = 0;
     esp_foc_set_regulation_callback(&axis, axis_run_regulator_cb);
@@ -157,7 +156,7 @@ TEST_CASE("axis stop: returns to idle and allows re-align", "[espFoC][axis_flow]
 {
     setup_sensored_mocks();
     esp_foc_initialize_axis(&axis, mock_inverter_interface(&mock_inv),
-                            mock_rotor_sensor_interface(&mock_rotor), NULL, settings);
+                            mock_encoder_interface(&mock_rotor), settings);
     esp_foc_align_axis(&axis);
     esp_foc_set_regulation_callback(&axis, axis_run_regulator_cb);
     TEST_ASSERT_EQUAL(ESP_FOC_OK, esp_foc_run(&axis));
@@ -181,7 +180,7 @@ TEST_CASE("axis stop: refuses while aligning", "[espFoC][axis_flow]")
 {
     setup_sensored_mocks();
     esp_foc_initialize_axis(&axis, mock_inverter_interface(&mock_inv),
-                            mock_rotor_sensor_interface(&mock_rotor), NULL, settings);
+                            mock_encoder_interface(&mock_rotor), settings);
     axis.state = ESP_FOC_AXIS_STATE_ALIGNING;
     TEST_ASSERT_EQUAL(ESP_FOC_ERR_ALIGNMENT_IN_PROGRESS, esp_foc_stop(&axis));
 }

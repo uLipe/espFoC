@@ -1,6 +1,6 @@
 # espfoc_shell (console REPL)
 
-Line-oriented commands on the **main UART** used by `idf monitor`. The scope stream (ESPF) uses a **separate** port — see [SCOPE_TOOL.md](SCOPE_TOOL.md).
+Line-oriented commands on the **main UART** used by `idf monitor`.
 
 Enable: `CONFIG_ESPFOC_SHELL=y` (default on `axis_shell`).
 
@@ -38,7 +38,7 @@ help [config|axis]
 | `set` | `set config.ki 120 0` | Write config field (RAM) |
 | `set` | `set iq 1.0 0` | Target current [A] |
 | `align` | `align 0` | `esp_foc_align_axis()` |
-| `run` | `run 0` | Start FOC — scope streams when **running** |
+| `run` | `run 0` | Start FOC |
 | `stop` | `stop 0` | `esp_foc_stop()` |
 | `store` | `store 0` | Save live tuning to NVS |
 | `erase` | `erase` | Erase all calibration NVS |
@@ -67,8 +67,6 @@ espFoC> align 0
 espFoC> set iq 0.5 0
 espFoC> run 0
 ```
-
-Open **espFoC Tool** on the USB Serial/JTAG / `ttyACM` scope port while the axis is **running**.
 
 ```text
 espFoC> stop 0

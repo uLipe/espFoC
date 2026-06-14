@@ -7,6 +7,7 @@
 #include <sys/cdefs.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include "espFoC/osal/os_interface.h"
 #include "espFoC/esp_foc.h"
 #include "esp_err.h"
 #include "esp_system.h"
@@ -30,7 +31,7 @@ int esp_foc_create_runner(foc_loop_runner runner, void *argument, int priority,
     int cpu_num = 0;
 #endif
     if (priority < 0) {
-        /* Legacy: was used for scope with -1 → RT prio 8 (too low). Prefer explicit 1–10. */
+        /* -1: default priority from level (1–10). */
         priority = (configMAX_PRIORITIES - 8);
         cpu_num = PRO_CPU_NUM;
     }

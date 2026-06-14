@@ -1,3 +1,0 @@
-# esp32s3: scope on dedicated UART (console stays on default UART0)
-CONFIG_ESP_FOC_STREAM_BRIDGE_UART=y
-CONFIG_ESP_FOC_STREAM_BRIDGE_USBCDC=n

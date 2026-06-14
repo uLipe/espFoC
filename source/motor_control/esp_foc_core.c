@@ -45,19 +45,16 @@
 
 static const char *tag = "ESP_FOC_CORE";
 
-#if defined(CONFIG_ESP_FOC_SCOPE)
-q16_t esp_foc_debug_scope_hot_path_dt_us_q16;
-#endif
 
 void esp_foc_axis_refresh_encoder_q16_scales(esp_foc_axis_t *axis)
 {
-    if (axis == NULL || axis->rotor_sensor_driver == NULL ||
-        axis->rotor_sensor_driver->get_counts_per_revolution == NULL) {
+    if (axis == NULL || axis->encoder_driver == NULL ||
+        axis->encoder_driver->get_counts_per_revolution == NULL) {
         return;
     }
     uint32_t cpr =
-        axis->rotor_sensor_driver->get_counts_per_revolution(
-            axis->rotor_sensor_driver);
+        axis->encoder_driver->get_counts_per_revolution(
+            axis->encoder_driver);
     if (cpr == 0u) {
         cpr = 1u;
     }
@@ -132,9 +129,6 @@ static void IRAM_ATTR foc_hot_isr(void *data)
     esp_foc_debug_pin_set();
 #endif
 
-#if defined(CONFIG_ESP_FOC_SCOPE)
-    uint64_t hot_path_t0 = esp_foc_now_useconds();
-#endif
 
     esp_foc_estimator_q16_step(&axis->rotor_estimator);
     axis->rotor_elec_angle =
@@ -144,8 +138,8 @@ static void IRAM_ATTR foc_hot_isr(void *data)
     q16_t i_alpha = axis->latest_i_alpha;
     q16_t i_beta = axis->latest_i_beta;
 
-    if (axis->isensor_driver != NULL) {
-        axis->isensor_driver->sample_isensors(axis->isensor_driver);
+    if (axis->inverter_driver != NULL) {
+        axis->inverter_driver->sample_isensors(axis->inverter_driver);
     }
 
     q16_t e_sin = q16_sin(q16_normalize_angle(axis->rotor_elec_angle));
@@ -190,10 +184,6 @@ static void IRAM_ATTR foc_hot_isr(void *data)
             }
         }
     }
-#if defined(CONFIG_ESP_FOC_SCOPE)
-    esp_foc_debug_scope_hot_path_dt_us_q16 =
-        calc_time_isr_q16(hot_path_t0, esp_foc_now_useconds());
-#endif
 
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
     esp_foc_debug_pin_clear();
@@ -201,7 +191,7 @@ static void IRAM_ATTR foc_hot_isr(void *data)
 }
 
 /* -------------------------------------------------------------------------
- * Slow loop: encoder measurement, scope, regulator callback trigger.
+ * Slow loop: encoder measurement and regulator callback trigger.
  * ------------------------------------------------------------------------- */
 static void core_low_speed_loop(void *arg)
 {
@@ -212,14 +202,14 @@ static void core_low_speed_loop(void *arg)
 
     ESP_LOGI(tag, "FOC outer loop (PWM ISR hot path)");
 
-    uint32_t cpr = axis->rotor_sensor_driver->get_counts_per_revolution(
-        axis->rotor_sensor_driver);
+    uint32_t cpr = axis->encoder_driver->get_counts_per_revolution(
+        axis->encoder_driver);
     if (cpr == 0u) {
         ESP_LOGE(tag, "FATAL, INVALID CPR, CHECK YOUR ROTOR SENSOR!");
         abort();
     }
 
-    axis->rotor_shaft_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+    axis->rotor_shaft_ticks = axis->encoder_driver->read_counts(axis->encoder_driver);
     axis->rotor_position = q16_mul(axis->rotor_shaft_ticks, axis->natural_direction);
     q16_t theta_meas = axis_theta_meas_mech(axis);
     esp_foc_estimator_q16_snap(&axis->rotor_estimator, theta_meas);
@@ -238,14 +228,11 @@ static void core_low_speed_loop(void *arg)
             continue;
         }
 
-        axis->rotor_shaft_ticks = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+        axis->rotor_shaft_ticks = axis->encoder_driver->read_counts(axis->encoder_driver);
         axis->rotor_position = q16_mul(axis->rotor_shaft_ticks, axis->natural_direction);
         esp_foc_estimator_q16_set_meas(&axis->rotor_estimator,
                                        axis_theta_meas_mech(axis));
 
-#if defined(CONFIG_ESP_FOC_SCOPE)
-        esp_foc_scope_data_push();
-#endif
         if (axis->regulator_ev != NULL) {
             esp_foc_send_notification(axis->regulator_ev);
         }
@@ -278,25 +265,16 @@ static void do_foc_outer_loop(void *arg)
 
 esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                       esp_foc_inverter_t *inverter,
-                                      esp_foc_rotor_sensor_t *rotor,
-                                      esp_foc_isensor_t *isensor,
+                                      esp_foc_encoder_t *encoder,
                                       esp_foc_motor_control_settings_t settings)
 {
     float pwm_rate_hz_f;
     float dt_f;
 
-    if (axis == NULL || inverter == NULL || rotor == NULL) {
+    if (axis == NULL || inverter == NULL || encoder == NULL) {
         ESP_LOGE(tag, "invalid args for axis initialization");
         return ESP_FOC_ERR_INVALID_ARG;
     }
-
-#if defined(CONFIG_ESP_FOC_SCOPE)
-    esp_foc_scope_initalize();
-#endif
-
-#if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
-    axis->magic = ESP_FOC_AXIS_MAGIC;
-#endif
 
     axis->state = ESP_FOC_AXIS_STATE_IDLE;
     axis->mode = ESP_FOC_AXIS_MODE_FOC;
@@ -307,8 +285,7 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->regulator_ev = NULL;
     axis->low_speed_ev = NULL;
     axis->inverter_driver = inverter;
-    axis->rotor_sensor_driver = rotor;
-    axis->isensor_driver = isensor;
+    axis->encoder_driver = encoder;
     esp_foc_calibration_axis_init_store(axis, &settings);
 
     axis->vdc_q16 = axis->inverter_driver->get_dc_link_voltage(axis->inverter_driver);
@@ -328,13 +305,11 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->target_i_d.raw = 0;
     axis->target_i_q.raw = 0;
 
-    if (isensor != NULL) {
-        axis->isensor_driver->calibrate_isensors(axis->isensor_driver,
-                                                 CONFIG_ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
+    if (axis->inverter_driver->calibrate_isensors != NULL) {
+        axis->inverter_driver->calibrate_isensors(axis->inverter_driver,
+                                                  CONFIG_ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
     }
 
-    /* Current-loop PIDs: default bypass (Kp=Ki=Kd=0, Kff=1). NVS overlay
-     * may replace gains after this block. */
     float loop_dt_s = dt_f;
     float loop_fs_hz = (loop_dt_s > 1e-9f) ? (1.0f / loop_dt_s) : 0.0f;
     q16_t loop_dt = q16_from_float(loop_dt_s);
@@ -347,36 +322,27 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
                                  ESP_FOC_VPU_ONE_Q16);
     }
 
-    /* Resolve the current-sensor low-pass cutoff. Precedence at boot:
-     *   1. NVS calibration overlay (when its current_filter_fc != 0).
-     *   2. CONFIG_ESP_FOC_CURRENT_FILTER_CUTOFF_HZ (default 300 Hz).
-     * The runtime tuner can override later via the protocol. */
     float current_filter_fc_hz = (float)CONFIG_ESP_FOC_CURRENT_FILTER_CUTOFF_HZ;
 
-    /* If a tuned calibration exists for this axis, override default bypass.
-     * NVS load is a cold path; failure skips the overlay silently. */
     axis->natural_direction =
         (settings.natural_direction == ESP_FOC_MOTOR_NATURAL_DIRECTION_CW) ? Q16_ONE
                                                                          : Q16_MINUS_ONE;
     axis->motor_pole_pairs = settings.motor_pole_pairs;
     esp_foc_calibration_axis_boot_apply(axis, &current_filter_fc_hz, loop_fs_hz);
 
-    if (isensor != NULL && axis->isensor_driver->set_filter_cutoff != NULL) {
-        axis->isensor_driver->set_filter_cutoff(axis->isensor_driver,
-                                                current_filter_fc_hz,
-                                                loop_fs_hz);
+    if (axis->inverter_driver->set_filter_cutoff != NULL) {
+        axis->inverter_driver->set_filter_cutoff(axis->inverter_driver,
+                                                 current_filter_fc_hz,
+                                                 loop_fs_hz);
     }
     axis->current_filter_fc_hz_q16 = q16_from_float(current_filter_fc_hz);
     axis->current_filter_fs_hz_q16 = q16_from_float(loop_fs_hz);
 
     axis->latest_i_alpha = 0;
     axis->latest_i_beta = 0;
-    /* Wire the ADC ISR's Clarke-publish path straight into the axis
-     * fields the PWM ISR will read. NULL targets disable publishing,
-     * so this is also the opt-in point for the new pipeline. */
-    if (isensor != NULL && axis->isensor_driver->set_publish_targets != NULL) {
-        axis->isensor_driver->set_publish_targets(
-            axis->isensor_driver,
+    if (axis->inverter_driver->set_publish_targets != NULL) {
+        axis->inverter_driver->set_publish_targets(
+            axis->inverter_driver,
             (q16_t *)&axis->latest_i_alpha,
             (q16_t *)&axis->latest_i_beta,
             &axis->i_u,
@@ -399,18 +365,8 @@ esp_foc_err_t esp_foc_initialize_axis(esp_foc_axis_t *axis,
     axis->torque_controller[0].ke = Q16_ONE;
     axis->torque_controller[1].ke = Q16_ONE;
 
-    /* natural_direction: defaults above; NVS may have overridden;
-     * esp_foc_align_axis() probes and overrides unless NVS has a
-     * stored direction bit. */
-
 #ifdef CONFIG_ESP_FOC_DEBUG_CORE_TIMING
     esp_foc_debug_pin_init(CONFIG_ESP_FOC_DEBUG_PIN);
-#endif
-
-#if defined(CONFIG_ESP_FOC_SCOPE) && CONFIG_ESP_FOC_SCOPE_NUM_CHANNELS == 17
-    if (esp_foc_scope_wire_axis(axis) != ESP_FOC_OK) {
-        ESP_LOGW(tag, "scope wire_axis skipped or failed");
-    }
 #endif
 
     esp_foc_sleep_ms(250);
@@ -454,8 +410,8 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 
     /* Step 2 — zero the encoder. The current physical position is now
      * the firmware's electrical zero. */
-    axis->rotor_sensor_driver->set_to_zero(axis->rotor_sensor_driver);
-    q16_t ticks_zero = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+    axis->encoder_driver->set_to_zero(axis->encoder_driver);
+    q16_t ticks_zero = axis->encoder_driver->read_counts(axis->encoder_driver);
     q16_t delta = 0;
 
     /* Step 3 — Cog the rotor by applying small VQ and check direction change*/
@@ -469,7 +425,7 @@ esp_foc_err_t esp_foc_align_axis(esp_foc_axis_t *axis)
 
             esp_foc_sleep_ms(ESP_FOC_DIR_SWEEP_MS_PER_STEP);
 
-        q16_t ticks_after_fwd = axis->rotor_sensor_driver->read_counts(axis->rotor_sensor_driver);
+        q16_t ticks_after_fwd = axis->encoder_driver->read_counts(axis->encoder_driver);
         delta = q16_sub(ticks_after_fwd, ticks_zero);
     }
 

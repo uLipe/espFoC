@@ -24,31 +24,26 @@ static void bench_park_inverter_safe(esp_foc_axis_t *axis)
 
 static void bench_apply_filter(esp_foc_axis_t *axis, float fc_hz, float fs_hz)
 {
-    if (axis->isensor_driver == NULL ||
-        axis->isensor_driver->set_filter_cutoff == NULL) {
+    if (axis->inverter_driver == NULL ||
+        axis->inverter_driver->set_filter_cutoff == NULL) {
         return;
     }
-    axis->isensor_driver->set_filter_cutoff(axis->isensor_driver, fc_hz, fs_hz);
+    axis->inverter_driver->set_filter_cutoff(axis->inverter_driver, fc_hz, fs_hz);
     axis->current_filter_fc_hz_q16 = q16_from_float(fc_hz);
     axis->current_filter_fs_hz_q16 = q16_from_float(fs_hz);
 }
 
 esp_foc_err_t esp_foc_initialize_axis_bench(esp_foc_axis_t *axis,
                                             esp_foc_inverter_t *inverter,
-                                            esp_foc_isensor_t *isensor,
                                             const esp_foc_axis_bench_config_t *config)
 {
-    if (axis == NULL || inverter == NULL || isensor == NULL || config == NULL) {
+    if (axis == NULL || inverter == NULL || config == NULL) {
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
     float pwm_rate_hz_f = (float)inverter->get_inverter_pwm_rate(inverter);
     float dt_f = (pwm_rate_hz_f > 1e-9f) ? (1.0f / pwm_rate_hz_f) : 0.0f;
     float loop_fs_hz = (dt_f > 1e-9f) ? (1.0f / dt_f) : 0.0f;
-
-#if defined(CONFIG_ESP_FOC_TUNER_ENABLE)
-    axis->magic = ESP_FOC_AXIS_MAGIC;
-#endif
 
     axis->mode = ESP_FOC_AXIS_MODE_BENCH;
     axis->bench_theta_e = config->bench_theta_e;
@@ -59,8 +54,7 @@ esp_foc_err_t esp_foc_initialize_axis_bench(esp_foc_axis_t *axis,
     axis->regulator_ev = NULL;
     axis->low_speed_ev = NULL;
     axis->inverter_driver = inverter;
-    axis->rotor_sensor_driver = NULL;
-    axis->isensor_driver = isensor;
+    axis->encoder_driver = NULL;
     axis->motor_pole_pairs = config->motor.motor_pole_pairs;
     axis->natural_direction = (config->motor.natural_direction ==
                                ESP_FOC_MOTOR_NATURAL_DIRECTION_CW)
@@ -85,20 +79,20 @@ esp_foc_err_t esp_foc_initialize_axis_bench(esp_foc_axis_t *axis,
 
     inverter->set_duties(inverter, 0, 0, 0);
 
-    if (config->calibrate_isensor_at_init) {
-        isensor->calibrate_isensors(isensor, CONFIG_ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
+    if (config->calibrate_isensor_at_init && inverter->calibrate_isensors != NULL) {
+        inverter->calibrate_isensors(inverter, CONFIG_ESP_FOC_ISENSOR_CALIBRATION_ROUNDS);
     }
 
     float fc_hz = (float)CONFIG_ESP_FOC_CURRENT_FILTER_CUTOFF_HZ;
     esp_foc_calibration_axis_boot_apply(axis, &fc_hz, loop_fs_hz);
     bench_apply_filter(axis, fc_hz, loop_fs_hz);
 
-    if (isensor->set_publish_targets != NULL) {
-        isensor->set_publish_targets(isensor,
-                                     (q16_t *)&axis->latest_i_alpha,
-                                     (q16_t *)&axis->latest_i_beta,
-                                     &axis->i_u,
-                                     &axis->i_v);
+    if (inverter->set_publish_targets != NULL) {
+        inverter->set_publish_targets(inverter,
+                                      (q16_t *)&axis->latest_i_alpha,
+                                      (q16_t *)&axis->latest_i_beta,
+                                      &axis->i_u,
+                                      &axis->i_v);
     }
 
     ESP_LOGI(TAG, "bench axis ready (theta_e=%f rad)",
@@ -146,10 +140,10 @@ esp_foc_err_t esp_foc_bench_step(esp_foc_axis_t *axis)
         return ESP_FOC_ERR_AXIS_INVALID_STATE;
     }
 
-    if (axis->isensor_driver != NULL) {
-        axis->isensor_driver->sample_isensors(axis->isensor_driver);
-        isensor_values_t val;
-        axis->isensor_driver->fetch_isensors(axis->isensor_driver, &val);
+    if (axis->inverter_driver != NULL && axis->inverter_driver->sample_isensors != NULL) {
+        axis->inverter_driver->sample_isensors(axis->inverter_driver);
+        esp_foc_inverter_isensor_values_t val;
+        axis->inverter_driver->fetch_isensors(axis->inverter_driver, &val);
         axis->i_u = val.iu_axis_0;
         axis->i_v = val.iv_axis_0;
         axis->i_w = val.iw_axis_0;

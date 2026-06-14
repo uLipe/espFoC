@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2021 Felipe Neves
  *
- * axis_shell — FOC axis with ESPF scope stream (USB) and console shell (UART).
+ * axis_shell — FOC axis with console shell (UART).
  */
 
 #include "esp_log.h"
@@ -16,26 +16,23 @@
 #if defined(CONFIG_ESP_FOC_FITL) && CONFIG_ESP_FOC_FITL
 #include "espFoC/esp_foc_in_the_loop.h"
 #else
-#include "espFoC/inverter_6pwm_mcpwm.h"
+#include "espFoC/drivers/esp_foc_inverter_mcpwm.h"
 #if defined(CONFIG_AXIS_TUNING_ROTOR_AS5600)
-#include "espFoC/rotor_sensor_as5600.h"
+#include "esp_foc_encoder_as5600.h"
 #elif defined(CONFIG_AXIS_TUNING_ROTOR_SIMU)
-#include "espFoC/rotor_sensor_simu.h"
+#include "esp_foc_encoder_simu.h"
 #endif
-#include "espFoC/current_sensor_adc.h"
-#include "soc/soc_caps.h"
 #endif
 
 static const char *TAG = "axis_shell";
 
 static esp_foc_axis_t s_axis;
 static esp_foc_inverter_t *s_inverter;
-static esp_foc_rotor_sensor_t *s_rotor;
-static esp_foc_isensor_t *s_shunts;
+static esp_foc_encoder_t *s_encoder;
 
 static void regulation_stub(esp_foc_axis_t *axis,
-                              esp_foc_d_current_q16_t *id_ref,
-                              esp_foc_q_current_q16_t *iq_ref)
+                            esp_foc_d_current_q16_t *id_ref,
+                            esp_foc_q_current_q16_t *iq_ref)
 {
     (void)axis;
     (void)id_ref;
@@ -79,10 +76,9 @@ void app_main(void)
         return;
     }
     s_inverter = fitl.inverter;
-    s_rotor = fitl.rotor;
-    s_shunts = fitl.isensor;
+    s_encoder = fitl.encoder;
 #else
-    s_inverter = inverter_6pwm_mpcwm_new(
+    s_inverter = esp_foc_inverter_mcpwm_6pwm_new(
         CONFIG_AXIS_TUNING_PWM_U_HI,
         CONFIG_AXIS_TUNING_PWM_U_LO,
         CONFIG_AXIS_TUNING_PWM_V_HI,
@@ -91,61 +87,49 @@ void app_main(void)
         CONFIG_AXIS_TUNING_PWM_W_LO,
         pwm_enable_gpio(),
         (float)CONFIG_AXIS_TUNING_DC_LINK_V,
-        0);
+        0,
+        (adc_channel_t)CONFIG_AXIS_TUNING_ISENSE_CH_U,
+        (adc_channel_t)CONFIG_AXIS_TUNING_ISENSE_CH_V,
+        (float)CONFIG_AXIS_TUNING_ISENSE_AMP_GAIN_X100 / 100.0f,
+        (float)CONFIG_AXIS_TUNING_ISENSE_SHUNT_MOHM / 1000.0f);
     if (s_inverter == NULL) {
         ESP_LOGE(TAG, "inverter init failed");
         return;
     }
 
 #if defined(CONFIG_AXIS_TUNING_ROTOR_AS5600)
-    s_rotor = rotor_sensor_as5600_new(
+    s_encoder = esp_foc_encoder_as5600_new(
         CONFIG_AXIS_TUNING_ENC_SDA,
         CONFIG_AXIS_TUNING_ENC_SCL,
         0);
 #elif defined(CONFIG_AXIS_TUNING_ROTOR_SIMU)
     q16_t vdc = q16_from_float((float)CONFIG_AXIS_TUNING_DC_LINK_V);
-    s_rotor = rotor_sensor_simu_new(
+    s_encoder = esp_foc_encoder_simu_new(
         0,
         CONFIG_AXIS_TUNING_POLE_PAIRS,
         (float)CONFIG_AXIS_TUNING_SIMU_R_MILLIOHM / 1000.0f,
         (float)CONFIG_AXIS_TUNING_SIMU_L_MICROHENRY / 1000000.0f,
         vdc);
 #endif
-    if (s_rotor == NULL) {
-        ESP_LOGE(TAG, "rotor sensor init failed");
-        return;
-    }
-
-    esp_foc_isensor_adc_config_t shunt_cfg = {
-        .channels = {(adc_channel_t)CONFIG_AXIS_TUNING_ISENSE_CH_U,
-                      (adc_channel_t)CONFIG_AXIS_TUNING_ISENSE_CH_V},
-        .unit = (CONFIG_AXIS_TUNING_ISENSE_ADC_UNIT == 2)
-                     ? ADC_UNIT_2
-                     : ADC_UNIT_1,
-        .amp_gain = (float)CONFIG_AXIS_TUNING_ISENSE_AMP_GAIN_X100 / 100.0f,
-        .shunt_resistance = (float)CONFIG_AXIS_TUNING_ISENSE_SHUNT_MOHM / 1000.0f,
-    };
-    s_shunts = isensor_adc_new(&shunt_cfg);
-    if (s_shunts == NULL) {
-        ESP_LOGE(TAG, "current sensor init failed");
+    if (s_encoder == NULL) {
+        ESP_LOGE(TAG, "encoder init failed");
         return;
     }
 #endif
 
     esp_foc_motor_control_settings_t settings = {
-        .motor_pole_pairs  = CONFIG_AXIS_TUNING_POLE_PAIRS,
+        .motor_pole_pairs = CONFIG_AXIS_TUNING_POLE_PAIRS,
         .natural_direction = ESP_FOC_MOTOR_NATURAL_DIRECTION_CW,
-        .motor_unit        = 0,
+        .motor_unit = 0,
     };
 
-    if (esp_foc_initialize_axis(&s_axis, s_inverter, s_rotor, s_shunts,
-                                settings) != ESP_FOC_OK) {
+    if (esp_foc_initialize_axis(&s_axis, s_inverter, s_encoder, settings) != ESP_FOC_OK) {
         ESP_LOGE(TAG, "axis init failed");
         return;
     }
 
 #if defined(CONFIG_AXIS_TUNING_ROTOR_SIMU) && (!defined(CONFIG_ESP_FOC_FITL) || !CONFIG_ESP_FOC_FITL)
-    rotor_sensor_simu_wire_ud_uq(s_rotor, &s_axis.u_d.raw, &s_axis.u_q.raw);
+    esp_foc_encoder_simu_wire_ud_uq(s_encoder, &s_axis.u_d.raw, &s_axis.u_q.raw);
 #endif
 
     esp_foc_set_regulation_callback(&s_axis, regulation_stub);
@@ -155,8 +139,7 @@ void app_main(void)
     espfoc_shell_start();
 #endif
 
-    ESP_LOGI(TAG,
-             "shell on UART (monitor); scope ESPF on USB-JTAG (ttyACM*) after run");
+    ESP_LOGI(TAG, "shell on UART (idf monitor)");
 
     while (1) {
         esp_foc_sleep_ms(500);
