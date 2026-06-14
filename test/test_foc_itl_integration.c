@@ -13,7 +13,8 @@
 #include "espFoC/esp_foc_err.h"
 #include "espFoC/utils/esp_foc_q16.h"
 
-#define FITL_ITL_POLL_MS  500
+/* At CONFIG_FREERTOS_HZ=100 each vTaskDelay(1) is 10 ms → 100 ticks ≈ 1 s. */
+#define FITL_ITL_POLL_TICKS  100
 
 static volatile int s_tick_cb_count;
 
@@ -65,8 +66,8 @@ TEST_CASE("fitl: tick invokes inverter callback", "[espFoC][foc_itl]")
     h.inverter->set_inverter_callback(h.inverter, fitl_count_tick, NULL);
     s_tick_cb_count = 0;
 
-    for (int ms = 0; ms < FITL_ITL_POLL_MS && s_tick_cb_count == 0; ++ms) {
-        vTaskDelay(pdMS_TO_TICKS(1));
+    for (int i = 0; i < FITL_ITL_POLL_TICKS && s_tick_cb_count == 0; ++i) {
+        vTaskDelay(1);
     }
 
     TEST_ASSERT_GREATER_THAN_MESSAGE(0, s_tick_cb_count,

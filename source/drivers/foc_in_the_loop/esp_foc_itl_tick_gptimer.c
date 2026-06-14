@@ -36,6 +36,8 @@ esp_foc_err_t esp_foc_itl_tick_start(esp_foc_itl_tick_cb_t cb, void *arg, uint32
         return ESP_FOC_ERR_INVALID_ARG;
     }
 
+    esp_foc_itl_tick_stop();
+
     s_cb = cb;
     s_cb_arg = arg;
 
