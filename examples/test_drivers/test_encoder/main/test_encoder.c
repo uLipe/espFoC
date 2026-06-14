@@ -4,11 +4,11 @@
 
 #include "esp_log.h"
 
-#include "espFoC/esp_foc_encoder_as5600.h"
+#include "esp_foc_encoder_as5600.h"
 #include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/osal/os_interface.h"
 #if defined(CONFIG_AXIS_TUNING_ENCODER_AS5048)
-#include "espFoC/esp_foc_encoder_as5048.h"
+#include "esp_foc_encoder_as5048.h"
 #include "driver/spi_common.h"
 #endif
 
@@ -47,7 +47,7 @@ void app_main(void)
 
     while (1) {
         q16_t ticks = enc->read_counts(enc);
-        ESP_LOGI(TAG, "counts=%lld", (long long)q16_to_int(ticks));
+        ESP_LOGI(TAG, "counts=%lld", (long long)(int32_t)q16_to_float(ticks));
         esp_foc_sleep_ms(100);
     }
 }

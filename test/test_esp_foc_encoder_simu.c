@@ -7,7 +7,7 @@
 #include <unity.h>
 #include <math.h>
 #include "espFoC/utils/esp_foc_q16.h"
-#include "espFoC/esp_foc_encoder_simu.h"
+#include "esp_foc_encoder_simu.h"
 
 #define MANY_STEPS 5000
 

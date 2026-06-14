@@ -8,7 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "espFoC/esp_foc.h"
-#include "espFoC/esp_foc_inverter_mcpwm.h"
+#include "espFoC/drivers/esp_foc_inverter_mcpwm.h"
 
 static const char *TAG = "isensor_char";
 

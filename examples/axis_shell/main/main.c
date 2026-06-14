@@ -16,11 +16,11 @@
 #if defined(CONFIG_ESP_FOC_FITL) && CONFIG_ESP_FOC_FITL
 #include "espFoC/esp_foc_in_the_loop.h"
 #else
-#include "espFoC/esp_foc_inverter_mcpwm.h"
+#include "espFoC/drivers/esp_foc_inverter_mcpwm.h"
 #if defined(CONFIG_AXIS_TUNING_ROTOR_AS5600)
-#include "espFoC/esp_foc_encoder_as5600.h"
+#include "esp_foc_encoder_as5600.h"
 #elif defined(CONFIG_AXIS_TUNING_ROTOR_SIMU)
-#include "espFoC/esp_foc_encoder_simu.h"
+#include "esp_foc_encoder_simu.h"
 #endif
 #endif
 

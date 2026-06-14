@@ -10,19 +10,12 @@
 #include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/utils/foc_math_q16.h"
 #include "espFoC/utils/modulator.h"
-
-#ifdef CONFIG_FOC_TEST_6_PWM
-#include "espFoC/inverter_6pwm_mcpwm.h"
-#else
-#include "espFoC/inverter_3pwm_mcpwm.h"
-#endif
+#include "espFoC/drivers/esp_foc_inverter_mcpwm.h"
 
 static const char *TAG = "esp-foc-example";
 
 static esp_foc_inverter_t *inverter;
 
-/* Same wire encoding as inverter_*_mcpwm_new: -1 = unused; else negative
- * GPIO index means active low on that pin. */
 static int mcpwm_enable_gpio_from_kconfig(void)
 {
     if (CONFIG_FOC_PWM_EN_PIN < 0) {
@@ -40,7 +33,7 @@ static void initialize_foc_drivers(void)
 {
     const int en = mcpwm_enable_gpio_from_kconfig();
 #ifdef CONFIG_FOC_TEST_6_PWM
-    inverter = inverter_6pwm_mpcwm_new(
+    inverter = esp_foc_inverter_mcpwm_6pwm_new(
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_UL_PIN,
         CONFIG_FOC_PWM_V_PIN,
@@ -49,25 +42,30 @@ static void initialize_foc_drivers(void)
         CONFIG_FOC_PWM_WL_PIN,
         en,
         24.0f,
-        0
-    );
+        0,
+        ADC_CHANNEL_1,
+        ADC_CHANNEL_5,
+        50.0f,
+        0.01f);
 #else
-    inverter = inverter_3pwm_mpcwm_new(
+    inverter = esp_foc_inverter_mcpwm_3pwm_new(
         CONFIG_FOC_PWM_U_PIN,
         CONFIG_FOC_PWM_V_PIN,
         CONFIG_FOC_PWM_W_PIN,
         en,
         24.0f,
-        0
-    );
+        0,
+        ADC_CHANNEL_1,
+        ADC_CHANNEL_5,
+        50.0f,
+        0.01f);
 #endif
 
-    if(inverter == NULL) {
+    if (inverter == NULL) {
         ESP_LOGE(TAG, "failed to create the inverter driver, aborting!");
         ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
         abort();
     }
-
 }
 
 void app_main(void)
@@ -77,13 +75,12 @@ void app_main(void)
     const q16_t step = q16_mul(q16_from_float(0.2f), Q16_INV_TWO_PI);
 
     initialize_foc_drivers();
-    /* Phase voltages [V]; zero → centred PWM (driver converts to duty). */
     inverter->set_duties(inverter, 0, 0, 0);
     inverter->enable(inverter);
     ESP_LOGI(TAG, "Observe if the motor runs!");
     esp_foc_sleep_ms(500);
 
-    while(1) {
+    while (1) {
         q16_t e_sin = q16_sin(theta);
         q16_t e_cos = q16_cos(theta);
 
