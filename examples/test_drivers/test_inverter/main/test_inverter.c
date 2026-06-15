@@ -10,7 +10,7 @@
 #include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/utils/foc_math_q16.h"
 #include "espFoC/utils/modulator.h"
-#include "espFoC/drivers/esp_foc_inverter_mcpwm.h"
+#include "esp_foc_inverter_mcpwm.h"
 
 static const char *TAG = "esp-foc-example";
 

@@ -5,7 +5,7 @@
  */
 
 #include "sdkconfig.h"
-#include "espFoC/drivers/esp_foc_inverter_mcpwm.h"
+#include "esp_foc_inverter_mcpwm.h"
 #include "esp_foc_inverter_mcpwm_6pwm.h"
 #include "esp_foc_inverter_mcpwm_3pwm.h"
 #include "esp_foc_isensor_adc_private.h"

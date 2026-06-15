@@ -64,7 +64,7 @@ fix_includes() {
             -e 's|"espFoC/driver_q16_local.h"|"driver_q16_local.h"|g' \
             -e 's|"isensor_adc_internal.h"|"esp_foc_inverter_internal.h"|g' \
             -e 's|"inverter_mcpwm_etm.h"|"esp_foc_inverter_mcpwm_etm.h"|g' \
-            -e 's|"espFoC/esp_foc_inverter_mcpwm.h"|"espFoC/drivers/esp_foc_inverter_mcpwm.h"|g' \
+            -e 's|"espFoC/esp_foc_inverter_mcpwm.h"|"esp_foc_inverter_mcpwm.h"|g' \
             -e 's|"espFoC/esp_foc_encoder_as5600.h"|"esp_foc_encoder_as5600.h"|g' \
             -e 's|"espFoC/esp_foc_encoder_as5048.h"|"esp_foc_encoder_as5048.h"|g' \
             -e 's|"espFoC/esp_foc_encoder_pcnt.h"|"esp_foc_encoder_pcnt.h"|g' \

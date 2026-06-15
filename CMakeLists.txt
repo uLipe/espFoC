@@ -34,6 +34,7 @@ if(CONFIG_ESP_FOC_FITL)
 else()
     list(APPEND requires esp_driver_uart esp_driver_pcnt esp_driver_gpio esp_driver_mcpwm)
     list(APPEND includes "source/drivers"
+                         "source/drivers/include"
                          "source/drivers/cali"
                          "source/drivers/encoder/as5600"
                          "source/drivers/encoder/as5048"
