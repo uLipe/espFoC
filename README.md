@@ -73,7 +73,7 @@ timers) go through **`include/espFoC/osal/os_interface.h`** so motor code
 does not depend on FreeRTOS headers.
 
 Inverter and encoder drivers are pluggable factories under
-`source/drivers/include/` (inverters) and `source/drivers/encoder/` (encoders):
+`source/drivers/inverter/include/` (inverters) and `source/drivers/encoder/` (encoders):
 
 - Inverters: `esp_foc_inverter_mcpwm_6pwm_new`, `esp_foc_inverter_mcpwm_3pwm_new` (PWM + ADC shunt, ETM wired internally).
 - Encoders: AS5600, AS5048A, quadrature via PCNT, simulated (`esp_foc_encoder_simu_new` + optional `esp_foc_encoder_simu_wire_ud_uq`).
@@ -173,7 +173,8 @@ espFoC/
 ├── source/
 │   ├── calibration/
 │   ├── drivers/        # MCPWM inverter, encoders, FITL tick
-│   │   └── include/    # driver factories (derived-class _new APIs)
+│   │   └── inverter/
+│   │       └── include/  # MCPWM inverter factories (_new APIs)
 │   ├── motor_control/  # axis core, FOC ISR, Q16 helpers
 │   ├── shell/          # espfoc_shell REPL
 │   └── osal/
