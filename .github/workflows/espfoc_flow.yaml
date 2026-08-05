@@ -1,0 +1,186 @@
+name: Build
+on: push
+jobs:
+  build:
+    name: Test compiling
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install python
+      uses: actions/setup-python@v2
+      with:
+
+        # XXX install python 3.8 because the official python package
+        # segfaults when installing modules in the runner.
+        #
+        # 2020-09-03T02:29:58.2517141Z Successfully installed cffi-1.14.2 cryptography-3.1 future-0.18.2 pycparser-2.20 pyparsing-2.3.1 pyserial-3.4 setuptools-50.1.0 six-1.15.0
+        # 2020-09-03T02:30:09.0409148Z /home/runner/work/_temp/66c91304-eef8-456d-84a1-7299428a62f7.sh: line 5:  4140 Segmentation fault      (core dumped) python3 -m pip install --user -r ${IDF_PATH}/requirements.txt
+        # 2020-09-03T02:30:09.0414254Z ##[error]Process completed with exit code 139.
+        #
+        # possibly related issue:
+        # https://github.com/actions/virtual-environments/issues/159
+        python-version: 3.8
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get install \
+          bison \
+          ccache \
+          flex \
+          gcc \
+          git \
+          gperf \
+          libffi-dev \
+          libncurses-dev \
+          libssl-dev \
+          make \
+          wget
+
+    - name: Checkout the SDK
+      uses: actions/checkout@v2
+      with:
+        repository: espressif/esp-idf
+        path: idf
+        submodules: recursive
+        ref: release/v5.5
+
+    - name: Build Samples
+      run: |
+        ./idf/install.sh
+        . ./idf/export.sh
+        pushd examples/axis_shell
+        idf.py set-target esp32s3
+        idf.py build
+        rm -rf build sdkconfig
+        idf.py set-target esp32c6
+        idf.py build
+        rm -rf build sdkconfig
+        popd
+        pushd examples/test_drivers/test_current_sense
+        idf.py set-target esp32s3
+        idf.py build
+        popd
+        pushd examples/test_drivers/test_encoder
+        idf.py set-target esp32s3
+        idf.py build
+        popd
+        pushd examples/test_drivers/test_inverter
+        idf.py set-target esp32s3
+        idf.py build
+        popd
+        pushd examples/test_drivers/test_voltage_path
+        idf.py set-target esp32s3
+        idf.py build
+        popd
+
+  python_tests:
+    name: espFoC Tool host tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install host deps
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libegl1 libxkbcommon0 libdbus-1-3
+        python -m pip install --upgrade pip
+        pip install -r tools/espfoc_tool/requirements.txt
+
+    - name: Run host test suite
+      env:
+        QT_QPA_PLATFORM: offscreen
+        PYTHONPATH: ${{ github.workspace }}/tools
+        ESPFOC_TOOL_NO_GL: "1"
+      run: |
+        python -m pytest tools/espfoc_tool/tests/ -v --tb=short
+
+  unit_tests:
+    name: Unit tests (build and run on QEMU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.8'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          bison ccache flex gcc git gperf libffi-dev libncurses-dev libssl-dev make wget \
+          libgcrypt20 libglib2.0-0 libpixman-1-0 libsdl2-2.0-0 libslirp0
+
+    - name: Checkout ESP-IDF
+      uses: actions/checkout@v4
+      with:
+        repository: espressif/esp-idf
+        path: idf
+        submodules: recursive
+        ref: release/v5.5
+
+    - name: Install ESP-IDF and pytest-embedded
+      run: |
+        ./idf/install.sh --enable-ci
+        . ./idf/export.sh
+
+    - name: Install QEMU for ESP32
+      run: |
+        . ./idf/export.sh
+        python $IDF_PATH/tools/idf_tools.py install qemu-xtensa
+
+    - name: Build unit test runner (esp32 for QEMU)
+      run: |
+        . ./idf/export.sh
+        cd examples/unit_test_runner
+        idf.py set-target esp32
+        idf.py -D TEST_COMPONENTS=espFoC build
+
+    - name: Run unit tests on QEMU
+      timeout-minutes: 15
+      env:
+        IDF_PATH: ${{ github.workspace }}/idf
+      run: |
+        . ./idf/export.sh
+        pip install pexpect
+        cd examples/unit_test_runner
+        python run_unit_tests_qemu.py
+
+    - name: Shell QEMU smoke (axis_shell FITL)
+      timeout-minutes: 10
+      run: |
+        . ./idf/export.sh
+        cd examples/axis_shell
+        idf.py set-target esp32
+        idf.py build
+        python3 ../../scripts/run_shell_qemu.py
+
+    - name: Build unit test runner (esp32c6 compile check)
+      run: |
+        . ./idf/export.sh
+        cd examples/unit_test_runner
+        idf.py set-target esp32c6
+        idf.py -D TEST_COMPONENTS=espFoC build
+
+    # Optional: run on real device on self-hosted runner (ESPPORT set).
+    - name: Run unit tests on device
+      env:
+        IDF_PATH: ${{ github.workspace }}/idf
+      run: |
+        . ./idf/export.sh
+        cd examples/unit_test_runner
+        idf.py set-target esp32s3
+        idf.py -D TEST_COMPONENTS=espFoC build
+        pytest pytest_espfoc_unittest.py -m generic -v
+      continue-on-error: true

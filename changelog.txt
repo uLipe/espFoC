@@ -1,0 +1,163 @@
+# espFoC Changelog (from 2.0.0)
+
+This file is used to generate GitHub releases. All versions from 2.0.0 onward are listed here.
+
+---
+
+## Unreleased
+
+### Added
+
+- **ESPF scope stream** — TX-only binary frames (`ESPF` magic, fixed channel count); `esp_foc_stream_bridge` (UART / USB Serial-JTAG / TinyUSB CDC).
+- **`esp_foc_scope_wire_axis()`** — standard 17ch map wired from `esp_foc_initialize_axis()`; `esp_foc_scope_is_initialized()` for tests.
+- **`esp_foc_notify_runner()`** — task notify from task or ISR without separate push paths.
+- **`CONFIG_ESP_FOC_SCOPE_DAEMON_PRIORITY`** — scope runner priority (default 3) so the daemon is not starved by FOC/FITL tasks.
+- **espfoc_shell** — console REPL on the monitor UART (`align`, `run`, `stop`, `set iq/id`, `store`, `list axis`); parser in `espfoc_shell_parse.c` with Unity tests.
+- **espFoC Tool (passive viewer)** — PySide6/QML Material 3 scope GUI; decodes ESPF only, no host commands. Catalog `axis_shell_17ch.py`.
+- **`examples/axis_shell`** — reference app: FITL default, 17ch scope, shell + stream on separate ports (C6: UART monitor + USJ).
+- **Debug scripts** — `scripts/esp_foc_debug.py`, `scripts/run_shell_qemu.py` (FITL shell smoke on QEMU).
+- **Docs** — `doc/PIVOT_SCOPE_SHELL.md`, `doc/SHELL.md`, `doc/AXIS_SHELL.md`, `doc/SCOPE_CHANNELS.md`, `doc/SCOPE_TOOL.md` (app ↔ tool integration guide).
+- **Unity** — `test_esp_foc_scope.c` (scope init + 17ch wire via axis init).
+
+### Removed
+
+- **gui_link / tuner stack** — `esp_foc_tuner`, `esp_foc_link_session`, link protocol, `espfocctl`, TunerStudio-era host control path.
+- **`examples/axis_tuning`**, **`doc/TUNING.md`**, tuner/link unit tests and managed TinyUSB copy in the example tree.
+- **Stream bridge stub** — `CONFIG_ESP_FOC_SCOPE=y` requires UART or USBCDC bridge.
+
+### Changed
+
+- **espFoC Tool** is RX-only (scope viewer); motor control via firmware shell, not host writes. Plot grid reflows to the window and scrolls when needed.
+- **CI** — builds `axis_shell` (esp32s3/esp32c6); host pytest; Unity on QEMU + shell smoke test.
+- **Scope daemon** — init before high-priority runners; owns notify handle via `esp_foc_create_runner`; explicit TX bank; `SCOPE_BUFFER_SIZE=8` in axis_shell.
+- **FITL plant** — decimated by `CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING` so the 20 kHz ISR does not starve FOC/shell; MCPWM tick uses UP count mode.
+- **USJ stream bridge** — non-blocking TX, no hot-path logs (drops frames silently when the host buffer is full).
+
+### Archived (squashed commit)
+
+- **TunerStudio → espFoC Tool control era** (history squashed into one commit): interactive host tuning, link protocol v2, `axis_tuning` reference firmware, espFoC Tool config/current/control views.
+
+### Removed (earlier unreleased notes)
+
+- **`legacy/` tree** removed (observer implementations and `test_observers_q16.c`). Sensorless angle observers are not part of the supported component surface; use a hardware rotor sensor or `rotor_sensor_simu` for bring-up.
+- **Example rename:** `examples/axis_sensored` → `examples/axis_simple` (main `axis_simple.c`, `hw_axis_simple.kconfig`, CMake `project(axis_simple)`).
+- **`esp_foc_controls.h` removed:** use Kconfig `CONFIG_ESP_FOC_LOW_SPEED_DOWNSAMPLING` and `CONFIG_ESP_FOC_ISENSOR_CALIBRATION_ROUNDS`. FOC PWM ISR and encoder slow loop are inlined in `esp_foc_core.c`; `esp_foc_axis_t` no longer carries internal runner callback pointers (user `regulation_cb` unchanged).
+
+### Features
+
+- **Tuner `CMD_PING` (0x00B4):** minimal EXEC with no payload; host tools use it for link liveness so periodic tuner polls are not conflated with CONNECTED / NO LINK. espFoC Studio runs ping every 5 s on the poll worker thread (independent of poll cadence).
+- **FOC current loop runs inside the PWM ISR.** Park / current PI / inverse Park / SVPWM / `set_voltages` execute at the full PWM rate (40 kHz default) instead of the legacy `pwm_rate / decimation` (2 kHz). The user `regulation_callback` keeps running on its task at 2 kHz so user code rate is unchanged; the inner current loop bandwidth ceiling jumps roughly 20x. Gated by `CONFIG_ESP_FOC_ISR_HOT_PATH` (default y); legacy 2.x task path stays available when n.
+- **Alpha-beta angle tracker** (`include/espFoC/utils/angle_predictor_q16.h`) remains available as a standalone module with unit tests (`test/test_angle_predictor.c`); it is **not** wired into the PWM ISR — the hot path uses **`rotor_elec_angle`** updated from the outer encoder loop.
+- **Clarke-publish path inside ADC drivers.** Both continuous and one-shot ADC drivers now apply offset + gain + Clarke right after the per-channel biquad in the ADC ISR and atomic-write `i_alpha` / `i_beta` into operator-supplied Q16 sinks. The PWM ISR reads the published values directly — zero blocking, zero critical sections in the hot path. Wired through the new `set_publish_targets()` interface method.
+- **`esp_foc_scope_data_push_from_isr()`** — ISR-safe variant of the scope push that uses `xTaskNotifyGiveFromISR`. Scope buffer storage flips from `float` to `q16_t` so the float conversion happens in the daemon thread (Xtensa FPU context save in ISRs is non-trivial).
+- **Build-time autotuner alignment.** `CONFIG_ESP_FOC_AUTOGEN_DECIMATION` defaults to 1 when ISR_HOT_PATH is on (matches the new loop rate); the PID controllers in core init pick `loop_dt = pwm_period` to integrate at the rate they actually fire at. No manual retune needed when flipping the flag.
+
+### Considered, ruled out
+
+- **Plan #3 — IPC offload of sin/cos to the other core.** `esp_ipc_isr_call` callback must be assembly on Xtensa, no async completion notification (only busy-wait variants), and the LUT-based sin+cos already runs in the order of hundreds of cycles — IPI round-trip would dwarf the win.
+
+### BREAKING CHANGES (major)
+
+- **`esp_foc_isensor_t` interface grew `set_publish_targets`.** Existing user-supplied isensor implementations need to add the method (a no-op stub is acceptable).
+- **EMA helper retired.** `include/espFoC/utils/ema_low_pass_filter.h` and `esp_foc_lp_filter_t` are gone. Every consumer (current filtering, velocity estimate, PLL observer, KF observer) migrated to the new 2nd-order Butterworth biquad in `include/espFoC/utils/biquad_q16.h`. Application code that called `esp_foc_low_pass_filter_*` directly must port to `esp_foc_biquad_q16_*` and `esp_foc_biquad_butterworth_lpf_design_q16()`.
+- **`esp_foc_axis_t` shrank.** The two `current_filters[2]` EMAs are gone — the per-phase Butterworth lives inside the isensor driver, applied to raw ADC counts before the gain conversion. `velocity_filter` keeps its slot but switches type from `esp_foc_lp_filter_t` to `esp_foc_biquad_q16_t`.
+- **Moving-average dropped from both ADC drivers.** `current_sensor_adc.c` and `current_sensor_adc_one_shot.c` no longer buffer `ESP_FOC_LOW_SPEED_DOWNSAMPLING` samples per channel and average them. Each fresh count goes through a per-channel biquad inside the ADC ISR. Consumers see the same `fetch_isensors()` interface.
+- **`esp_foc_isensor_t` interface grew `set_filter_cutoff(self, fc_hz, fs_hz)`.** Existing user-supplied isensor implementations must add the method (a no-op stub is acceptable).
+
+### Features
+
+- **Discrete 2nd-order Butterworth low-pass filter** (`biquad_q16`) with bilinear-prewarped designer. Direct-Form-II Transposed for fixed-point stability; coefficients land in Q16.16; DC gain exactly unity, perfect zero at Nyquist by construction.
+- **Per-phase current sense filtering** runs inside the isensor driver, fed straight from the ADC interrupt. Cutoff defaults to `CONFIG_ESP_FOC_CURRENT_FILTER_CUTOFF_HZ` (300 Hz), overridable at runtime via tuner protocol, persisted in NVS calibration.
+- **Tuner protocol additions:** `PARAM_I_FILTER_FC_Q16` (0x0014, read), `WRITE_I_FILTER_FC_Q16` (0x0023). Writes re-run the Butterworth designer per-phase under critical section and emit a LOG-channel breadcrumb. The calibration NVS payload claims 4 of its 16 reserved bytes for the cutoff (schema version unchanged at 1; old blobs migrate silently with cutoff=0 → use default).
+- **TunerStudio:** new "I-LPF fc" live readout and spinbox + "Apply current LPF cutoff" button on the Tuning tab. The Generate App tab bakes the live cutoff into the produced project's NVS image and into the main.c header comment.
+- **`tunerctl cutoff [--set HZ]`** subcommand for scripted use.
+
+---
+
+## 3.0.0
+
+### BREAKING CHANGES (major)
+
+- **Settings struct slimmed down:** `motor_resistance`, `motor_inductance` and `motor_inertia` were removed from `esp_foc_motor_control_settings_t`. Current-loop gains come from the build-time MPZ autotuner (selected via `CONFIG_ESP_FOC_MOTOR_PROFILE`), the new NVS calibration overlay, or the runtime tuner. The old continuous-time formula was the maybe-good-maybe-not codepath and is gone.
+- **Legacy LEDC PWM driver removed:** `inverter_3pwm_ledc.[ch]` and `CONFIG_ESP_FOC_ENABLE_LEGACY_LEDC_PWM` are gone. Use the 3-PWM or 6-PWM MCPWM drivers.
+- **Sensorless example removed:** `examples/axis_sensorless/` was a placeholder behind a compile guard while the rotor-observer integration is reworked. It will return when the observer chain is wired into the axis again.
+- **Tuner motion-target IDs renumbered:** moved 0x0050..0x0053 → 0x0060..0x0063 to make room for `PARAM_FIRMWARE_TYPE` (0x0050). Affects only consumers that hardcode the wire IDs; the C symbols and the Python protocol mirror are updated in lockstep.
+
+### Features
+
+- **NVS calibration overlay** (`esp_foc_calibration_*` API). Tune live, save once, every subsequent boot comes up already tuned with no host attached. Each blob carries an FNV-1a profile hash of `<motor_profile>:<schema_version>` so a calibration tuned on motor A can never be silently loaded on motor B. Wire format: `[magic=0xE5F0CC11][version=1][profile_hash:u32][crc32:u32][payload_len:u16][pad][payload bytes]`. Gated by `CONFIG_ESP_FOC_CALIBRATION_NVS` (default y when the tuner backend is enabled).
+- **Auto natural-direction probe in `esp_foc_align_axis()`.** After the initial parking, the routine drives a short positive `Vq` pulse and watches the encoder delta to decide whether the encoder counts up or down on physical forward motion. `settings.natural_direction` becomes a hint used only when the rotor refuses to deflect (load-stuck, open phase, dead encoder).
+- **`tuner_studio_target` service-mode firmware** (`examples/tuner_studio_target`). Boots, parks the motor, attaches the axis to the runtime tuner, advertises `'TSGX'` through the new `esp_foc_tuner_firmware_type()` weak hook so TunerStudio recognises the target on connect. USB-CDC default on S3/P4, UART on plain ESP32.
+- **Tuner protocol additions:** `CMD_ALIGN_AXIS`, `CMD_PERSIST_NVS`, `CMD_LOAD_NVS`, `CMD_ERASE_NVS`, `PARAM_NVS_PRESENT`, `PARAM_FIRMWARE_TYPE`. Blocking commands stream progress on the LOG link channel so the GUI's log viewer / CLI can surface alignment and persistence status.
+- **TunerStudio:** Align button, Save / Load / Erase calibration buttons, calibration status indicator, LOG-channel viewer in the Tuning panel; new Hardware tab with target-aware GPIO / ADC dropdowns; new Generate App tab that renders a self-contained IDF project from the live tuning state plus the Hardware tab values, with a bit-exact `nvs_calibration.bin` when `nvs_partition_gen.py` is on `$IDF_PATH`. The Generate App tab is conditional on `firmware_type == 'TSGX'`.
+- **`tunerctl` CLI:** `align`, `persist`, `load`, `erase`, `firmware-type` subcommands.
+- **CI:** new `python_tests` job runs the host suite (link codec, tuner protocol, analysis, codegen, GUI smoke under `QT_QPA_PLATFORM=offscreen`); `tuner_studio_target` is built for esp32s3 (USB-CDC) + esp32 (UART) on every push.
+
+### Bug fixes
+
+- `idf_component.yml` `esp_tinyusb` rule used the wrong key (`idf_target` instead of `target`); the dependency was never auto-fetched on USB-capable targets. Fixed.
+- QEMU runner timed out flakily because Unity's prompt was raced; runner now expects `"Enter test for running"` explicitly and uses a 300 s timeout.
+- LinkReader / LoopbackTransport busy-looped reading 0 bytes when the demo firmware had nothing to send, starving the Qt event loop down to ~10 FPS. Switched to `threading.Condition` so reads block efficiently.
+
+### Other
+
+- Docs revamp: README is now concise and TunerStudio-first; deep tuning reference lives in `doc/TUNING.md`.
+- Internal: `esp_foc_initialize_axis()` lost ~35 lines of duplicated `#if` branching once the float fallback was deleted.
+
+---
+
+## 2.0.0
+
+### BREAKING CHANGES (major)
+
+- **Servo API removed:** Built-in position and velocity control are no longer part of the library. `esp_foc_set_target_position` and `esp_foc_set_target_speed` (and related servo APIs) have been removed.
+- **Motor control is now fully callback-driven:** The application must implement the regulation loop by setting Id/Iq references and Ud/Uq feedforward in the `esp_foc_motor_regulation_callback_t`. Axis state (e.g. `rotor_position`, `current_speed`, currents) is read from the axis struct for use in custom velocity/position or torque logic.
+- **Sine PWM modulation removed:** Space vector PWM (SVPWM) is now the default and only modulation method.
+- **Examples layout changed:** The old examples from the 1.5.x API were removed for simplification and due to the breaking API changes in 2.0. Example projects are now organized under `examples/axis_sensored`, `examples/axis_sensorless`, and `examples/test_drivers` (inverter, voltage path, current sense). Use `axis_sensored` as the main reference for building and flashing.
+
+### Features
+
+- Callback-based regulation API: user-defined callback runs in the outer loop and sets `target_i_d`, `target_i_q`, `target_u_d`, `target_u_q`.
+- Current-mode FOC sensored: Id/Iq closed loop with rotor sensor (e.g. encoder, AS5600) and ADC shunt current sensing.
+- Current-mode FOC sensorless (experimental): Id/Iq closed loop with observer-based rotor estimation; open-loop startup with 1st-order current regulator and output clamp.
+- Observer: Kalman filter-based angle estimator for sensorless mode.
+- Observer: PMSM model-based observer (detailed model).
+- Observer: PLL observer refactored to use vector phase detector; lock detector based on error variance.
+- Observer: Simulated observer restored and used for open-loop/sensorless startup; filter on I-alpha/beta before Back-EMF estimator.
+- 6-PWM MCPWM inverter driver: complementary outputs, hardware dead-time; enable pin can be invertible (negative GPIO value).
+- 3-PWM MCPWM inverter driver (LEDC-based also available).
+- ADC one-shot current sensor driver: interrupt-based, optional analog encoder channel borrowing.
+- AS5048 magnetic encoder driver (SPI).
+- AS5600: bus check read at init for quick validation.
+- Scope utility: refactored to allow custom transmission bus; CSV format; extra channels for SVPWM output and Vq/Vd command; user-placed measurements.
+- Slow-mode FOC: voltage and current control run at a multiple of PWM rate, outside ISR, in high-priority task; ADC and angle sampled in sync.
+- Voltage normalization pipeline refactored for best use of DC bus (sine or SVPWM).
+- PID: anti-windup simplified; discretization for current PI.
+- Low-pass filters configurable by cutoff frequency (current and observer).
+- Debug pin moved to OSAL; build and include path reorganized (motor_control, observers, osal).
+- Rust FFI layer (experimental; can be disabled).
+- Examples: `axis_sensored` (main sensored current-mode demo), `axis_sensorless`, and `test_drivers` (inverter, voltage path, current sense bring-up).
+
+### Bug fixes
+
+- Rust FFI: rotor sensor parameter fixed.
+- ADC one-shot: interrupt handling fixed when conversion done (enable and flag clear registers).
+- 6-PWM MCPWM: dead-time insertion and waveform polarity corrected; dead-time calculation improved, default reduced to limit PWM distortion.
+- Sensorless: observer integration time fixed (phase drift).
+- Sensorless: avoid sampling currents in true open-loop mode.
+- Observer: normalized angle result assigned correctly.
+- Core: observer downsampling factor fixed.
+- 3-PWM MCPWM: remove IRAM_ATTR to fix build (IRAM via linker instead).
+- Simulated observer: torque formula corrected.
+- Current control: pipeline and coefficient calculation order fixed; low-pass filter cutoff set via dedicated function.
+- Voltage mode slow: compiler warning fixed.
+- Drivers: FPU operations removed from ISR.
+- Control: sensorless startup and log (esp_log) usage adjusted.
+
+### Other
+
+- CI: IDF version bumped to 5.5.
+- Docs: README updated for 2.0.0 (architecture, control modes, quick start ^2.0.0, example path axis_sensored); documentation and demo GIF updated.
+- Dependencies: idf >= 5.0; targets esp32, esp32s3, esp32p4.
+
+---

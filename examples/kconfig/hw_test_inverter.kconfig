@@ -1,0 +1,50 @@
+menu "test_inverter — hardware (MCPWM)"
+
+    config FOC_PWM_U_PIN
+        int "GPIO: phase U (high) or 3-PWM U"
+        range 0 54
+        default 19
+
+    config FOC_PWM_V_PIN
+        int "GPIO: phase V (high) or 3-PWM V"
+        range 0 54
+        default 20
+
+    config FOC_PWM_W_PIN
+        int "GPIO: phase W (high) or 3-PWM W"
+        range 0 54
+        default 3
+
+    config FOC_PWM_EN_PIN
+        int "Gate driver enable GPIO (set to -1 if not connected)"
+        range -1 54
+        default 14
+
+    config FOC_PWM_EN_ACT_LOW
+        bool "Active-low enable (inverted)"
+        default n
+        depends on FOC_PWM_EN_PIN >= 0
+
+    config FOC_TEST_6_PWM
+        bool "6-PWM (complementary) vs 3 half-bridge outputs"
+        default n
+
+    config FOC_PWM_UL_PIN
+        int "GPIO: phase U (low) — 6-PWM only"
+        depends on FOC_TEST_6_PWM
+        range 0 54
+        default 21
+
+    config FOC_PWM_VL_PIN
+        int "GPIO: phase V (low) — 6-PWM only"
+        range 0 54
+        depends on FOC_TEST_6_PWM
+        default 10
+
+    config FOC_PWM_WL_PIN
+        int "GPIO: phase W (low) — 6-PWM only"
+        range 0 54
+        depends on FOC_TEST_6_PWM
+        default 11
+
+endmenu
