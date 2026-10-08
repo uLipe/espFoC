@@ -1,0 +1,179 @@
+menu "espFoC example: sensored servo"
+
+    menu "Board: inverter"
+
+        config EXAMPLE_PWM_U_HIGH_GPIO
+            int "Phase U high-side gate GPIO"
+            range 0 30
+            default 18
+
+        config EXAMPLE_PWM_U_LOW_GPIO
+            int "Phase U low-side gate GPIO"
+            range 0 30
+            default 19
+
+        config EXAMPLE_PWM_V_HIGH_GPIO
+            int "Phase V high-side gate GPIO"
+            range 0 30
+            default 20
+
+        config EXAMPLE_PWM_V_LOW_GPIO
+            int "Phase V low-side gate GPIO"
+            range 0 30
+            default 21
+
+        config EXAMPLE_PWM_W_HIGH_GPIO
+            int "Phase W high-side gate GPIO"
+            range 0 30
+            default 22
+
+        config EXAMPLE_PWM_W_LOW_GPIO
+            int "Phase W low-side gate GPIO"
+            range 0 30
+            default 23
+
+        config EXAMPLE_BRIDGE_ENABLE_GPIO
+            int "Bridge enable GPIO (-1 = not wired)"
+            range -1 30
+            default 15
+            help
+                Gate-driver enable line. The driver holds it in the disabled
+                level from init until the controller arms the bridge.
+
+        config EXAMPLE_BRIDGE_ENABLE_ACTIVE_LOW
+            bool "Bridge enable is active low"
+            depends on EXAMPLE_BRIDGE_ENABLE_GPIO >= 2
+            default y
+            help
+                Active-low enable needs GPIO 2 or above.
+
+        config EXAMPLE_PWM_DEAD_TIME_NS
+            int "Dead time between high and low side [ns]"
+            range 100 5000
+            default 500
+            help
+                Pick it from the gate driver and MOSFET datasheets: long
+                enough that both FETs of a leg are never on together.
+
+        config EXAMPLE_BRIDGE_TRIP_MA
+            int "Software current trip [mA]"
+            range 100 50000
+            default 4000
+            help
+                Any phase current above this turns the bridge off within one
+                PWM period. Keep it under what the bridge and the winding
+                tolerate.
+
+    endmenu
+
+    menu "Board: current sense"
+
+        config EXAMPLE_CURRENT_U_GPIO
+            int "Phase U current sense GPIO (ADC)"
+            range 0 30
+            default 5
+
+        config EXAMPLE_CURRENT_V_GPIO
+            int "Phase V current sense GPIO (ADC)"
+            range 0 30
+            default 4
+
+        config EXAMPLE_CURRENT_W_GPIO
+            int "Phase W current sense GPIO (ADC, -1 = two shunts)"
+            range -1 30
+            default -1
+            help
+                With two shunts the third current is rebuilt from
+                iu + iv + iw = 0.
+
+        config EXAMPLE_SHUNT_MILLIOHM
+            int "Shunt resistance [mOhm]"
+            range 1 10000
+            default 10
+
+        config EXAMPLE_CURRENT_AMP_GAIN
+            int "Current amplifier gain [V/V]"
+            range 1 1000
+            default 20
+
+    endmenu
+
+    menu "Board: rotor sensor (AS5600)"
+
+        config EXAMPLE_ENCODER_SDA_GPIO
+            int "AS5600 SDA GPIO"
+            range 0 30
+            default 2
+
+        config EXAMPLE_ENCODER_SCL_GPIO
+            int "AS5600 SCL GPIO"
+            range 0 30
+            default 3
+
+        config EXAMPLE_ENCODER_I2C_HZ
+            int "I2C bus frequency [Hz]"
+            range 100000 1000000
+            default 400000
+
+    endmenu
+
+    menu "Motor"
+
+        config EXAMPLE_MOTOR_POLE_PAIRS
+            int "Pole pairs"
+            range 1 64
+            default 13
+            help
+                Magnet poles / 2. Identification measures everything else,
+                but not this.
+
+        config EXAMPLE_DC_LINK_MILLIVOLT
+            int "DC link voltage [mV]"
+            range 3000 60000
+            default 12000
+            help
+                Supply voltage of the bridge. It scales every voltage the
+                controller asks for, so set the value you actually feed.
+
+        config EXAMPLE_OVERSPEED_RPM
+            int "Overspeed trip [rpm]"
+            range 100 60000
+            default 600
+            help
+                The controller turns the bridge off above this speed. Servo
+                moves are slow (see the move speed below); a shaft this fast
+                means the loop lost the rotor, so keep it low.
+
+    endmenu
+
+    menu "Servo moves"
+
+        config EXAMPLE_MOVE_MAX_SPEED_DEG_S
+            int "Peak shaft speed of a move [deg/s]"
+            range 1 3600
+            default 90
+            help
+                A move to a single position takes as long as it needs to stay
+                under this speed. A trajectory segment that would go faster
+                is rejected before the shaft moves.
+
+        config EXAMPLE_MOVE_MIN_TIME_MS
+            int "Shortest single-position move [ms]"
+            range 100 60000
+            default 2500
+            help
+                Lower bound on the duration of a single-position move, so a
+                small step is not a jerk.
+
+        config EXAMPLE_SETTLE_TIMEOUT_MS
+            int "Time allowed to settle after a move [ms]"
+            range 100 60000
+            default 5000
+            help
+                After the reference reaches the target, the shaft has this long
+                to come into the controller's in-position band. The final
+                position is reported either way.
+
+    endmenu
+
+endmenu

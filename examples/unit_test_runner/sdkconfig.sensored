@@ -1,0 +1,7 @@
+# Layered over sdkconfig.defaults for the sensored-stack build of the runner:
+#   idf.py -B build_sd -D SDKCONFIG=build_sd/sdkconfig \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.sensored" build
+# One stack per build, so this build runs the sensored tests and the
+# sensorless ones drop out.
+CONFIG_ESP_FOC_STACK_SENSORED=y
+CONFIG_ESP_FOC_SD_MAX_AXES=2

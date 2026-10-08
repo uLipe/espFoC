@@ -1,51 +1,17 @@
-# espFoC unit test runner
+# espFoC unit test runner (greenfield)
 
-Minimal app that runs the Unity test menu for espFoC unit tests. Default target for automated runs is **QEMU** on esp32 (no hardware); **esp32c6** is the reference build target for examples.
-
-## Build
-
-From this directory (default target for tests is esp32 for QEMU):
+Runs Unity tests from `test/` on ESP32-C6 (Q16 CORDIC trig, IIR biquad, 2p2z PID).
 
 ```bash
-. $IDF_PATH/export.sh
-idf.py set-target esp32
-idf.py -D TEST_COMPONENTS=espFoC build
-```
-
-For other targets (e.g. esp32s3, esp32p4), run `idf.py set-target <target>` first.
-
-## Run tests (default: QEMU)
-
-From repo root, run unit tests on QEMU (CI and local, no device needed). Exit code 0 = all passed.
-
-```bash
-. $IDF_PATH/export.sh
-# Install Espressif QEMU once if needed: python $IDF_PATH/tools/idf_tools.py install qemu-xtensa
-# Install pexpect for the runner script: pip install pexpect
 cd examples/unit_test_runner
-python run_unit_tests_qemu.py
+idf.py -D TEST_COMPONENTS=espFoC set-target esp32c6
+idf.py -D TEST_COMPONENTS=espFoC -p /dev/ttyUSB0 flash monitor
 ```
 
-## Run on device
+On boot the app auto-runs all registered tests. Expect:
 
-Flash and open the serial monitor, then use the Unity menu:
-
-```bash
-idf.py flash monitor
+```text
+31 Tests 0 Failures 0 Ignored
+OK
+PASS unit_tests
 ```
-
-Press **Enter** to show the test menu, then:
-
-- `*` — run all tests
-- `[espFoC]` — run only espFoC tests
-- A number — run a single test by index
-
-To run the pytest suite against a connected board (ESPPORT set):
-
-```bash
-pytest pytest_espfoc_unittest.py -m generic -v
-```
-
-## CI
-
-The workflow job `unit_tests` builds for esp32, installs Espressif QEMU (`idf_tools.py install qemu-xtensa`), and runs `python run_unit_tests_qemu.py`. The runner always tears down the `idf.py qemu` process group after Unity prints its summary so CI does not hang on the interactive menu. Pass/fail is taken from the script exit code (0 = all tests passed). An optional step runs tests on a real device via `pytest -m generic` when using a self-hosted runner with `ESPPORT` set (`continue-on-error: true` when no device is present).
