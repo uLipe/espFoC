@@ -1,298 +1,1008 @@
 menu "espFoC Settings"
 
-    menu "Core"
-        config NOOF_AXIS
-            int "Number of motor outputs"
-            range 1 2
-            default 1
+    config ESP_FOC_MAX_INVERTERS
+        int "Max inverter driver instances (static pool)"
+        range 1 2
+        default 1
+
+    config ESP_FOC_MAX_ROTOR_SENSORS
+        int "Max rotor sensor instances (static pool)"
+        range 1 2
+        default 1
+
+    config ESP_FOC_ROTOR_HALL
+        bool "Hall-effect rotor sensor driver"
+        default y
+        help
+            Electrical rotor angle from three 60-degree hall lines, made
+            continuous by the common-layer angle estimator.
+
+            Init order: create the inverter before this sensor. Both use ETM,
+            and the inverter's bring-up resets the peripheral, which clears
+            every channel including this driver's. This driver only enables the
+            ETM bus clock and never resets, so inverter-then-hall needs no
+            coordination. The sensor detects the reverse order at init and
+            refuses when its require_etm_ready config field is set.
+
+    config ESP_FOC_MAX_MUTEXES
+        int "Max OSAL mutex instances (static pool)"
+        range 1 8
+        default 2
+
+    config ESP_FOC_PWM_RATE_HZ
+        int "Default PWM carrier frequency [Hz]"
+        range 5000 40000
+        default 20000
+
+    config ESP_FOC_TRACE_ENABLE
+        bool "Enable IRAM binary hot-path trace buffer"
+        default y
+
+    config ESP_FOC_TRACE_DEPTH
+        int "Trace ring depth (power of two)"
+        depends on ESP_FOC_TRACE_ENABLE
+        range 16 4096
+        default 256
+
+    config ESP_FOC_ADC_DIGI_SW_TRIGGER
+        bool "ADC digi software timer trigger (debug; disables ETM-only start)"
+        default n
+        help
+            When enabled, the ADC digi controller timer starts conversions instead of
+            relying solely on ETM ADC_TASK_START0. Use only for DMA bring-up HIL.
+
+    config ESP_FOC_ENABLE_MOTOR_ID
+        bool "Enable machine identification (sys-id + current-loop autotune)"
+        default n
+        help
+            Adds the standstill/spin identification sequence and its estimator
+            kernels. The FoC core does not depend on it, so leaving this off
+            costs nothing.
+
+    menu "Motor identification"
+        depends on ESP_FOC_ENABLE_MOTOR_ID
+
+        config ESP_FOC_MOTOR_ID_TASK_STACK
+            int "Identification task stack (bytes)"
+            range 3072 32768
+            default 6144
             help
-                Number of FOC channel sets. Each set uses a full inverter,
-                encoder and current-sensor stack up to the driver limits.
+                The identification runs on its own task while the caller blocks,
+                so the caller's stack does not have to hold the sequence. The
+                on_event callback runs on this task: size it for what the
+                callback does (a formatted log line with floats is the usual
+                peak).
 
-        config FOC_TASK_STACK_SIZE
-            int "Regulator / runner task stack size (bytes)"
-            default 3072
-
-        config ESP_FOC_PWM_RATE_HZ
-            int "PWM switching frequency [Hz] (MCPWM carrier)"
-            range 10000 40000
-            default 20000
+        config ESP_FOC_MOTOR_ID_TASK_PRIO
+            int "Identification task priority"
+            range 1 22
+            default 5
             help
-                Carrier frequency for espFoC MCPWM inverter drivers and for
-                control-loop timing (dt = 1/PWM).
+                Below the rotor task the sensored stages spawn at the top
+                priority.
 
-        config ESP_FOC_DC_LINK_NOMINAL_MV
-            int "Nominal DC bus voltage [mV] (SVPWM / Ud Uq volt scaling)"
-            range 1000 60000
-            default 12000
+        config ESP_FOC_MOTOR_ID_PROBE_PERIODS
+            int "Whole excitation periods per impedance probe"
+            range 4 256
+            default 128
             help
-                Used by MCPWM inverter get_dc_link_voltage() when the constructor
-                dc_link_voltage argument is <= 0. Ud/Uq and SVPWM math assume the
-                same volt basis as this nominal rail; wrong values make small
-                tuner voltage commands map to the wrong modulation depth (e.g.
-                Q16_ONE=1 V treated as full bus made 0.1 V look like 10% PWM).
+                Correlation window of the AC impedance probe. More periods trade
+                identification time for noise rejection.
 
-        config ESP_FOC_CUSTOM_MATH
-            bool "Use espFoC Q16 fast math (LUT sin/cos, etc.)"
-            default y
-    endmenu
-
-    menu "Optional hardware drivers"
-        config ESP_FOC_ENABLE_PCNT_DRIVER
-            bool "Build PCNT-based rotor sensor driver (encoder pulse counting)"
-            default n
-    endmenu
-
-    menu "Rotor sensor simulation (open-loop)"
-        config ESP_FOC_ROTOR_SIMU_DEFAULT_J_X1E7
-            int "Default mechanical inertia J * 1e7 [kg·m²]"
-            range 1 1000000
-            default 500
+        config ESP_FOC_MOTOR_ID_I_TARGET_MA
+            int "AC probe response target (mA)"
+            range 50 5000
+            default 450
             help
-                Used by rotor_sensor_simu for omega integration. Example: 500
-                means J = 5e-5 kg·m².
+                The excitation amplitude is searched toward this response. High
+                enough to be read over the current-sense floor.
 
-        config ESP_FOC_ROTOR_SIMU_DEFAULT_B_X1E7
-            int "Default viscous damping B * 1e7 [N·m·s/rad]"
-            range 0 1000000
+        config ESP_FOC_MOTOR_ID_I_PROBE_MAX_MA
+            int "AC probe response ceiling (mA)"
+            range 100 10000
+            default 900
+
+        config ESP_FOC_MOTOR_ID_I_ABORT_MA
+            int "Probe window abort average (mA)"
+            range 100 20000
+            default 1200
+            help
+                A probe window whose guard average reaches this is discarded.
+                Keep it under the bridge trip so the identification names the
+                state that failed before the trip latches.
+
+        config ESP_FOC_MOTOR_ID_V_DEADZONE_MV
+            int "Bridge dead zone the AC probes are biased past (mV)"
+            range 0 5000
+            default 700
+
+        config ESP_FOC_MOTOR_ID_I_BW_HZ
+            int "Current-loop bandwidth of the flux leg (Hz)"
+            range 20 5000
+            default 300
+
+        config ESP_FOC_MOTOR_ID_I_FLUX_MA
+            int "I-f current of the flux leg (mA)"
+            range 50 10000
+            default 450
+
+        config ESP_FOC_MOTOR_ID_FLUX_HZ
+            int "I-f electrical frequency of the flux leg (Hz)"
+            range 10 2000
             default 100
-            help
-                Mechanical viscous term. 100 => B = 1e-5 N·m·s/rad.
 
-        config ESP_FOC_ROTOR_SIMU_DEFAULT_KT_X1E7
-            int "Default torque constant Kt * 1e7 [N·m/A]"
-            range 1 1000000
-            default 1000
-            help
-                Maps simulated i_q to electrical torque. 1000 => 1e-4 N·m/A.
-    endmenu
-
-    menu "Control loop"
-        config ESP_FOC_CURRENT_FILTER_CUTOFF_HZ
-            int "Isensor biquad low-pass cutoff [Hz]"
-            range 500 10000
-            default 8000
-            help
-                Cutoff of the 2nd-order Butterworth on raw ADC before gain scaling.
-                Overridable at runtime when NVS calibration is used.
-
-        config ESP_FOC_LOW_SPEED_DOWNSAMPLING
-            int "Outer loop downsample factor (PWM ticks per slow loop)"
-            range 1 1000
-            default 10
-            help
-                The PWM ISR counts down this many ticks before notifying the
-                slow encoder task once.
-
-        config ESP_FOC_ENCODER_PLL_BW_HZ
-            int "Encoder PLL bandwidth [Hz] (mechanical, zeta=1)"
-            range 10 200
-            default 50
-            help
-                Second-order encoder PLL tracking bandwidth. The estimator
-                integrates at PWM rate; this sets Kp/Ki from the ISR dt.
-
-        config ESP_FOC_ENCODER_PLL_OMEGA_MAX_REV_S
-            int "Encoder PLL omega integrator clamp [mech rev/s]"
-            range 1 1000
-            default 100
-            help
-                Hard limit on the PLL velocity integrator (mechanical rev/s).
-
-        config ESP_FOC_ISENSOR_CALIBRATION_ROUNDS
-            int "Current sensor calibration averaging rounds"
-            range 1 10000
-            default 100
-
-    endmenu
-
-    menu "Diagnostics"
-        config ESP_FOC_DEBUG_CORE_TIMING
-            bool "GPIO pulse around the high speed control loop (timing)"
-            default y
-            help
-                Calls esp_foc_debug_pin_set/clear in the high-speed loop.
-
-        config ESP_FOC_DEBUG_PIN
-            int "GPIO number used for output hot path pulse"
-            depends on ESP_FOC_DEBUG_CORE_TIMING
-            range 0 63
-            default 4
-
-    endmenu
-
-    menu "Scope stream"
-        config ESP_FOC_SCOPE
-            bool "Enable scope channel capture and ESPF streaming"
-            default n
-
-        config ESP_FOC_SCOPE_NUM_CHANNELS
-            int "Scope channels per frame (fixed on wire)"
-            depends on ESP_FOC_SCOPE
-            default 17
-
-        config ESP_FOC_SCOPE_BUFFER_SIZE
-            int "Scope ring buffer (frames per half-buffer)"
-            depends on ESP_FOC_SCOPE
-            default 8 if ESP_FOC_SCOPE_NUM_CHANNELS = 17
-            default 8 if ESP_FOC_SCOPE_NUM_CHANNELS = 14
-            default 4096 if ESP_FOC_SCOPE_NUM_CHANNELS = 8
-            default 8
-
-        config ESP_FOC_SCOPE_DAEMON_PRIORITY
-            int "Scope daemon runner priority (esp_foc_create_runner arg)"
-            depends on ESP_FOC_SCOPE
+        config ESP_FOC_MOTOR_ID_TRIES
+            int "Attempts per electrical leg"
             range 1 10
             default 3
-            help
-                Lower number = higher FreeRTOS priority (same scale as FOC outer
-                loop). Default 3 → RT priority 22 on IDF (below plant/FOC at 23–24).
 
-        config ESP_FOC_SCOPE_TX_ALWAYS
-            bool "Stream without RUNNING gate (test / bring-up only)"
-            depends on ESP_FOC_SCOPE
-            default n
+        menu "Sensored stages"
 
-        choice ESP_FOC_STREAM_BRIDGE
-            prompt "Scope stream physical interface (TX only)"
-            depends on ESP_FOC_SCOPE
-            default ESP_FOC_STREAM_BRIDGE_USBCDC if IDF_TARGET_ESP32C6
-            default ESP_FOC_STREAM_BRIDGE_UART
-            help
-                Separate from the console UART used for logs and espfoc_shell.
-                ESP32-C6: use USB Serial/JTAG for espFoC Tool; UART for monitor.
-
-            config ESP_FOC_STREAM_BRIDGE_UART
-                bool "Dedicated UART"
-
-            config ESP_FOC_STREAM_BRIDGE_USBCDC
-                bool "USB CDC / Serial-JTAG"
-                depends on SOC_USB_OTG_SUPPORTED || SOC_USB_SERIAL_JTAG_SUPPORTED
-        endchoice
-
-        if ESP_FOC_STREAM_BRIDGE_UART
-            config ESP_FOC_STREAM_UART_NUM
-                int "Scope UART port index"
-                range 0 2
-                default 1
-            config ESP_FOC_STREAM_UART_BAUD
-                int "Scope UART baud"
-                default 921600
-            config ESP_FOC_STREAM_UART_TX_PIN
-                int "Scope UART TX GPIO"
-                default 17
-            config ESP_FOC_STREAM_UART_RX_PIN
-                int "Scope UART RX GPIO (unused for TX-only)"
-                default 18
-        endif
-
-        config ESP_FOC_CALIBRATION_NVS
-            bool "Persist calibration to NVS"
-            default y
-    endmenu
-
-    menu "espfoc_shell (console REPL)"
-        config ESPFOC_SHELL
-            bool "Console command shell on ESP_CONSOLE UART"
-            default y
-            help
-                Line-oriented REPL on the main serial console (idf monitor).
-                Not on the scope stream port.
-    endmenu
-
-    menu "FOC-in-the-loop (simulated plant)"
-        config ESP_FOC_FITL
-            bool "FOC-in-the-loop: simulated motor plant (exclusive with HW drivers)"
-            default n
-            help
-                When enabled, espFoC builds the in-the-loop plant factory instead
-                of MCPWM inverter, ADC shunt, and hardware rotor drivers.
-
-        if ESP_FOC_FITL
-
-            config FOC_ITL_PWM_10KHZ
-                bool "Use 10 kHz PWM tick (default 20 kHz)"
-                default n
+            config ESP_FOC_MOTOR_ID_FETCH_HZ
+                int "Rotor fetch rate (Hz)"
+                range 100 20000
+                default 2500
                 help
-                    FITL inverter ISR tick rate. Plant integration runs at
-                    ISR rate divided by "Outer loop downsample factor" in
-                    espFoC Settings -> Control loop (default 10 → 2 kHz plant).
+                    Rate the identification task reads the rotor at. Must divide
+                    the PWM rate and match the rate the sensor was configured for.
 
-            config FOC_ITL_USE_RK2
-                bool "Plant integrator: RK2 instead of RK4"
-                default n
+            config ESP_FOC_MOTOR_ID_SPIN_I_BW_HZ
+                int "Current-loop bandwidth while spinning on the encoder (Hz)"
+                range 20 5000
+                default 200
 
-            config FOC_ITL_MOTOR_DELTA
-                bool "Motor windings: delta (QBL4208 default)"
+            config ESP_FOC_MOTOR_ID_IQ_DIR_MA
+                int "+Iq of the direction check (mA)"
+                range 50 10000
+                default 700
+
+            config ESP_FOC_MOTOR_ID_I_MAX_MA
+                int "iq ceiling of the mechanical stage and speed hold (mA)"
+                range 50 10000
+                default 700
+
+            config ESP_FOC_MOTOR_ID_K_FALLBACK
+                int "K the speed hold falls back to (rad/s^2/A)"
+                range 100 1000000
+                default 6500
+                help
+                    Used only to design the internal speed hold when the raw
+                    mechanical stage refuses its fit. Low on purpose: an
+                    underestimated K gives a sluggish hold, an overestimated one
+                    an unstable hold.
+
+            config ESP_FOC_MOTOR_ID_ANGLE_COMP
+                bool "Fit the Park-angle offset and latency on the encoder"
                 default y
+
+            config ESP_FOC_MOTOR_ID_OVERSPEED_HZ
+                int "Abort above this electrical speed (Hz)"
+                range 10 10000
+                default 625
+
+        endmenu
+
+    endmenu
+
+    menu "Phase map discovery"
+
+        config ESP_FOC_PHASE_DISCOVER
+            bool "Enable phase map discovery"
+            default y
+            help
+                Standstill measurement of the PWM-to-phase permutation and the
+                current-sense sign, plus encoder zero and direction when a
+                rotor sensor is given. Values below are defaults for
+                esp_foc_phase_discover_default_config() only.
+
+        config ESP_FOC_PHASE_DISCOVER_VD_MV
+            int "Probe voltage [mV]"
+            depends on ESP_FOC_PHASE_DISCOVER
+            range 200 12000
+            default 1200
+            help
+                A voltage, not a bus fraction: dead time and device drop take
+                a fixed ~0.7 V. Clamped to 5..25 % of Vdc at init.
+
+        config ESP_FOC_PHASE_DISCOVER_ID_MIN_MA
+            int "Minimum d-axis current to admit a candidate [mA]"
+            depends on ESP_FOC_PHASE_DISCOVER
+            range 10 2000
+            default 80
+
+        config ESP_FOC_PHASE_DISCOVER_PULSE_MS
+            int "Pulse window [ms]"
+            depends on ESP_FOC_PHASE_DISCOVER
+            range 3 50
+            default 6
+            help
+                Longer than the electrical time constant, shorter than the
+                mechanical one.
+
+        config ESP_FOC_PHASE_DISCOVER_CAL_ROUNDS
+            int "Shunt zero rounds per candidate"
+            depends on ESP_FOC_PHASE_DISCOVER
+            range 0 256
+            default 32
+
+        config ESP_FOC_PHASE_DISCOVER_TRIES
+            int "Attempts before giving up"
+            depends on ESP_FOC_PHASE_DISCOVER
+            range 1 8
+            default 3
+
+        config ESP_FOC_PHASE_DISCOVER_NUDGE_MS
+            int "Nudge hold between attempts [ms]"
+            depends on ESP_FOC_PHASE_DISCOVER
+            range 0 5000
+            default 300
+
+        config ESP_FOC_PHASE_DISCOVER_SETTLE_MS
+            int "Mechanical settle after a nudge [ms]"
+            depends on ESP_FOC_PHASE_DISCOVER
+            range 0 10000
+            default 800
+
+        menu "Rotor sensor stage"
+            depends on ESP_FOC_PHASE_DISCOVER
+
+            config ESP_FOC_PHASE_DISCOVER_WELL_MA
+                int "Well hold current [mA]"
+                range 50 5000
+                default 600
                 help
-                    QBL4208 series uses delta coil topology. Scales terminal
-                    voltages by 1/sqrt(3) for wye-equivalent phase drive.
+                    Cogging holds the rotor within asin(cog / i_well) of the
+                    well; the encoder zero is taken there.
 
-            choice FOC_ITL_TICK_SOURCE
-                prompt "PWM tick backend"
-                default FOC_ITL_TICK_MCPWM if SOC_MCPWM_SUPPORTED
-                default FOC_ITL_TICK_GPTIMER
+            config ESP_FOC_PHASE_DISCOVER_WELL_SWEEP_MS
+                int "One electrical revolution sweep before the hold [ms]"
+                range 50 5000
+                default 500
 
-                config FOC_ITL_TICK_MCPWM
-                    bool "MCPWM timer (device)"
-                    depends on SOC_MCPWM_SUPPORTED
+            config ESP_FOC_PHASE_DISCOVER_STILL_TOL_MRAD
+                int "Rest tolerance on the mechanical angle [mrad]"
+                range 1 500
+                default 12
 
-                config FOC_ITL_TICK_GPTIMER
-                    bool "GPTimer (QEMU / generic)"
-            endchoice
+            config ESP_FOC_PHASE_DISCOVER_STILL_CALM_MS
+                int "Time inside the tolerance to call it rest [ms]"
+                range 10 5000
+                default 400
 
-            config FOC_ITL_DEFAULT_R_MILLIOHM
-                int "Default phase R [milli-ohm]"
-                range 1 1000000
-                default 720
+            config ESP_FOC_PHASE_DISCOVER_STILL_TIMEOUT_MS
+                int "Give up waiting for rest after [ms]"
+                range 100 30000
+                default 4000
+
+            config ESP_FOC_PHASE_DISCOVER_ZERO_SAMPLES
+                int "Sensor reads averaged into the zero"
+                range 1 256
+                default 16
+
+            config ESP_FOC_PHASE_DISCOVER_DIR_MV
+                int "Direction pulse q voltage [mV]"
+                range 200 12000
+                default 1000
+
+            config ESP_FOC_PHASE_DISCOVER_DIR_MS
+                int "Direction pulse length [ms]"
+                range 5 500
+                default 25
+
+            config ESP_FOC_PHASE_DISCOVER_DIR_MIN_MRAD
+                int "Minimum shaft travel over the direction pulse [mrad]"
+                range 1 1000
+                default 5
+
+        endmenu
+
+    endmenu
+
+    choice ESP_FOC_STACK
+        prompt "FoC stack"
+        default ESP_FOC_STACK_NONE
+        help
+            One closed-loop stack per build. Commissioning blocks (phase map,
+            identification) and the building blocks stay available either way.
+
+        config ESP_FOC_STACK_NONE
+            bool "None (building blocks only)"
+
+        config ESP_FOC_STACK_SENSORED
+            bool "Sensored"
+
+        config ESP_FOC_STACK_SENSORLESS
+            bool "Sensorless"
+    endchoice
+
+    menu "Sensored stack"
+        depends on ESP_FOC_STACK_SENSORED
+
+        config ESP_FOC_SD_MAX_AXES
+            int "Maximum number of sensored axes"
+            range 1 4
+            default 1
+            help
+                Static instances, one per axis (cfg.axis selects one). Each
+                initialised axis adds a supervisor task, a TEZ fast path on
+                its own inverter and the cogging buffers.
+
+        menu "Loop"
+
+            config ESP_FOC_SD_TASK_PRIO_BELOW_MAX
+                int "Supervisor priority, levels below the highest"
+                range 0 10
+                default 0
                 help
-                    Per-phase resistance (delta: R_LL from datasheet).
-                    Default: QBL4208-61-04-013 R_LL=0.72 ohm.
+                    The supervisor fetches the encoder; a late fetch is a late
+                    speed sample.
 
-            config FOC_ITL_DEFAULT_L_UH
-                int "Default phase L [micro-henry]"
-                range 1 1000000
-                default 1200
+            config ESP_FOC_SD_TASK_STACK
+                int "Supervisor stack [bytes]"
+                range 2048 16384
+                default 4096
+
+            config ESP_FOC_SD_FETCH_HZ
+                int "Encoder fetch rate [Hz]"
+                range 100 20000
+                default 2500
                 help
-                    Per-phase inductance (delta: L_LL from datasheet).
-                    Default: QBL4208-61-04-013 L_LL=1.2 mH.
+                    Must divide the PWM rate. The speed PI, the position P and
+                    the PLL all run at this rate.
 
-            config FOC_ITL_DEFAULT_J_X1E7
-                int "Default inertia J * 1e7 [kg·m²]"
-                range 1 1000000
-                default 480
+            config ESP_FOC_SD_PLL_BW_HZ
+                int "Speed PLL bandwidth [Hz]"
+                range 5 2000
+                default 180
+
+            config ESP_FOC_SD_PLL_ZETA_PERMIL
+                int "Speed PLL damping [permil]"
+                range 300 3000
+                default 1000
+
+            config ESP_FOC_SD_PWM_DELAY_PERMIL
+                int "Inverse-Park lead for the PWM update delay [permil of a period]"
+                range 0 5000
+                default 1500
+
+            config ESP_FOC_SD_I_MAX_MA
+                int "Speed loop |iq| ceiling [mA]"
+                range 10 50000
+                default 700
+
+            config ESP_FOC_SD_I_BW_HZ
+                int "Current loop bandwidth [Hz]"
+                range 50 5000
+                default 200
+
+            config ESP_FOC_SD_I_BACKOFF_PERMIL
+                int "Current PI gain backoff [permil of IMC-zoh]"
+                range 100 1000
+                default 500
+
+        endmenu
+
+        menu "Speed loop"
+
+            config ESP_FOC_SD_SPEED_BW_E4
+                int "Wanted bandwidth [1e-4 of f_base]"
+                range 1 10000
+                default 154
                 help
-                    Rotor inertia. Default: QBL4208-61-04-013 J=48e-6 kg·m².
+                    f_base = Vdc/sqrt(3)/(2 pi psi). Clamped to the min/max
+                    below, then to the noise and PLL-phase ceilings.
 
-            config FOC_ITL_DEFAULT_B_X1E7
-                int "Default viscous B * 1e7 [N·m·s/rad]"
-                range 0 1000000
+            config ESP_FOC_SD_SPEED_BW_MIN_HZ
+                int "Wanted bandwidth floor [Hz]"
+                range 1 200
+                default 4
+
+            config ESP_FOC_SD_SPEED_BW_MAX_HZ
+                int "Wanted bandwidth ceiling [Hz]"
+                range 1 500
+                default 8
+
+            config ESP_FOC_SD_SPEED_ZETA_PERMIL
+                int "Damping [permil]"
+                range 400 3000
+                default 1150
+
+            config ESP_FOC_SD_FB_IQ_BUDGET_MA
+                int "iq one feedback sigma may command [mA]"
+                range 1 10000
                 default 100
 
-            config FOC_ITL_DEFAULT_KT_X1E7
-                int "Default torque constant Kt * 1e7 [N·m/A]"
+            config ESP_FOC_SD_PLL_SEP_PERMIL
+                int "PLL pole over the speed crossover [permil]"
+                range 1000 50000
+                default 5000
+
+            config ESP_FOC_SD_RIPPLE_MS
+                int "Feedback ripple window at rest [ms]"
+                range 50 5000
+                default 400
+
+            config ESP_FOC_SD_STILL_HZ
+                int "Rest before the ripple window, |w| under [Hz electrical]"
+                range 1 100
+                default 3
+
+            config ESP_FOC_SD_STILL_TIMEOUT_MS
+                int "Rest wait timeout [ms]"
+                range 100 60000
+                default 8000
+
+            config ESP_FOC_SD_WREF_SLEW_HZ_S
+                int "Speed reference slew [Hz electrical per s]"
                 range 1 1000000
-                default 360000
-                help
-                    Default: QBL4208-61-04-013 Kt=0.036 N·m/A.
+                default 2000
 
-            config FOC_ITL_DEFAULT_POLE_PAIRS
-                int "Default pole pairs"
-                range 1 64
-                default 4
-                help
-                    Default: QBL4208-61-04-013 (8 poles).
+        endmenu
 
-            config FOC_ITL_DEFAULT_I_MAX_MA
-                int "Default phase current limit [mA]"
-                range 100 100000
-                default 10600
-                help
-                    Plant saturation limit. Default: QBL4208-61-04-013
-                    peak phase current 10.6 A (rated 3.47 A).
+        menu "Position loop"
 
-        endif
+            config ESP_FOC_SD_POS_SEP_PERMIL
+                int "Speed crossover over the position crossover [permil]"
+                range 1000 50000
+                default 4000
+
+            config ESP_FOC_SD_CORR_MAX_MHZ
+                int "|P correction| ceiling [mHz mechanical]"
+                range 10 1000000
+                default 800
+
+            config ESP_FOC_SD_WM_MAX_HZ
+                int "|speed reference| ceiling [Hz mechanical]"
+                range 1 1000
+                default 18
+
+            config ESP_FOC_SD_INPOS_MDEG
+                int "In-position band [millidegrees]"
+                range 1 360000
+                default 1000
+
+            config ESP_FOC_SD_INPOS_W_HZ
+                int "In-position |w| ceiling [Hz electrical]"
+                range 1 1000
+                default 6
+
+            config ESP_FOC_SD_INPOS_MS
+                int "In-position hold [ms]"
+                range 1 10000
+                default 100
+
+        endmenu
+
+        menu "Guards"
+
+            config ESP_FOC_SD_OVERSPEED_HZ
+                int "Overspeed trip [Hz electrical]"
+                range 1 5000
+                default 600
+
+            config ESP_FOC_SD_OVERSPEED_HOLD_MS
+                int "Overspeed hold [ms]"
+                range 0 1000
+                default 2
+
+            config ESP_FOC_SD_STALE_SLOTS
+                int "Encoder samples without a fresh one before the abort"
+                range 2 100000
+                default 125
+
+            config ESP_FOC_SD_FAIL_MAX
+                int "Consecutive fetch errors before the abort"
+                range 1 100000
+                default 50
+
+        endmenu
+
+        menu "Cogging learn"
+
+            config ESP_FOC_SD_COG_BINS
+                int "Table bins per mechanical revolution"
+                range 64 4096
+                default 1440
+
+            config ESP_FOC_SD_COG_SWEEP_MHZ
+                int "Sweep speed [mHz mechanical]"
+                range 10 10000
+                default 250
+
+            config ESP_FOC_SD_COG_REVS_PERMIL
+                int "Revolutions per sweep leg [permil]"
+                range 100 20000
+                default 2000
+
+            config ESP_FOC_SD_COG_PASSES_MAX
+                int "Passes at most"
+                range 1 50
+                default 6
+
+            config ESP_FOC_SD_COG_CONV_UA
+                int "Table change RMS that ends the learn [uA]"
+                range 1 1000000
+                default 10000
+
+            config ESP_FOC_SD_COG_SMOOTH
+                int "Smoothing width [bins, odd]"
+                range 1 63
+                default 9
+
+            config ESP_FOC_SD_COG_SKIP_MS
+                int "Sweep start left out of the map [ms]"
+                range 0 10000
+                default 500
+
+            config ESP_FOC_SD_COG_REST_MS
+                int "Rest after each leg [ms]"
+                range 0 10000
+                default 1000
+
+        endmenu
+
     endmenu
+
+    menu "Sensorless stack"
+        depends on ESP_FOC_STACK_SENSORLESS
+
+        config ESP_FOC_SL_MAX_AXES
+            int "Maximum number of sensorless axes"
+            range 1 4
+            default 1
+            help
+                Static instances, one per axis (cfg.axis selects one). Each
+                initialised axis adds a supervisor task and a TEZ fast path on
+                its own inverter.
+
+        menu "Loop"
+
+            config ESP_FOC_SL_SLOW_DIV
+                int "PWM periods per speed/guard slot"
+                range 2 64
+                default 10
+
+            config ESP_FOC_SL_TASK_PRIO_BELOW_MAX
+                int "Supervisor priority, levels below the highest"
+                range 0 10
+                default 2
+
+            config ESP_FOC_SL_TASK_STACK
+                int "Supervisor stack [bytes]"
+                range 2048 16384
+                default 4096
+
+            config ESP_FOC_SL_I_BW_HZ
+                int "Current loop bandwidth [Hz]"
+                range 50 5000
+                default 1000
+
+            config ESP_FOC_SL_I_MAX_MA
+                int "Speed loop |iq| ceiling [mA]"
+                range 10 50000
+                default 500
+                help
+                    Also the ceiling of set_iq() and set_id(). The derived speed
+                    Kp is this ceiling over the error in
+                    ESP_FOC_SL_SPEED_ERR_SAT_PERMIL: scale both together to move
+                    the ceiling without moving the gains.
+
+            config ESP_FOC_SL_ID_RUN_MA
+                int "Id after the handoff [mA]"
+                range 0 50000
+                default 450
+                help
+                    Held from the lock-in until set_id(). The baselines kept the
+                    align current on d through the whole run.
+
+        endmenu
+
+        menu "Trigger"
+
+            config ESP_FOC_SL_W_MIN_HZ
+                int "Speed mode start/cut on |w_ref| [Hz electrical]"
+                range 1 2000
+                default 40
+
+            config ESP_FOC_SL_IQ_MIN_MA
+                int "Torque mode start/cut on |iq| [mA]"
+                range 1 50000
+                default 50
+
+            config ESP_FOC_SL_REV_DECEL_HZ_S
+                int "Speed mode reversal deceleration [Hz/s]"
+                range 1 10000
+                default 7
+
+            config ESP_FOC_SL_REV_DECEL_MA_S
+                int "Torque mode reversal ramp [mA/s]"
+                range 1 100000
+                default 500
+
+            config ESP_FOC_SL_COAST_MS
+                int "Bridge-off time before a relaunch [ms]"
+                range 0 30000
+                default 5000
+                help
+                    Nothing measures the shaft with the bridge off, so this
+                    is the only wait for it to stop. A launch into a shaft
+                    that still turns aligns and calibrates the current zero
+                    against its back EMF.
+
+        endmenu
+
+        menu "Startup"
+
+            config ESP_FOC_SL_CAL_ROUNDS
+                int "Shunt zero rounds at each launch"
+                range 0 256
+                default 32
+                help
+                    0 still arms the inverter's current limit without a new
+                    zero.
+
+            config ESP_FOC_SL_ARM_MS
+                int "Mid-duty dwell after enable [ms]"
+                range 0 2000
+                default 50
+
+            config ESP_FOC_SL_ALIGN_MA
+                int "Align and lock-in current [mA]"
+                range 10 50000
+                default 450
+
+            config ESP_FOC_SL_ALIGN_MS
+                int "Align current slew [ms]"
+                range 0 5000
+                default 400
+
+            config ESP_FOC_SL_ALIGN_SETTLE_MS
+                int "Align dwell [ms]"
+                range 0 5000
+                default 250
+
+            config ESP_FOC_SL_ALIGN_TIMEOUT_MS
+                int "Align deadline [ms]"
+                range 100 30000
+                default 3000
+
+            config ESP_FOC_SL_STEP_MS
+                int "Lock-in step [ms]"
+                range 5 200
+                default 50
+
+            config ESP_FOC_SL_ACCEL_RADS2
+                int "Lock-in acceleration [rad/s^2 electrical]"
+                range 10 100000
+                default 200
+
+            config ESP_FOC_SL_PLATEAU_FBASE_PERMIL
+                int "Plateau as a fraction of f_base [permil]"
+                range 10 1000
+                default 185
+                help
+                    f_base = (Vdc/sqrt(3)) / (2 pi psi_f), the speed where the
+                    BEMF uses the whole linear modulation range.
+
+            config ESP_FOC_SL_PLATEAU_MIN_HZ
+                int "Plateau floor [Hz]"
+                range 1 2000
+                default 20
+
+            config ESP_FOC_SL_PLATEAU_MAX_HZ
+                int "Plateau ceiling [Hz]"
+                range 1 2000
+                default 50
+                help
+                    The fastest the I-f ramp can pull the rotor on the align
+                    current alone. An under-identified psi_f asks for a faster
+                    plateau, which is backwards from what the machine can do.
+
+            config ESP_FOC_SL_VF_HZ
+                int "V/f break-away up to [Hz] (0 = off)"
+                range 0 200
+                default 0
+
+            config ESP_FOC_SL_VF_RAMP_MS
+                int "V/f ramp [ms]"
+                range 1 10000
+                default 800
+
+            config ESP_FOC_SL_VF_MARGIN_MV
+                int "V/f boost margin over dead zone + Rs*I_align [mV]"
+                range 0 5000
+                default 250
+
+            config ESP_FOC_SL_FOLLOW_PERMIL
+                int "Lock-in proof: |v - Rs i| over psi*w [permil]"
+                range 0 1000
+                default 500
+                help
+                    Only a turning magnet forces this voltage, so it is the one
+                    lock-in witness the observer cannot fake. 0 disables it.
+
+            config ESP_FOC_SL_FOLLOW_HOLD_MS
+                int "Lock-in proof hold [ms]"
+                range 0 5000
+                default 300
+
+            config ESP_FOC_SL_FOLLOW_TIMEOUT_MS
+                int "Lock-in proof deadline [ms]"
+                range 100 30000
+                default 2500
+
+            config ESP_FOC_SL_RAMP_ID_ERR_MA
+                int "Ramp refusal: |Id* - Id| above [mA]"
+                range 10 50000
+                default 200
+
+            config ESP_FOC_SL_RAMP_ID_ERR_MS
+                int "Ramp refusal: for [ms]"
+                range 10 10000
+                default 400
+
+        endmenu
+
+        menu "Handoff"
+
+            config ESP_FOC_SL_ACQ_BAND_HZ
+                int "PLL acquire |we - w_if| band [Hz]"
+                range 1 1000
+                default 70
+
+            config ESP_FOC_SL_ACQ_HUNT_HZ
+                int "PLL acquire hunt per step [Hz]"
+                range 1 1000
+                default 70
+
+            config ESP_FOC_SL_ACQ_HOLD_MS
+                int "PLL acquire hold [ms]"
+                range 20 5000
+                default 250
+
+            config ESP_FOC_SL_ACQ_TIMEOUT_MS
+                int "PLL acquire deadline [ms]"
+                range 100 30000
+                default 4000
+
+            config ESP_FOC_SL_BLEND_MS
+                int "Park blend theta_ol -> theta_obs [ms]"
+                range 1 1000
+                default 10
+
+            config ESP_FOC_SL_SETTLE_MS
+                int "Settle on theta_obs before commit [ms]"
+                range 20 5000
+                default 250
+
+            config ESP_FOC_SL_IQ_START_MA
+                int "Iq floor at the reseed [mA]"
+                range 0 50000
+                default 200
+
+            config ESP_FOC_SL_WE_MIN_PERMIL
+                int "Refuse the handoff under this fraction of the plateau [permil]"
+                range 100 1000
+                default 556
+
+        endmenu
+
+        menu "Speed loop"
+
+            config ESP_FOC_SL_SPEED_BW_E4
+                int "Speed bandwidth as a fraction of fe_rated [1e-4]"
+                range 1 2000
+                default 154
+
+            config ESP_FOC_SL_SPEED_ZETA_PERMIL
+                int "Speed loop damping [permil]"
+                range 450 1150
+                default 700
+
+            config ESP_FOC_SL_SPEED_FILT_PERMIL
+                int "w_ctrl filter corner as a fraction of the speed bandwidth [permil]"
+                range 100 5000
+                default 900
+
+            config ESP_FOC_SL_SPEED_ERR_SAT_PERMIL
+                int "Speed error that saturates iq, of fe_rated [permil]"
+                range 1 500
+                default 22
+                help
+                    Paired with ESP_FOC_SL_I_MAX_MA: 22 permil at 500 mA gives about
+                    the same derived Kp as 29 permil at 650 mA or 20 at 450 mA.
+
+            config ESP_FOC_SL_WREF_SLEW_HZ_S
+                int "w_ref slew [Hz/s]"
+                range 1 100000
+                default 7
+
+            config ESP_FOC_SL_CATCH_FLOOR_MA
+                int "|iq| floor while catching [mA]"
+                range 0 50000
+                default 180
+
+            config ESP_FOC_SL_BRAKE_MA
+                int "Reverse-torque allowance once caught [mA]"
+                range 0 50000
+                default 200
+
+            config ESP_FOC_SL_CATCH_HOLD_MS
+                int "Hold on |w_obs| before ramping to the reference [ms]"
+                range 0 30000
+                default 1500
+
+            config ESP_FOC_SL_CATCH_HOLD_FBASE_PERMIL
+                int "Ceiling of that hold, of f_base [permil]"
+                range 100 1000
+                default 650
+
+            config ESP_FOC_SL_CLOSE_PERMIL
+                int "Caught when |w_ctrl - w_ref| under this fraction [permil]"
+                range 1 500
+                default 60
+
+            config ESP_FOC_SL_CLOSE_MIN_HZ
+                int "Floor of that band [Hz]"
+                range 1 200
+                default 3
+
+            config ESP_FOC_SL_CLOSE_TIMEOUT_MS
+                int "Give up waiting to be caught after [ms]"
+                range 100 60000
+                default 8000
+
+            config ESP_FOC_SL_CATCH_SLEW_MA_S
+                int "Torque mode ramp to the user iq, and the Id ramp [mA/s]"
+                range 1 100000
+                default 500
+
+        endmenu
+
+        menu "Observer"
+
+            config ESP_FOC_SL_OBS_BW_HZ
+                int "Flux LPF bandwidth [Hz]"
+                range 10 5000
+                default 800
+
+            config ESP_FOC_SL_OBS_ZETA_PERMIL
+                int "Observer damping [permil]"
+                range 450 1150
+                default 700
+
+            config ESP_FOC_SL_TRACK_BW_E4
+                int "PLL bandwidth as a fraction of fe_rated [1e-4]"
+                range 1 2000
+                default 385
+
+            config ESP_FOC_SL_TRACK_ZETA_PERMIL
+                int "PLL damping [permil]"
+                range 450 1150
+                default 700
+
+            config ESP_FOC_SL_BLEND_E4
+                int "Washout as a fraction of fe_rated [1e-4]"
+                range 1 2000
+                default 257
+
+            config ESP_FOC_SL_PSI_LOCK_PERMIL
+                int "Lock when |psi_r| above this fraction of psi_f [permil]"
+                range 100 1000
+                default 500
+
+            config ESP_FOC_SL_W_MAX_PERMIL
+                int "VCO ceiling, of fe_rated [permil]"
+                range 100 5000
+                default 1400
+
+            config ESP_FOC_SL_LOCK_COUNT
+                int "PWM periods above the lock threshold to report lock"
+                range 1 65535
+                default 400
+
+        endmenu
+
+        menu "Guards"
+
+            config ESP_FOC_SL_BEMF_PERMIL
+                int "Abort when |e| under this fraction of psi*|w| [permil]"
+                range 0 1000
+                default 150
+
+            config ESP_FOC_SL_BEMF_HOLD_MS
+                int "BEMF guard hold [ms]"
+                range 1 10000
+                default 200
+
+            config ESP_FOC_SL_BEMF_FMIN_HZ
+                int "BEMF guard only above [Hz]"
+                range 1 2000
+                default 20
+
+            config ESP_FOC_SL_OVERSPEED_PERMIL
+                int "Overspeed, of fe_rated [permil]"
+                range 100 5000
+                default 1250
+
+            config ESP_FOC_SL_OVERSPEED_HOLD_MS
+                int "Overspeed hold [ms]"
+                range 1 30000
+                default 2000
+
+            config ESP_FOC_SL_COLLAPSE_MA
+                int "Current collapse under [mA]"
+                range 1 50000
+                default 60
+
+            config ESP_FOC_SL_COLLAPSE_HOLD_MS
+                int "Current collapse hold [ms]"
+                range 1 10000
+                default 250
+
+            config ESP_FOC_SL_LOCK_LOSS_MS
+                int "Observer lock loss hold [ms]"
+                range 1 10000
+                default 250
+
+            config ESP_FOC_SL_LOCK_LOSS_ABORT
+                bool "Abort on observer lock loss"
+                default n
+                help
+                    Off in the baselines: the lock flag drops on healthy runs
+                    and the BEMF guard covers a stalled rotor.
+
+        endmenu
+
+    endmenu
+
+    config ESP_FOC_USE_HW_ACCEL_TRIGO
+        bool "Use hardware CORDIC for trig when available"
+        default n
+        help
+            When enabled and the SoC exposes a CORDIC accelerator, sin/cos/atan2/sqrt
+            use hardware. Otherwise the software CORDIC path is used (all current targets).
+
+    config ESP_FOC_USE_HW_ACCEL_IIR
+        bool "Use hardware IIR for biquad when available"
+        default n
+        help
+            When enabled and the SoC exposes an IIR/biquad accelerator, filter update
+            uses hardware. Otherwise the software TDF-II path is used (all current targets).
+
+    config ESP_FOC_USE_HW_ACCEL_PID
+        bool "Use hardware PID (2p2z) when available"
+        default n
+        help
+            When enabled and the SoC exposes a PID accelerator, pid update uses hardware.
+            Otherwise the software 2p2z path is used (all current targets).
+
+    config ESP_FOC_USE_HW_ACCEL_CLARKE
+        bool "Use hardware Clarke transform when available"
+        default n
+        help
+            When enabled and the SoC exposes a Clarke accelerator, clarke/inv_clarke
+            use hardware. Otherwise the software path is used (all current targets).
+
+    config ESP_FOC_USE_HW_ACCEL_PARK
+        bool "Use hardware Park transform when available"
+        default n
+        help
+            When enabled and the SoC exposes a Park accelerator, park/inv_park
+            use hardware. Otherwise the software path is used (all current targets).
+
+    config ESP_FOC_USE_HW_ACCEL_VLIM
+        bool "Use hardware dq voltage limiter when available"
+        default n
+        help
+            When enabled and the SoC exposes a voltage-limit accelerator, vlim uses
+            hardware. Otherwise CORDIC sqrt + Q16 scale is used (all current targets).
+
+    config ESP_FOC_USE_HW_ACCEL_SVM
+        bool "Use hardware SVM when available"
+        default n
+        help
+            When enabled and the SoC exposes an SVM accelerator, svm uses hardware.
+            Otherwise min-max common-mode software SVM is used (all current targets).
 
 endmenu

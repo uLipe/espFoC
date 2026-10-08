@@ -1,0 +1,18 @@
+CONFIG_IDF_TARGET="esp32c6"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Phase discovery times its probe pulses in 1 ms sleeps.
+CONFIG_FREERTOS_HZ=1000
+
+# espFoC: 20 kHz PWM, identification on, the sensorless stack as the controller.
+CONFIG_ESP_FOC_PWM_RATE_HZ=20000
+CONFIG_ESP_FOC_ENABLE_MOTOR_ID=y
+CONFIG_ESP_FOC_STACK_SENSORLESS=y
+CONFIG_ESP_FOC_TRACE_ENABLE=n
+
+# The control loop runs in an interrupt at the PWM rate and needs -O2.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# Keep the console to what the example prints; driver warnings still show.
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y

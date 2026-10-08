@@ -1,109 +1,133 @@
-set(srcs    "source/motor_control/esp_foc_core.c"
-            "source/motor_control/esp_foc_axis_bench.c"
-            "source/motor_control/esp_foc_estimator_q16.c"
-            "source/motor_control/esp_foc_biquad_q16.c"
-            "source/calibration/esp_foc_calibration_format.c"
-            "source/calibration/esp_foc_calibration_nvs.c"
-            "source/calibration/esp_foc_calibration_axis.c"
-            "source/motor_control/esp_foc_iq31.c"
-            "source/motor_control/esp_foc_q16.c"
-            )
+# espFoC — new generation
 
-set(includes "include" "source/motor_control")
+set(includes "include")
+
+if(IDF_TARGET STREQUAL "linux")
+    # Host build: the portable core only. Drivers, OSAL and the stacks need
+    # the SoC or the RTOS and are covered on silicon.
+    set(srcs
+        "source/debug/esp_foc_trace.c"
+        "source/utils/esp_foc_trig_cordic.c"
+        "source/utils/esp_foc_trig.c"
+        "source/utils/esp_foc_trig_hw.c"
+        "source/utils/esp_foc_iir_soft.c"
+        "source/utils/esp_foc_iir.c"
+        "source/utils/esp_foc_iir_hw.c"
+        "source/utils/esp_foc_pid_soft.c"
+        "source/utils/esp_foc_pid.c"
+        "source/utils/esp_foc_pid_hw.c"
+        "source/utils/esp_foc_clarke_soft.c"
+        "source/utils/esp_foc_clarke.c"
+        "source/utils/esp_foc_clarke_hw.c"
+        "source/utils/esp_foc_park_soft.c"
+        "source/utils/esp_foc_park.c"
+        "source/utils/esp_foc_park_hw.c"
+        "source/utils/esp_foc_vlim_soft.c"
+        "source/utils/esp_foc_vlim.c"
+        "source/utils/esp_foc_vlim_hw.c"
+        "source/utils/esp_foc_svm_soft.c"
+        "source/utils/esp_foc_svm.c"
+        "source/utils/esp_foc_svm_hw.c"
+        "source/motor_control/esp_foc_observer_bemf.c"
+        "source/motor_control/esp_foc_observer_flux.c"
+        "source/motor_control/esp_foc_rotor_est.c"
+        "source/motor_control/esp_foc_rotor_pll.c"
+        "source/motor_control/esp_foc_if.c"
+    )
+    if(CONFIG_ESP_FOC_ENABLE_MOTOR_ID)
+        list(APPEND srcs
+            "source/motor_control/esp_foc_ident.c"
+            "source/motor_control/esp_foc_motor_id_seq.c"
+            "source/motor_control/esp_foc_motor_id_probe.c"
+            "source/motor_control/esp_foc_mech_id.c"
+        )
+    endif()
+    idf_component_register(SRCS "${srcs}"
+                           INCLUDE_DIRS "${includes}"
+                           PRIV_INCLUDE_DIRS "source/utils" "source/motor_control")
+    return()
+endif()
+
+set(srcs
+    "source/osal/esp_foc_osal_idf.c"
+    "source/debug/esp_foc_trace.c"
+    "source/utils/esp_foc_trig_cordic.c"
+    "source/utils/esp_foc_trig.c"
+    "source/utils/esp_foc_trig_hw.c"
+    "source/utils/esp_foc_iir_soft.c"
+    "source/utils/esp_foc_iir.c"
+    "source/utils/esp_foc_iir_hw.c"
+    "source/utils/esp_foc_pid_soft.c"
+    "source/utils/esp_foc_pid.c"
+    "source/utils/esp_foc_pid_hw.c"
+    "source/utils/esp_foc_clarke_soft.c"
+    "source/utils/esp_foc_clarke.c"
+    "source/utils/esp_foc_clarke_hw.c"
+    "source/utils/esp_foc_park_soft.c"
+    "source/utils/esp_foc_park.c"
+    "source/utils/esp_foc_park_hw.c"
+    "source/utils/esp_foc_vlim_soft.c"
+    "source/utils/esp_foc_vlim.c"
+    "source/utils/esp_foc_vlim_hw.c"
+    "source/utils/esp_foc_svm_soft.c"
+    "source/utils/esp_foc_svm.c"
+    "source/utils/esp_foc_svm_hw.c"
+    "source/motor_control/esp_foc_observer_bemf.c"
+    "source/motor_control/esp_foc_observer_flux.c"
+    "source/motor_control/esp_foc_rotor_est.c"
+    "source/motor_control/esp_foc_rotor_pll.c"
+    "source/motor_control/esp_foc_if.c"
+    "source/drivers/rotor/esp_foc_rotor_sensorless.c"
+    "source/drivers/inverter/mcpwm_bridge.c"
+    "source/drivers/inverter/adc_dma_sense.c"
+    "source/drivers/inverter/etm_link.c"
+    "source/drivers/inverter/esp_foc_inverter_mcpwm.c"
+    "source/drivers/rotor/i2c_hal_bus.c"
+    "source/drivers/rotor/as5600.c"
+)
+
+if(CONFIG_ESP_FOC_ROTOR_HALL)
+    list(APPEND srcs
+        "source/drivers/rotor/esp_foc_rotor_hall.c"
+        "source/drivers/rotor/hall_timestamp.c"
+        "source/drivers/rotor/hall_timestamp_etm.c"
+        "source/drivers/rotor/hall_timestamp_irq.c"
+    )
+endif()
+
+if(CONFIG_ESP_FOC_PHASE_DISCOVER)
+    list(APPEND srcs "source/motor_control/esp_foc_phase_discover.c")
+endif()
+
+if(CONFIG_ESP_FOC_STACK_SENSORED)
+    list(APPEND srcs "source/motor_control/esp_foc_sensored.c")
+endif()
+
+if(CONFIG_ESP_FOC_STACK_SENSORLESS)
+    list(APPEND srcs "source/motor_control/esp_foc_sensorless.c")
+endif()
+
+if(CONFIG_ESP_FOC_ENABLE_MOTOR_ID)
+    list(APPEND srcs
+        "source/motor_control/esp_foc_ident.c"
+        "source/motor_control/esp_foc_motor_id.c"
+        "source/motor_control/esp_foc_motor_id_seq.c"
+        "source/motor_control/esp_foc_motor_id_probe.c"
+        "source/motor_control/esp_foc_mech_id.c"
+    )
+endif()
 
 if(ESP_PLATFORM)
-
-idf_build_get_property(target IDF_TARGET)
-
-set(requires driver freertos esp_system esp_timer nvs_flash esp_hw_support efuse)
-
-if(CONFIG_ESP_FOC_FITL)
-    list(APPEND srcs "source/motor_control/foc_in_the_loop/esp_foc_itl_plant.c"
-                     "source/motor_control/foc_in_the_loop/esp_foc_in_the_loop.c")
-    list(APPEND includes "source/motor_control/foc_in_the_loop"
-                         "source/drivers/foc_in_the_loop")
-    list(APPEND srcs "source/osal/os_interface_idf.c")
-
-    if(CONFIG_FOC_ITL_TICK_MCPWM)
-        list(APPEND srcs "source/drivers/foc_in_the_loop/esp_foc_itl_tick_mcpwm.c")
-        list(APPEND requires esp_driver_mcpwm)
-    elseif(CONFIG_FOC_ITL_TICK_GPTIMER)
-        list(APPEND srcs "source/drivers/foc_in_the_loop/esp_foc_itl_tick_gptimer.c")
-        list(APPEND requires esp_driver_gptimer)
-    endif()
-else()
-    list(APPEND requires esp_driver_uart esp_driver_pcnt esp_driver_gpio esp_driver_mcpwm)
-    list(APPEND includes "source/drivers" "source/drivers/cali")
-    list(APPEND srcs    "source/drivers/inverter_3pwm_mcpwm.c"
-                        "source/drivers/inverter_6pwm_mcpwm.c"
-                        "source/drivers/rotor_sensor_as5600.c"
-                        "source/drivers/rotor_sensor_as5048.c"
-                        "source/drivers/rotor_sensor_pcnt.c"
-                        "source/drivers/rotor_sensor_simu.c"
-                        "source/drivers/current_sensor_adc.c"
-                        "source/drivers/esp_foc_adc_cali_lut.c"
-                        "source/drivers/cali/esp_foc_adc_cali_curve.c"
-                        "source/drivers/cali/esp_foc_adc_range_extend.c"
-                        "source/osal/os_interface_idf.c")
-
-    if(target STREQUAL "esp32")
-        list(APPEND srcs "source/drivers/cali/esp_foc_adc_cali_line_esp32.c")
-    elseif(target STREQUAL "esp32s2")
-        list(APPEND srcs "source/drivers/cali/esp_foc_adc_cali_line_esp32s2.c")
-    elseif(target STREQUAL "esp32c2")
-        list(APPEND srcs "source/drivers/cali/esp_foc_adc_cali_line_esp32c2.c")
-    elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/source/drivers/cali/coeff/esp_foc_curve_coeff_${target}.c")
-        list(APPEND srcs "source/drivers/cali/coeff/esp_foc_curve_coeff_${target}.c")
-    endif()
-
-    if(CONFIG_SOC_ETM_SUPPORTED)
-        list(APPEND srcs "source/drivers/isensor_adc_etm.c")
-    endif()
-
-    if(target STREQUAL "esp32")
-        list(APPEND srcs "source/drivers/isensor_adc_dma_esp32.c")
-        list(APPEND requires esp_driver_i2s)
-    elseif(target STREQUAL "esp32s2")
-        list(APPEND srcs "source/drivers/isensor_adc_dma_esp32s2.c")
-        list(APPEND requires esp_driver_spi)
-    else()
-        list(APPEND srcs "source/drivers/isensor_adc_dma_gdma.c")
-        list(APPEND requires esp_mm)
-    endif()
-endif()
-
-if(target STREQUAL "esp32s2" OR target STREQUAL "esp32s3" OR target STREQUAL "esp32p4")
-    list(APPEND requires espressif__esp_tinyusb)
-endif()
-
-if(CONFIG_ESP_FOC_SCOPE)
-    list(APPEND srcs "source/stream/esp_foc_scope.c")
-    if(CONFIG_ESP_FOC_STREAM_BRIDGE_UART)
-        list(APPEND srcs "source/drivers/stream/esp_foc_stream_bridge_uart.c")
-        list(APPEND requires esp_driver_uart)
-    elseif(CONFIG_ESP_FOC_STREAM_BRIDGE_USBCDC)
-        if(target STREQUAL "esp32s2" OR target STREQUAL "esp32s3" OR target STREQUAL "esp32p4")
-            list(APPEND srcs "source/drivers/stream/esp_foc_stream_bridge_usbcdc.c")
-        else()
-            list(APPEND srcs "source/drivers/stream/esp_foc_stream_bridge_usb_serial_jtag.c")
-            list(APPEND requires esp_driver_usb_serial_jtag)
-        endif()
-    else()
-        message(FATAL_ERROR
-            "espFoC: CONFIG_ESP_FOC_SCOPE=y requires ESP_FOC_STREAM_BRIDGE_UART or "
-            "ESP_FOC_STREAM_BRIDGE_USBCDC (no stub fallback)")
-    endif()
-endif()
-if(CONFIG_ESPFOC_SHELL)
-    list(APPEND srcs "source/shell/espfoc_shell_parse.c"
-                     "source/shell/espfoc_shell.c")
-else()
-    list(APPEND srcs "source/shell/espfoc_shell_parse.c")
-endif()
-
-idf_component_register(SRCS "${srcs}"
-                       INCLUDE_DIRS "${includes}"
-                       PRIV_REQUIRES "${requires}"
-                       LDFRAGMENTS linker.lf)
-
+    idf_component_register(SRCS "${srcs}"
+                           INCLUDE_DIRS "${includes}"
+                           PRIV_INCLUDE_DIRS
+                               "source/utils"
+                               "source/motor_control"
+                               "source/drivers/inverter"
+                               "source/drivers/rotor"
+                           PRIV_REQUIRES freertos hal soc esp_hw_support esp_rom esp_timer
+                           LDFRAGMENTS linker.lf)
+    # The TEZ path only fits its PWM period at -O2, whatever level the
+    # project builds the rest of the firmware at.
+    target_compile_options(${COMPONENT_LIB} PRIVATE -O2)
 endif()
