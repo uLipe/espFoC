@@ -45,6 +45,8 @@ if(IDF_TARGET STREQUAL "linux")
     idf_component_register(SRCS "${srcs}"
                            INCLUDE_DIRS "${includes}"
                            PRIV_INCLUDE_DIRS "source/utils" "source/motor_control")
+    # Float config paths (expf, tanf, ...) need libm on the host toolchain.
+    target_link_libraries(${COMPONENT_LIB} PUBLIC m)
     return()
 endif()
 
