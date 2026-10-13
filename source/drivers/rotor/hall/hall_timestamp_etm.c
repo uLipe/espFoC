@@ -15,6 +15,7 @@
 #include "hall_timestamp.h"
 
 #include "esp_check.h"
+#include "esp_foc_hal_compat.h"
 #include "esp_log.h"
 #include "esp_private/periph_ctrl.h"
 #include "hal/etm_ll.h"
@@ -25,7 +26,11 @@
 #include "soc/soc_caps.h"
 #include "soc/soc_etm_source.h"
 #include "soc/soc_etm_struct.h"
+#if __has_include("hal/timer_periph.h")
+#include "hal/timer_periph.h"
+#else
 #include "soc/timer_periph.h"
+#endif
 
 static const char *TAG = "foc_hall_etm";
 
@@ -56,8 +61,8 @@ static void program_channels(esp_foc_hall_ts_t *ts)
         uint32_t gch = (uint32_t)i;
         uint32_t ech = (uint32_t)ts->cfg.etm_channel[i];
 
-        gpio_ll_etm_event_channel_set_gpio(&GPIO_ETM, gch, (uint32_t)ts->cfg.gpio[i]);
-        gpio_ll_etm_enable_event_channel(&GPIO_ETM, gch, true);
+        gpio_ll_etm_event_channel_set_gpio(ESP_FOC_GPIO_ETM_HW, gch, (uint32_t)ts->cfg.gpio[i]);
+        gpio_ll_etm_enable_event_channel(ESP_FOC_GPIO_ETM_HW, gch, true);
 
         etm_ll_disable_channel(&SOC_ETM, ech);
         etm_ll_channel_set_event(&SOC_ETM, ech, GPIO_LL_ETM_EVENT_ID_ANY_EDGE(gch));
@@ -70,11 +75,11 @@ static esp_err_t etm_init(esp_foc_hall_ts_t *ts)
 {
     const esp_foc_hall_ts_cfg_t *cfg = &ts->cfg;
 
-    ESP_RETURN_ON_FALSE(cfg->timer_group >= 0 && cfg->timer_group < SOC_TIMER_GROUPS,
+    ESP_RETURN_ON_FALSE(cfg->timer_group >= 0 && cfg->timer_group < ESP_FOC_TIMG_GROUPS,
                         ESP_ERR_INVALID_ARG, TAG, "group");
     for (int i = 0; i < 3; i++) {
         ESP_RETURN_ON_FALSE(cfg->etm_channel[i] >= 0 &&
-                                (uint32_t)cfg->etm_channel[i] < SOC_ETM_CHANNELS_PER_GROUP,
+                                (uint32_t)cfg->etm_channel[i] < ESP_FOC_ETM_CHANNELS,
                             ESP_ERR_INVALID_ARG, TAG, "chan");
         for (int j = i + 1; j < 3; j++) {
             ESP_RETURN_ON_FALSE(cfg->etm_channel[i] != cfg->etm_channel[j],
@@ -121,10 +126,10 @@ static esp_err_t etm_init(esp_foc_hall_ts_t *ts)
      * timer_ll_reset_register() is never called: it resets the whole group and
      * would take the watchdog with it.
      */
-    PERIPH_RCC_ACQUIRE_ATOMIC(timer_group_periph_signals.groups[cfg->timer_group].module,
+    PERIPH_RCC_ACQUIRE_ATOMIC(ESP_FOC_TIMG_RCC_MODULE(cfg->timer_group),
                               ref_count) {
         if (ref_count == 0) {
-            timer_ll_enable_bus_clock(cfg->timer_group, true);
+            ESP_FOC_TIMG_ENABLE_BUS_CLOCK(cfg->timer_group, true);
         }
     }
     HALL_CLK_SRC_ATOMIC() {
@@ -199,7 +204,7 @@ static bool etm_healthy(const esp_foc_hall_ts_t *ts)
             return false;
         }
         /* Also catches a channel re-pointed at somebody else's pin. */
-        if (gpio_ll_etm_event_channel_get_gpio(&GPIO_ETM, (uint32_t)i) !=
+        if (gpio_ll_etm_event_channel_get_gpio(ESP_FOC_GPIO_ETM_HW, (uint32_t)i) !=
             (uint32_t)ts->cfg.gpio[i]) {
             return false;
         }
@@ -211,7 +216,7 @@ static void etm_deinit(esp_foc_hall_ts_t *ts)
 {
     for (int i = 0; i < 3; i++) {
         etm_ll_disable_channel(&SOC_ETM, (uint32_t)ts->cfg.etm_channel[i]);
-        gpio_ll_etm_enable_event_channel(&GPIO_ETM, (uint32_t)i, false);
+        gpio_ll_etm_enable_event_channel(ESP_FOC_GPIO_ETM_HW, (uint32_t)i, false);
     }
     timer_ll_enable_etm(timg_of(ts), false);
     /* Counter and clocks are left running: the group is shared. */

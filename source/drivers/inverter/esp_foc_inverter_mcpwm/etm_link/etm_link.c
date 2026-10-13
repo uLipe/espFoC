@@ -8,6 +8,7 @@
 #include "etm_link.h"
 
 #include "esp_check.h"
+#include "esp_foc_hal_compat.h"
 #include "hal/etm_ll.h"
 #include "soc/soc_etm_struct.h"
 #include "soc/soc_etm_source.h"
@@ -25,10 +26,10 @@ esp_err_t esp_foc_etm_link_init(esp_foc_etm_link_t *link,
     ESP_RETURN_ON_FALSE(link != NULL && cfg != NULL, ESP_ERR_INVALID_ARG, TAG, "null");
     ESP_RETURN_ON_FALSE(cfg->mcpwm_timer >= 0 && cfg->mcpwm_timer < 3, ESP_ERR_INVALID_ARG, TAG, "timer");
     ESP_RETURN_ON_FALSE(cfg->etm_channel >= 0 &&
-                            (uint32_t)cfg->etm_channel < SOC_ETM_CHANNELS_PER_GROUP,
+                            (uint32_t)cfg->etm_channel < ESP_FOC_ETM_CHANNELS,
                         ESP_ERR_INVALID_ARG, TAG, "chan");
     ESP_RETURN_ON_FALSE(cfg->stop_channel >= 0 &&
-                            (uint32_t)cfg->stop_channel < SOC_ETM_CHANNELS_PER_GROUP &&
+                            (uint32_t)cfg->stop_channel < ESP_FOC_ETM_CHANNELS &&
                             cfg->stop_channel != cfg->etm_channel,
                         ESP_ERR_INVALID_ARG, TAG, "stop chan");
     ESP_RETURN_ON_FALSE(cfg->dma_rx_channel >= 0 && cfg->dma_rx_channel <= 2,
