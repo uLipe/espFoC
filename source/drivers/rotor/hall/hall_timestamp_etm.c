@@ -22,8 +22,14 @@
 #include "hal/gpio_etm_ll.h"
 #include "hal/timer_ll.h"
 #include "soc/gpio_ext_struct.h"
-#include "soc/pcr_struct.h"
 #include "soc/soc_caps.h"
+#if __has_include("soc/pcr_struct.h")
+#include "soc/pcr_struct.h"
+#define HALL_ETM_CLK_ON() (PCR.etm_conf.etm_clk_en != 0)
+#else
+#include "soc/hp_sys_clkrst_struct.h"
+#define HALL_ETM_CLK_ON() (HP_SYS_CLKRST.etm_ctrl0.reg_etm_apb_clk_en != 0)
+#endif
 #include "soc/soc_etm_source.h"
 #include "soc/soc_etm_struct.h"
 #if __has_include("hal/timer_periph.h")
@@ -35,8 +41,9 @@
 static const char *TAG = "foc_hall_etm";
 
 /* Only where the clock-source bits are shared with another peripheral does
- * setting them need the critical section. Same gate IDF's gptimer uses. */
-#if SOC_PERIPH_CLK_CTRL_SHARED
+ * setting them need the critical section (IDF's gptimer gate), or where the LL
+ * wraps the setter in a macro that refuses to build outside it. */
+#if SOC_PERIPH_CLK_CTRL_SHARED || defined(timer_ll_set_clock_source)
 #define HALL_CLK_SRC_ATOMIC() PERIPH_RCC_ATOMIC()
 #else
 #define HALL_CLK_SRC_ATOMIC()
@@ -102,7 +109,7 @@ static esp_err_t etm_init(esp_foc_hall_ts_t *ts)
      * power-on reset, so the reading is exact from cold and merely advisory
      * after a software or JTAG reset, where the previous run's state survives.
      */
-    ts->etm_cold_start = (PCR.etm_conf.etm_clk_en == 0);
+    ts->etm_cold_start = !HALL_ETM_CLK_ON();
     if (ts->etm_cold_start) {
         if (cfg->require_etm_ready) {
             ESP_LOGE(TAG, "ETM is cold: create the inverter before the hall rotor "
