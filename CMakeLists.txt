@@ -77,21 +77,21 @@ set(srcs
     "source/motor_control/esp_foc_rotor_est.c"
     "source/motor_control/esp_foc_rotor_pll.c"
     "source/motor_control/esp_foc_if.c"
-    "source/drivers/rotor/esp_foc_rotor_sensorless.c"
+    "source/drivers/rotor/sensorless/esp_foc_rotor_sensorless.c"
     "source/drivers/inverter/mcpwm_bridge.c"
     "source/drivers/inverter/adc_dma_sense.c"
     "source/drivers/inverter/etm_link.c"
     "source/drivers/inverter/esp_foc_inverter_mcpwm.c"
-    "source/drivers/rotor/i2c_hal_bus.c"
-    "source/drivers/rotor/as5600.c"
+    "source/drivers/rotor/as5600/i2c_hal_bus.c"
+    "source/drivers/rotor/as5600/as5600.c"
 )
 
 if(CONFIG_ESP_FOC_ROTOR_HALL)
     list(APPEND srcs
-        "source/drivers/rotor/esp_foc_rotor_hall.c"
-        "source/drivers/rotor/hall_timestamp.c"
-        "source/drivers/rotor/hall_timestamp_etm.c"
-        "source/drivers/rotor/hall_timestamp_irq.c"
+        "source/drivers/rotor/hall/esp_foc_rotor_hall.c"
+        "source/drivers/rotor/hall/hall_timestamp.c"
+        "source/drivers/rotor/hall/hall_timestamp_etm.c"
+        "source/drivers/rotor/hall/hall_timestamp_irq.c"
     )
 endif()
 
@@ -124,7 +124,6 @@ if(ESP_PLATFORM)
                                "source/utils"
                                "source/motor_control"
                                "source/drivers/inverter"
-                               "source/drivers/rotor"
                            PRIV_REQUIRES freertos hal soc esp_hw_support esp_rom esp_timer
                            LDFRAGMENTS linker.lf)
     # The TEZ path only fits its PWM period at -O2, whatever level the
