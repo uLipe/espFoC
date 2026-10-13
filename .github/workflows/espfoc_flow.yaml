@@ -2,9 +2,12 @@ name: Build
 on: push
 jobs:
   unit_tests:
-    name: Unit tests (linux host run, esp32c6 compile check)
+    name: Unit tests (linux host run, esp32c6 compile check, ${{ matrix.idf }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      matrix:
+        idf: [release/v5.5, release/v6.1]
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -12,7 +15,7 @@ jobs:
     - name: Install Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.8'
+        python-version: '3.10'
 
     - name: Install dependencies
       run: |
@@ -26,7 +29,7 @@ jobs:
         repository: espressif/esp-idf
         path: idf
         submodules: recursive
-        ref: release/v5.5
+        ref: ${{ matrix.idf }}
 
     - name: Install ESP-IDF
       run: |
@@ -53,11 +56,12 @@ jobs:
         idf.py -D TEST_COMPONENTS=espFoC build
 
   examples:
-    name: Build examples (esp32c6)
+    name: Build examples (esp32c6, ${{ matrix.idf }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:
+        idf: [release/v5.5, release/v6.1]
         example: [foc_sensored_torque, foc_sensored_velocity, foc_sensored_servo,
                   foc_sensorless_torque, foc_sensorless_velocity]
     steps:
@@ -67,7 +71,7 @@ jobs:
     - name: Install Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.8'
+        python-version: '3.10'
 
     - name: Install dependencies
       run: |
@@ -81,7 +85,7 @@ jobs:
         repository: espressif/esp-idf
         path: idf
         submodules: recursive
-        ref: release/v5.5
+        ref: ${{ matrix.idf }}
 
     - name: Install ESP-IDF
       run: |
