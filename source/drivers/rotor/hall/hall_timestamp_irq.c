@@ -79,7 +79,7 @@ static esp_err_t irq_init(esp_foc_hall_ts_t *ts)
                           : ((level == 2) ? ESP_INTR_FLAG_LEVEL2 : ESP_INTR_FLAG_LEVEL1);
 
     intr_handle_t handle = NULL;
-    esp_err_t err = esp_intr_alloc(ETS_GPIO_INTR_SOURCE, flags, hall_gpio_isr, ts, &handle);
+    esp_err_t err = esp_intr_alloc(GPIO_LL_INTR_SOURCE0, flags, hall_gpio_isr, ts, &handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_intr_alloc: %s", esp_err_to_name(err));
         return err;
