@@ -10,9 +10,36 @@
 
 #include "esp_err.h"
 #include "espFoC/utils/esp_foc_q16.h"
+#include "hal/adc_ll.h"
+#include "soc/soc_caps.h"
+#include "soc/soc_etm_source.h"
 
-/* GDMA RX channel the converter streams into; the ETM stop link keys on its EOF. */
+/*
+ * Burst sense: the SAR has its own ETM sample/stop tasks and a continue mode
+ * that converts the pattern back to back from one SAMPLE task, streaming into
+ * the LP AHB DMA. A period is one burst, opened by the sample timer and closed
+ * in hardware when the DMA finishes the descriptor that holds it.
+ */
+#if defined(ADC_LL_DMA_USE_LP_AHB_GDMA) && ADC_LL_DMA_USE_LP_AHB_GDMA && defined(ADC_TASK_SAMPLE1)
+#define ESP_FOC_ADC_SAR_BURST 1
+#else
+#define ESP_FOC_ADC_SAR_BURST 0
+#endif
+
+/* SAR units a sense instance can bind to (esp_foc_adc_dma_cfg_t::adc_unit). */
+#if ESP_FOC_ADC_SAR_BURST && SOC_ADC_DIGI_CONTROLLER_NUM >= 2 && defined(ADC_TASK_SAMPLE2)
+#define ESP_FOC_ADC_UNITS 2
+#else
+#define ESP_FOC_ADC_UNITS 1
+#endif
+
+/* DMA RX channel the converter streams into; the ETM stop link keys on its
+ * completion event (GDMA on the start/stop path, LP AHB DMA on the burst path). */
+#if ESP_FOC_ADC_SAR_BURST
+#define ESP_FOC_ADC_DMA_RX_CH 0
+#else
 #define ESP_FOC_ADC_DMA_RX_CH 2
+#endif
 /* Conversions per block, worst case (see the pattern choice in init). */
 #define ESP_FOC_ADC_MAX_CONV 3
 
@@ -29,6 +56,8 @@ typedef struct {
     uint32_t pwm_hz;
     esp_foc_adc_dma_done_fn_t on_done;
     void *on_done_arg;
+    /** 0 or 1 = ADC1, 2 = ADC2 (only where ESP_FOC_ADC_UNITS == 2). */
+    uint8_t adc_unit;
 } esp_foc_adc_dma_cfg_t;
 
 typedef struct esp_foc_adc_dma_sense esp_foc_adc_dma_sense_t;

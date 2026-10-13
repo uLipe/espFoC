@@ -11,11 +11,13 @@
 #include "esp_err.h"
 
 typedef struct {
+    int mcpwm_group;
     int mcpwm_timer; /* 0..2 */
     int etm_channel; /* 0 .. ESP_FOC_ETM_CHANNELS-1 */
     int stop_channel; /* ADC stop; must differ from etm_channel */
     int dma_rx_channel;
     bool stop_per_conversion; /* stop on each conversion done, else on GDMA RX EOF */
+    uint8_t adc_unit; /* burst sense only: 0 or 1 = ADC1, 2 = ADC2 */
 } esp_foc_etm_link_cfg_t;
 
 typedef struct {
