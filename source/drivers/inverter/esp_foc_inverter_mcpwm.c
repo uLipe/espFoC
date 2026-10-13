@@ -769,6 +769,7 @@ esp_err_t esp_foc_inverter_mcpwm_init(esp_foc_inverter_t *inv,
         .pwm_hz = o->pwm_hz,
         .on_done = on_dma,
         .on_done_arg = o,
+        .adc_unit = cfg->adc_unit,
     };
     err = esp_foc_adc_dma_sense_init(&o->adc, &adc_cfg);
     if (err != ESP_OK) {
@@ -786,12 +787,16 @@ esp_err_t esp_foc_inverter_mcpwm_init(esp_foc_inverter_t *inv,
     o->sample_shift_ns = 0;
     apply_sample_delay(o);
 
+    /* Two ETM channels per inverter so instances never share a link. */
+    const int etm_base = 2 * (int)(o - s_pool);
     esp_foc_etm_link_cfg_t etm_cfg = {
+        .mcpwm_group = cfg->mcpwm_group,
         .mcpwm_timer = esp_foc_mcpwm_bridge_sample_timer(&o->mcpwm),
-        .etm_channel = 0,
-        .stop_channel = 1,
+        .etm_channel = etm_base,
+        .stop_channel = etm_base + 1,
         .dma_rx_channel = ESP_FOC_ADC_DMA_RX_CH,
         .stop_per_conversion = esp_foc_adc_dma_sense_starts(o->adc) > 1u,
+        .adc_unit = cfg->adc_unit,
     };
     err = esp_foc_etm_link_init(&o->etm, &etm_cfg);
     if (err != ESP_OK) {

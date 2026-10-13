@@ -82,6 +82,7 @@ set(srcs
     "source/drivers/rotor/sensorless/esp_foc_rotor_sensorless.c"
     "source/drivers/inverter/esp_foc_inverter_mcpwm/mcpwm_bridge/mcpwm_bridge.c"
     "source/drivers/inverter/esp_foc_inverter_mcpwm/adc_dma_sense/adc_dma_sense.c"
+    "source/drivers/inverter/esp_foc_inverter_mcpwm/adc_dma_sense/adc_dma_sense_burst.c"
     "source/drivers/inverter/esp_foc_inverter_mcpwm/etm_link/etm_link.c"
     "source/drivers/inverter/esp_foc_inverter_mcpwm.c"
     "source/drivers/rotor/as5600/i2c_hal_bus.c"

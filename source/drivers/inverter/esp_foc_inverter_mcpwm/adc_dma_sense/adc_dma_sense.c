@@ -4,6 +4,9 @@
  * Copyright (c) 2026 Felipe Neves
  */
 #include "esp_foc_driver_soc_gate.h"
+#include "adc_dma_sense.h"
+
+#if !ESP_FOC_ADC_SAR_BURST
 
 #include <string.h>
 
@@ -37,7 +40,6 @@
 #include "soc/interrupts.h"
 #include "soc/soc_caps.h"
 
-#include "adc_dma_sense.h"
 #include "espFoC/debug/esp_foc_trace.h"
 
 static const char *TAG = "foc_adc";
@@ -307,6 +309,8 @@ esp_err_t esp_foc_adc_dma_sense_init(esp_foc_adc_dma_sense_t **out,
 {
     ESP_RETURN_ON_FALSE(out != NULL && cfg != NULL, ESP_ERR_INVALID_ARG, TAG, "null");
     ESP_RETURN_ON_FALSE(cfg->shunt_count >= 2 && cfg->shunt_count <= 3, ESP_ERR_INVALID_ARG, TAG, "shunts");
+    ESP_RETURN_ON_FALSE(cfg->adc_unit <= 1u, ESP_ERR_NOT_SUPPORTED, TAG, "adc unit %u",
+                        (unsigned)cfg->adc_unit);
 
     esp_foc_adc_dma_sense_t *s = NULL;
     for (int i = 0; i < CONFIG_ESP_FOC_MAX_INVERTERS; i++) {
@@ -711,3 +715,5 @@ uint8_t esp_foc_adc_dma_sense_peek_conversions(esp_foc_adc_dma_sense_t *s,
     }
     return w;
 }
+
+#endif /* !ESP_FOC_ADC_SAR_BURST */

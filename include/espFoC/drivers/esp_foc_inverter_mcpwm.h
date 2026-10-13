@@ -78,6 +78,13 @@ typedef struct {
     uint32_t boot_charge_ms;
     /* Optional seed; invalid / zero → identity at init. */
     esp_foc_phase_map_t phase_map;
+    /*
+     * SAR the shunts are wired to: 0 (default) or 1 = ADC1, 2 = ADC2. ADC2 is
+     * only on chips with two digital controllers and ETM sample tasks for both;
+     * elsewhere init returns ESP_ERR_NOT_SUPPORTED. The gpio_i* pins must be
+     * channels of the selected unit.
+     */
+    uint8_t adc_unit;
 } esp_foc_inverter_mcpwm_config_t;
 
 esp_foc_inverter_t *esp_foc_inverter_mcpwm_acquire(unsigned index);
