@@ -883,3 +883,12 @@ int32_t esp_foc_inverter_mcpwm_conv_offset_ns(esp_foc_inverter_t *inv, uint8_t i
     }
     return esp_foc_adc_dma_sense_conv_offset_ns(o->adc, i);
 }
+
+esp_err_t esp_foc_inverter_mcpwm_get_sense_saturations(esp_foc_inverter_t *inv,
+                                                       uint32_t *count)
+{
+    ESP_RETURN_ON_FALSE(inv != NULL && count != NULL, ESP_ERR_INVALID_ARG, TAG, "null");
+    esp_foc_inverter_mcpwm_obj_t *o = obj_from(inv);
+    ESP_RETURN_ON_FALSE(o->inited, ESP_ERR_INVALID_STATE, TAG, "state");
+    return esp_foc_adc_dma_sense_saturations(o->adc, count);
+}

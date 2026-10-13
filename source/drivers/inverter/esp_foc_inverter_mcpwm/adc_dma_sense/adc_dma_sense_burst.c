@@ -57,11 +57,15 @@ static const char *TAG = "foc_adc";
 #endif
 #define BURST_CONV_NS 600u
 /*
- * Single-ended input reads 0..2 V as ADC_LL_ZERO_DIFF_CODE..4393 (17-bit
- * weighted result, see adc_digi_output_data_t); above 2 V it saturates.
+ * No attenuation (SOC_ADC_ATTEN_NUM 1). Single-ended, a P pad reads 0..2 V as
+ * ADC_LL_ZERO_DIFF_CODE..4393 (17-bit weighted result, see
+ * adc_digi_output_data_t) and an N pad reads it inverted, ..0; past 2 V both
+ * sit on the rail. An amplifier idling at 1.65 V therefore keeps 0.35 V of
+ * headroom on the positive side only.
  */
+#define BURST_CODE_MAX  4393
 #define BURST_FS_VOLTS  2.0f
-#define BURST_FS_COUNTS (4393 - ADC_LL_ZERO_DIFF_CODE)
+#define BURST_FS_COUNTS (BURST_CODE_MAX - ADC_LL_ZERO_DIFF_CODE)
 
 struct esp_foc_adc_dma_sense {
     bool inited;
@@ -74,11 +78,13 @@ struct esp_foc_adc_dma_sense {
     uint32_t lead_ns;
     int32_t conv_offset_ns[ADC_MAX_CONV];
     int channels[ADC_MAX_SHUNTS];
+    bool n_pad[ADC_MAX_SHUNTS];
     q16_t scale_q16;
     int32_t offset_raw[ADC_MAX_SHUNTS];
     volatile q16_t iu, iv, iw;
     volatile bool sample_ready;
     volatile uint32_t bad_frames;
+    volatile uint32_t saturations;
     esp_foc_adc_dma_done_fn_t on_done;
     void *on_done_arg;
     ahb_dma_dev_t *dma;
@@ -133,6 +139,33 @@ static int gpio_to_channel(uint8_t unit, int gpio)
     return -1;
 }
 
+/*
+ * Pads come in P/N pairs, and the driver numbers each pad as its own channel,
+ * N first: channel 2k is CHk_N. Read single-ended, an N pad's code falls as
+ * the voltage rises, so its current has to be negated.
+ */
+static bool channel_is_n_pad(int ch)
+{
+#if SOC_ADC_DIFF_SUPPORTED
+    return (ch & 1) == 0;
+#else
+    (void)ch;
+    return false;
+#endif
+}
+
+/* Offset-removed counts, positive for a rising pad voltage on either pad. */
+static inline int32_t pad_delta(const esp_foc_adc_dma_sense_t *s, int k, uint32_t raw)
+{
+    const int32_t d = (int32_t)raw - s->offset_raw[k];
+    return s->n_pad[k] ? -d : d;
+}
+
+static inline bool pad_on_rail(const esp_foc_adc_dma_sense_t *s, int k, uint32_t raw)
+{
+    return s->n_pad[k] ? (raw == 0u) : (raw >= BURST_CODE_MAX);
+}
+
 static void gpio_as_analog(int gpio)
 {
     gpio_ll_input_disable(&GPIO, gpio);
@@ -160,24 +193,31 @@ static int shunt_of_word(const esp_foc_adc_dma_sense_t *s, adc_digi_output_data_
 static void adc_parse_and_publish(esp_foc_adc_dma_sense_t *s)
 {
     q16_t vals[ADC_MAX_SHUNTS] = {0};
-    int32_t sum[ADC_MAX_SHUNTS] = {0};
+    int32_t delta[ADC_MAX_SHUNTS] = {0};
     uint8_t n[ADC_MAX_SHUNTS] = {0};
     uint8_t seen = 0;
+    uint32_t rail = 0;
     for (uint8_t i = 0; i < s->conv_count; i++) {
         const adc_digi_output_data_t w = { .val = s->dma_buf[i] };
         const int k = shunt_of_word(s, w);
         if (k < 0) {
             continue;
         }
-        sum[k] += (int32_t)w.type2.data;
+        delta[k] = pad_delta(s, k, w.type2.data);
+        rail += pad_on_rail(s, k, w.type2.data) ? 1u : 0u;
         n[k]++;
+    }
+    /* A clipped sample is still published (it is the nearest value the pad can
+     * give) but counted, so a current past the window is not mistaken for one
+     * at its edge. */
+    if (rail != 0u) {
+        s->saturations += rail;
     }
     for (uint8_t k = 0; k < s->shunt_count; k++) {
         if (n[k] != s->conv_per_slot[k]) {
             continue;
         }
-        const int32_t delta = sum[k] - s->offset_raw[k];
-        vals[k] = q16_mul((q16_t)(delta << 16), s->scale_q16);
+        vals[k] = q16_mul((q16_t)(delta[k] << 16), s->scale_q16);
         seen++;
     }
     /* Keep the last good frame rather than publish zeros for a mis-tagged one;
@@ -341,6 +381,7 @@ esp_err_t esp_foc_adc_dma_sense_init(esp_foc_adc_dma_sense_t **out,
         ESP_RETURN_ON_FALSE(ch >= 0, ESP_ERR_INVALID_ARG, TAG, "gpio %d is not on ADC%u",
                             gpios[i], (unsigned)s->unit + 1u);
         s->channels[i] = ch;
+        s->n_pad[i] = channel_is_n_pad(ch);
         gpio_as_analog(gpios[i]);
     }
 
@@ -392,9 +433,11 @@ esp_err_t esp_foc_adc_dma_sense_init(esp_foc_adc_dma_sense_t **out,
                                    adc_dma_isr, s, &s->intr);
     ESP_RETURN_ON_ERROR(err, TAG, "lp dma intr");
 
-    ESP_LOGI(TAG, "burst ADC%u conv=%u ch=%d,%d lead=%lu ns",
+    ESP_LOGI(TAG, "burst ADC%u conv=%u ch=%d%s,%d%s lead=%lu ns",
              (unsigned)s->unit + 1u, (unsigned)s->conv_count,
-             s->channels[0], s->channels[1], (unsigned long)s->lead_ns);
+             s->channels[0], s->n_pad[0] ? "(N)" : "(P)",
+             s->channels[1], s->n_pad[1] ? "(N)" : "(P)",
+             (unsigned long)s->lead_ns);
 
     s->armed = false;
     s->inited = true;
@@ -436,6 +479,7 @@ esp_err_t esp_foc_adc_dma_sense_arm(esp_foc_adc_dma_sense_t *s)
     ahb_dma_ll_rx_clear_interrupt_status(s->dma, ADC_DMA_RX_CH, AHB_DMA_LL_RX_EVENT_MASK);
     ring_build(s);
     s->bad_frames = 0u;
+    s->saturations = 0u;
     s->armed = true;
     adc_ll_digi_reset();
     adc_ll_digi_clear_pattern_table(s->unit == 0u ? ADC_UNIT_1 : ADC_UNIT_2);
@@ -592,6 +636,13 @@ int32_t esp_foc_adc_dma_sense_conv_offset_ns(const esp_foc_adc_dma_sense_t *s, u
     return (s != NULL && i < s->conv_count) ? s->conv_offset_ns[i] : 0;
 }
 
+esp_err_t esp_foc_adc_dma_sense_saturations(const esp_foc_adc_dma_sense_t *s, uint32_t *count)
+{
+    ESP_RETURN_ON_FALSE(s != NULL && s->inited && count != NULL, ESP_ERR_INVALID_ARG, TAG, "arg");
+    *count = s->saturations;
+    return ESP_OK;
+}
+
 uint8_t esp_foc_adc_dma_sense_peek_conversions(esp_foc_adc_dma_sense_t *s,
                                                q16_t *amps, uint8_t *slot,
                                                uint8_t max)
@@ -606,7 +657,7 @@ uint8_t esp_foc_adc_dma_sense_peek_conversions(esp_foc_adc_dma_sense_t *s,
         if (k < 0) {
             continue;
         }
-        const int32_t delta = (int32_t)word.type2.data - s->offset_raw[k];
+        const int32_t delta = pad_delta(s, k, word.type2.data);
         if (amps != NULL) {
             amps[w] = q16_mul((q16_t)(delta << 16), s->scale_q16);
         }

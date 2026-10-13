@@ -690,6 +690,13 @@ int32_t esp_foc_adc_dma_sense_conv_offset_ns(const esp_foc_adc_dma_sense_t *s, u
     return (s != NULL && i < s->conv_count) ? s->conv_offset_ns[i] : 0;
 }
 
+esp_err_t esp_foc_adc_dma_sense_saturations(const esp_foc_adc_dma_sense_t *s, uint32_t *count)
+{
+    (void)s;
+    (void)count;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
 uint8_t esp_foc_adc_dma_sense_peek_conversions(esp_foc_adc_dma_sense_t *s,
                                                q16_t *amps, uint8_t *slot,
                                                uint8_t max)

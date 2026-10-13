@@ -115,6 +115,15 @@ uint8_t esp_foc_inverter_mcpwm_peek_conversions(esp_foc_inverter_t *inv,
  * peak, before any sample shift. */
 int32_t esp_foc_inverter_mcpwm_conv_offset_ns(esp_foc_inverter_t *inv, uint8_t i);
 
+/**
+ * Current-sense conversions that sat on the converter rail since the last
+ * enable. Such a sample is still published, at the edge of the window, so a
+ * non-zero count means the real current was larger than reported. Returns
+ * ESP_ERR_NOT_SUPPORTED on sense paths that do not count them.
+ */
+esp_err_t esp_foc_inverter_mcpwm_get_sense_saturations(esp_foc_inverter_t *inv,
+                                                       uint32_t *count);
+
 #ifdef __cplusplus
 }
 #endif
