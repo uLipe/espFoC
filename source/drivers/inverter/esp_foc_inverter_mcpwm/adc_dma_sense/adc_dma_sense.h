@@ -88,6 +88,9 @@ uint8_t esp_foc_adc_dma_sense_starts(const esp_foc_adc_dma_sense_t *s);
 uint32_t esp_foc_adc_dma_sense_lead_ns(const esp_foc_adc_dma_sense_t *s);
 /** Nominal sample instant of conversion `i` of a frame, in ns from the timer peak. */
 int32_t esp_foc_adc_dma_sense_conv_offset_ns(const esp_foc_adc_dma_sense_t *s, uint8_t i);
+/** Conversions on the converter rail since arm. ESP_ERR_NOT_SUPPORTED where
+ * the path does not count them. */
+esp_err_t esp_foc_adc_dma_sense_saturations(const esp_foc_adc_dma_sense_t *s, uint32_t *count);
 /*
  * Last block, one entry per conversion in sampling order: amps (offset removed,
  * hardware slot, no phase map) and the slot it belongs to. Consistent only from
