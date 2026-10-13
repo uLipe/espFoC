@@ -10,8 +10,10 @@
 #include <string.h>
 
 #include "esp_check.h"
+#include "esp_foc_hal_compat.h"
 #include "esp_rom_gpio.h"
 #include "hal/gpio_ll.h"
+#include "soc/gpio_sig_map.h"
 #include "soc/gpio_struct.h"
 #include "soc/io_mux_reg.h"
 
@@ -24,7 +26,7 @@ void esp_foc_hall_ts_gpio_as_input(int gpio)
     }
     esp_rom_gpio_pad_select_gpio((uint32_t)gpio);
     gpio_ll_func_sel(&GPIO, (uint8_t)gpio, PIN_FUNC_GPIO);
-    gpio_ll_matrix_out_default(&GPIO, (uint32_t)gpio);
+    ESP_FOC_GPIO_MATRIX_OUT_DEFAULT(&GPIO, (uint32_t)gpio);
     /*
      * 5 V hall, open-collector. The pad must never push 3.3 V: that fights
      * the sensor, and a 5 V pull-up into a push-pull C6 pad cooks the pin.

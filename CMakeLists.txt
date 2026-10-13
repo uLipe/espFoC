@@ -117,17 +117,27 @@ if(CONFIG_ESP_FOC_ENABLE_MOTOR_ID)
     )
 endif()
 
+set(priv_requires freertos hal soc esp_hw_support esp_rom esp_timer)
+# IDF 6 moved the peripheral HAL/LL headers out of `hal` into per-block
+# components.
+if("${IDF_VERSION_MAJOR}" GREATER_EQUAL 6)
+    list(APPEND priv_requires
+        esp_hal_mcpwm esp_hal_ana_conv esp_hal_dma esp_hal_gpio
+        esp_hal_i2c esp_hal_timg)
+endif()
+
 if(ESP_PLATFORM)
     idf_component_register(SRCS "${srcs}"
                            INCLUDE_DIRS "${includes}"
                            PRIV_INCLUDE_DIRS
                                "source/utils"
                                "source/motor_control"
+                               "source/drivers"
                                "source/drivers/inverter"
                                "source/drivers/inverter/esp_foc_inverter_mcpwm/mcpwm_bridge"
                                "source/drivers/inverter/esp_foc_inverter_mcpwm/adc_dma_sense"
                                "source/drivers/inverter/esp_foc_inverter_mcpwm/etm_link"
-                           PRIV_REQUIRES freertos hal soc esp_hw_support esp_rom esp_timer
+                           PRIV_REQUIRES ${priv_requires}
                            LDFRAGMENTS linker.lf)
     # The TEZ path only fits its PWM period at -O2, whatever level the
     # project builds the rest of the firmware at.

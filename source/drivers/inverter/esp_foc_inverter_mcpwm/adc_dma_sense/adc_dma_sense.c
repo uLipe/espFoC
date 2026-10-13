@@ -10,6 +10,7 @@
 #include "esp_check.h"
 #include "esp_clk_tree.h"
 #include "esp_cpu.h"
+#include "esp_foc_hal_compat.h"
 #include "esp_intr_alloc.h"
 #include "esp_private/adc_share_hw_ctrl.h"
 #include "esp_private/regi2c_ctrl.h"
@@ -27,7 +28,11 @@
 #include "hal/gpio_ll.h"
 #include "soc/adc_channel.h"
 #include "soc/clk_tree_defs.h"
+#if __has_include("hal/gdma_channel.h")
+#include "hal/gdma_channel.h"
+#else
 #include "soc/gdma_channel.h"
+#endif
 #include "soc/gpio_struct.h"
 #include "soc/interrupts.h"
 #include "soc/soc_caps.h"
@@ -450,8 +455,7 @@ esp_err_t esp_foc_adc_dma_sense_init(esp_foc_adc_dma_sense_t **out,
     s->gdma = GDMA_LL_GET_HW(ADC_DMA_GROUP);
 
     gdma_ll_rx_reset_channel(s->gdma, ADC_DMA_RX_CH);
-    gdma_ll_rx_connect_to_periph(s->gdma, ADC_DMA_RX_CH, GDMA_TRIG_PERIPH_ADC,
-                                 SOC_GDMA_TRIG_PERIPH_ADC0);
+    ESP_FOC_GDMA_RX_CONNECT_ADC(s->gdma, ADC_DMA_RX_CH, SOC_GDMA_TRIG_PERIPH_ADC0);
     gdma_ll_rx_enable_owner_check(s->gdma, ADC_DMA_RX_CH, false);
     gdma_ll_rx_enable_etm_task(s->gdma, ADC_DMA_RX_CH, false);
     gdma_ll_rx_enable_interrupt(s->gdma, ADC_DMA_RX_CH, GDMA_LL_EVENT_RX_SUC_EOF, true);
@@ -483,7 +487,7 @@ void esp_foc_adc_dma_sense_deinit(esp_foc_adc_dma_sense_t *s)
     if (s->gdma != NULL) {
         gdma_ll_rx_stop(s->gdma, ADC_DMA_RX_CH);
         gdma_ll_rx_enable_interrupt(s->gdma, ADC_DMA_RX_CH, GDMA_LL_EVENT_RX_SUC_EOF, false);
-        gdma_ll_rx_disconnect_from_periph(s->gdma, ADC_DMA_RX_CH);
+        ESP_FOC_GDMA_RX_DISCONNECT(s->gdma, ADC_DMA_RX_CH);
     }
     adc_ll_digi_trigger_disable();
     adc_ll_digi_dma_disable();

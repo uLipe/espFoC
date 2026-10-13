@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "esp_check.h"
+#include "esp_foc_hal_compat.h"
 #include "esp_intr_alloc.h"
 #include "esp_log.h"
 #include "esp_rom_gpio.h"
@@ -16,7 +17,11 @@
 #include "hal/gpio_ll.h"
 #include "soc/gpio_struct.h"
 #include "soc/mcpwm_struct.h"
+#if __has_include("hal/mcpwm_periph.h")
+#include "hal/mcpwm_periph.h"
+#else
 #include "soc/mcpwm_periph.h"
+#endif
 #include "soc/clk_tree_defs.h"
 #include "soc/interrupts.h"
 #include "soc/io_mux_reg.h"
@@ -235,14 +240,14 @@ esp_err_t esp_foc_mcpwm_bridge_init(esp_foc_mcpwm_bridge_t *b,
     const int gpios_h[3] = { cfg->gpio_uh, cfg->gpio_vh, cfg->gpio_wh };
     const int gpios_l[3] = { cfg->gpio_ul, cfg->gpio_vl, cfg->gpio_wl };
     const uint32_t sig_a[3] = {
-        mcpwm_periph_signals.groups[gid].operators[0].generators[0].pwm_sig,
-        mcpwm_periph_signals.groups[gid].operators[1].generators[0].pwm_sig,
-        mcpwm_periph_signals.groups[gid].operators[2].generators[0].pwm_sig,
+        ESP_FOC_MCPWM_SIGNALS(gid).operators[0].generators[0].pwm_sig,
+        ESP_FOC_MCPWM_SIGNALS(gid).operators[1].generators[0].pwm_sig,
+        ESP_FOC_MCPWM_SIGNALS(gid).operators[2].generators[0].pwm_sig,
     };
     const uint32_t sig_b[3] = {
-        mcpwm_periph_signals.groups[gid].operators[0].generators[1].pwm_sig,
-        mcpwm_periph_signals.groups[gid].operators[1].generators[1].pwm_sig,
-        mcpwm_periph_signals.groups[gid].operators[2].generators[1].pwm_sig,
+        ESP_FOC_MCPWM_SIGNALS(gid).operators[0].generators[1].pwm_sig,
+        ESP_FOC_MCPWM_SIGNALS(gid).operators[1].generators[1].pwm_sig,
+        ESP_FOC_MCPWM_SIGNALS(gid).operators[2].generators[1].pwm_sig,
     };
 
     for (int op = 0; op < 3; op++) {
@@ -283,7 +288,7 @@ esp_err_t esp_foc_mcpwm_bridge_init(esp_foc_mcpwm_bridge_t *b,
         mcpwm_gpio_as_fault_in(b->gpio_fault);
         esp_rom_gpio_connect_in_signal(
             (uint32_t)b->gpio_fault,
-            mcpwm_periph_signals.groups[gid].gpio_faults[FAULT_SIG_ID].fault_sig,
+            ESP_FOC_MCPWM_SIGNALS(gid).gpio_faults[FAULT_SIG_ID].fault_sig,
             false);
         mcpwm_ll_fault_set_active_level(b->dev, FAULT_SIG_ID, b->fault_active_high);
         mcpwm_ll_fault_enable_detection(b->dev, FAULT_SIG_ID, true);
@@ -297,7 +302,7 @@ esp_err_t esp_foc_mcpwm_bridge_init(esp_foc_mcpwm_bridge_t *b,
     mcpwm_ll_intr_enable(b->dev, b->irq_mask, true);
 
     esp_err_t err = esp_intr_alloc_intrstatus(
-        mcpwm_periph_signals.groups[gid].irq_id,
+        ESP_FOC_MCPWM_SIGNALS(gid).irq_id,
         ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL3,
         (uint32_t)mcpwm_ll_intr_get_status_reg(b->dev),
         b->irq_mask | sample_mask,

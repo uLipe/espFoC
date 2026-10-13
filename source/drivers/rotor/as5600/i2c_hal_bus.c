@@ -20,7 +20,11 @@
 #include "hal/gpio_ll.h"
 #include "hal/i2c_ll.h"
 #include "soc/gpio_struct.h"
+#if __has_include("hal/i2c_periph.h")
+#include "hal/i2c_periph.h"
+#else
 #include "soc/i2c_periph.h"
+#endif
 #include "soc/io_mux_reg.h"
 #include "soc/clk_tree_defs.h"
 #include "espFoC/osal/esp_foc_osal.h"

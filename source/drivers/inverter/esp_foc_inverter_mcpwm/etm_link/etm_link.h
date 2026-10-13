@@ -12,7 +12,7 @@
 
 typedef struct {
     int mcpwm_timer; /* 0..2 */
-    int etm_channel; /* 0 .. SOC_ETM_CHANNELS_PER_GROUP-1 */
+    int etm_channel; /* 0 .. ESP_FOC_ETM_CHANNELS-1 */
     int stop_channel; /* ADC stop; must differ from etm_channel */
     int dma_rx_channel;
     bool stop_per_conversion; /* stop on each conversion done, else on GDMA RX EOF */
