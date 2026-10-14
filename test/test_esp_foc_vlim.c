@@ -1,6 +1,8 @@
 /*
  * Unit tests for dq circle voltage limiter.
  */
+#include <math.h>
+
 #include "unity.h"
 #include "espFoC/utils/esp_foc_angle.h"
 #include "espFoC/utils/esp_foc_q16.h"
@@ -72,4 +74,67 @@ TEST_CASE("vlim repeated clamp does not grow", "[espFoC][vlim]")
     }
     TEST_ASSERT_INT32_WITHIN(VLIM_ERR, vmax, mag_dq(d, q));
     TEST_ASSERT_TRUE(mag_dq(d, q) <= q16_add(vmax, VLIM_ERR));
+}
+
+TEST_CASE("vlim_mag with the soft magnitude matches vlim_dq", "[espFoC][vlim]")
+{
+    const q16_t vmax = Q16_INV_SQRT3;
+    for (int k = 0; k < 64; k++) {
+        const q16_t th = q16_from_float(-3.1f + 0.0968f * (float)k);
+        const q16_t r = q16_from_float(0.05f + 0.03f * (float)k);
+        q16_t s;
+        q16_t c;
+        esp_foc_sincos(th, &s, &c);
+        q16_t d0 = q16_mul(r, c);
+        q16_t q0 = q16_mul(r, s);
+        q16_t d1 = d0;
+        q16_t q1 = q0;
+        esp_foc_vlim_dq(&d0, &q0, vmax);
+        esp_foc_vlim_dq_mag(&d1, &q1, mag_dq(d1, q1), vmax);
+        TEST_ASSERT_EQUAL_INT32(d0, d1);
+        TEST_ASSERT_EQUAL_INT32(q0, q1);
+    }
+}
+
+TEST_CASE("vlim_mag under limit, zero and vmax edges", "[espFoC][vlim]")
+{
+    q16_t d = q16_from_float(0.2f);
+    q16_t q = q16_from_float(-0.1f);
+    esp_foc_vlim_dq_mag(&d, &q, mag_dq(d, q), Q16_INV_SQRT3);
+    TEST_ASSERT_EQUAL_INT32(q16_from_float(0.2f), d);
+    TEST_ASSERT_EQUAL_INT32(q16_from_float(-0.1f), q);
+
+    d = 0;
+    q = 0;
+    esp_foc_vlim_dq_mag(&d, &q, 0, Q16_INV_SQRT3);
+    TEST_ASSERT_EQUAL_INT32(0, d);
+    TEST_ASSERT_EQUAL_INT32(0, q);
+
+    d = Q16_ONE;
+    q = Q16_ONE;
+    esp_foc_vlim_dq_mag(&d, &q, mag_dq(d, q), 0);
+    TEST_ASSERT_EQUAL_INT32(0, d);
+    TEST_ASSERT_EQUAL_INT32(0, q);
+
+    d = Q16_ONE;
+    q = Q16_ONE;
+    esp_foc_vlim_dq_mag(&d, &q, mag_dq(d, q), Q16_MINUS_ONE);
+    TEST_ASSERT_EQUAL_INT32(0, d);
+    TEST_ASSERT_EQUAL_INT32(0, q);
+}
+
+TEST_CASE("vlim_mag exact magnitude lands on vmax and does not grow", "[espFoC][vlim]")
+{
+    const q16_t vmax = Q16_INV_SQRT3;
+    q16_t d = q16_from_float(1.5f);
+    q16_t q = q16_from_float(-2.0f);
+    for (int i = 0; i < 50; i++) {
+        const q16_t mag = q16_from_float(sqrtf(q16_to_float(d) * q16_to_float(d) +
+                                               q16_to_float(q) * q16_to_float(q)));
+        esp_foc_vlim_dq_mag(&d, &q, mag, vmax);
+    }
+    const float m = sqrtf(q16_to_float(d) * q16_to_float(d) + q16_to_float(q) * q16_to_float(q));
+    TEST_ASSERT_FLOAT_WITHIN(4.0f / 65536.0f, q16_to_float(vmax), m);
+    TEST_ASSERT_TRUE(d > 0 && q < 0);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, -2.0f / 1.5f, q16_to_float(q) / q16_to_float(d));
 }
