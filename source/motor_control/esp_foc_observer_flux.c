@@ -52,12 +52,8 @@ static q16_t lpf1(q16_t *w, q16_t x, q16_t b0)
     return y;
 }
 
-static q16_t flux_dpsi_mwb(q16_t v, q16_t inv_ts)
+static q16_t flux_sat64(int64_t r)
 {
-    if (inv_ts == 0) {
-        return 0;
-    }
-    int64_t r = (((int64_t)v * 1000) << 16) / (int64_t)inv_ts;
     if (r > INT32_MAX) {
         return (q16_t)INT32_MAX;
     }
@@ -65,6 +61,17 @@ static q16_t flux_dpsi_mwb(q16_t v, q16_t inv_ts)
         return (q16_t)INT32_MIN;
     }
     return (q16_t)r;
+}
+
+static q16_t flux_dpsi_mwb(q16_t v, int32_t ts_mwb_q27)
+{
+    return flux_sat64(((int64_t)v * ts_mwb_q27 + (1LL << 26)) >> 27);
+}
+
+/* x / 1000 as a multiply by round(2^41 / 1000); |error| < 1 LSB over int32. */
+static q16_t flux_mwb_to_wb(q16_t x)
+{
+    return (q16_t)(((int64_t)x * 2199023256LL + (1LL << 40)) >> 41);
 }
 
 static void flux_seed_psi(esp_foc_observer_flux_t *o, q16_t i_a, q16_t i_b)
@@ -178,6 +185,8 @@ static void flux_update(esp_foc_observer_t *self,
     const q16_t rs = o->rs;
     const q16_t ls = o->ls_mh;
     const q16_t inv_ts = o->inv_ts;
+    const int32_t ts_q36 = o->ts_q36;
+    const int32_t ts_mwb_q27 = o->ts_mwb_q27;
 
     if (!o->have_psi) {
         flux_seed_psi(o, i_alpha, i_beta);
@@ -189,8 +198,8 @@ static void flux_update(esp_foc_observer_t *self,
     q16_t psi_r_a = q16_sub(o->psi_s_a, q16_mul(ls, i_alpha));
     q16_t psi_r_b = q16_sub(o->psi_s_b, q16_mul(ls, i_beta));
 
-    q16_t dpsi_a = flux_dpsi_mwb(va_drop, inv_ts);
-    q16_t dpsi_b = flux_dpsi_mwb(vb_drop, inv_ts);
+    q16_t dpsi_a = flux_dpsi_mwb(va_drop, ts_mwb_q27);
+    q16_t dpsi_b = flux_dpsi_mwb(vb_drop, ts_mwb_q27);
     o->psi_s_a = q16_sub(q16_add(o->psi_s_a, dpsi_a),
                          q16_mul(o->lambda_ts, psi_r_a));
     o->psi_s_b = q16_sub(q16_add(o->psi_s_b, dpsi_b),
@@ -266,11 +275,12 @@ static void flux_update(esp_foc_observer_t *self,
                 o->omega = w;
             }
         }
-        o->theta = q16_wrap_pi(q16_add(o->theta, q16_div(o->omega, inv_ts)));
+        const q16_t dth = (q16_t)(((int64_t)o->omega * ts_q36 + (1LL << 35)) >> 36);
+        o->theta = q16_wrap_pi(q16_add(o->theta, dth));
     }
 
-    o->e_a = q16_div(q16_mul(q16_neg(o->omega), o->psi_r_b), FLUX_MWB);
-    o->e_b = q16_div(q16_mul(o->omega, o->psi_r_a), FLUX_MWB);
+    o->e_a = flux_mwb_to_wb(q16_mul(q16_neg(o->omega), o->psi_r_b));
+    o->e_b = flux_mwb_to_wb(q16_mul(o->omega, o->psi_r_a));
 
     o->i_a = i_alpha;
     o->i_b = i_beta;
@@ -430,6 +440,8 @@ esp_err_t esp_foc_observer_flux_init(esp_foc_observer_flux_t *o,
     o->ls_mh = q16_from_float(cfg->ls_h * 1000.0f);
     o->psi_f_mwb = q16_from_float(cfg->psi_f_wb * 1000.0f);
     o->inv_ts = q16_from_float(1.0f / ts);
+    o->ts_q36 = (int32_t)((double)ts * 68719476736.0 + 0.5);
+    o->ts_mwb_q27 = (int32_t)((double)ts * 1000.0 * 134217728.0 + 0.5);
     o->lambda_ts = q16_from_float(2.0f * (float)M_PI * blend_hz * ts);
     o->lpf_b0 = q16_from_float(b0);
     ESP_RETURN_ON_ERROR(esp_foc_pid_init(&o->pll_pi, pll_kp, pll_ki, 0.0f, 0.0f, ts),

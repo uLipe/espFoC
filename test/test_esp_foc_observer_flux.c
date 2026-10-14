@@ -767,3 +767,79 @@ TEST_CASE("flux observer ceiling keeps the estimate direction",
 
     TEST_ASSERT_TRUE_MESSAGE(checked, "ceiling never engaged");
 }
+
+TEST_CASE("flux theta integrates omega*Ts over many samples without drift",
+          "[espFoC][observer][flux]")
+{
+    const float rates[] = { 10000.0f, 20000.0f, 40000.0f };
+    const float speeds[] = { 0.0f, 2.0f * (float)M_PI * 300.0f,
+                             -2.0f * (float)M_PI * 800.0f };
+    const int n = 4000;
+    for (unsigned r = 0; r < 3u; r++) {
+        for (unsigned k = 0; k < 3u; k++) {
+            esp_foc_observer_flux_t store;
+            esp_foc_observer_flux_config_t c = flux_cfg();
+            c.ts_s = 1.0f / rates[r];
+            esp_foc_observer_t *o = flux_ok(&store, &c);
+            const q16_t wq = q16_from_float(speeds[k]);
+            esp_foc_observer_set_pll_enable(o, false);
+            esp_foc_observer_set_theta(o, 0);
+            esp_foc_observer_set_omega(o, wq);
+            /* First update only seeds ψ̂; θ̂ advances from the second one. */
+            esp_foc_observer_update(o, 0, 0, 0, 0);
+            for (int i = 0; i < n; i++) {
+                esp_foc_observer_update(o, 0, 0, 0, 0);
+            }
+            const double want = fmod((double)q16_to_float(wq) * (double)c.ts_s * n,
+                                     2.0 * M_PI);
+            const float got = q16_to_float(esp_foc_observer_get_theta(o));
+            /* ≤ 0.5 LSB rounding per sample, same sign every step. */
+            const float tol = (float)n * 0.5f / 65536.0f + 1e-4f;
+            TEST_ASSERT_FLOAT_WITHIN(tol, 0.0f, wrap_pi_f(got - (float)want));
+            if (k == 0u) {
+                TEST_ASSERT_EQUAL_INT32(0, esp_foc_observer_get_theta(o));
+            }
+        }
+    }
+}
+
+TEST_CASE("flux observer tracks at 10 and 40 kHz sample rates",
+          "[espFoC][observer][flux]")
+{
+    const float rates[] = { 10000.0f, 40000.0f };
+    for (unsigned r = 0; r < 2u; r++) {
+        esp_foc_observer_flux_t store;
+        esp_foc_observer_flux_config_t c = flux_cfg();
+        c.ts_s = 1.0f / rates[r];
+        esp_foc_observer_t *o = flux_ok(&store, &c);
+        float theta = 0.4f;
+        run_flux_at_hz(o, &c, 120.0f, (int)(0.4f * rates[r]), 0.4f, &theta);
+
+        float d = wrap_pi_f(q16_to_float(esp_foc_observer_get_theta(o)) - theta);
+        TEST_ASSERT_TRUE_MESSAGE(fabsf(d) < 0.45f, "theta error");
+        TEST_ASSERT_TRUE(esp_foc_observer_is_locked(o));
+        float pa = q16_to_float(esp_foc_observer_get_psi_alpha(o));
+        float pb = q16_to_float(esp_foc_observer_get_psi_beta(o));
+        TEST_ASSERT_FLOAT_WITHIN(0.0015f, c.psi_f_wb, sqrtf(pa * pa + pb * pb));
+    }
+}
+
+TEST_CASE("flux back-EMF is omega times psi in volts", "[espFoC][observer][flux]")
+{
+    esp_foc_observer_flux_t store;
+    esp_foc_observer_flux_config_t c = flux_cfg();
+    esp_foc_observer_t *o = flux_ok(&store, &c);
+    float theta = 0.4f;
+    run_flux_at_hz(o, &c, 300.0f, 8000, 0.4f, &theta);
+
+    const float w = q16_to_float(esp_foc_observer_get_omega(o));
+    const float pa = q16_to_float(esp_foc_observer_get_psi_alpha(o));
+    const float pb = q16_to_float(esp_foc_observer_get_psi_beta(o));
+    const float ea = q16_to_float(esp_foc_observer_get_e_alpha(o));
+    const float eb = q16_to_float(esp_foc_observer_get_e_beta(o));
+    /* ψ getters quantize Wb to 1/65536, so allow ω·2 LSB on top. */
+    const float tol = fabsf(w) * 2.0f / 65536.0f + 2.0f / 65536.0f;
+    TEST_ASSERT_FLOAT_WITHIN(tol, -w * pb, ea);
+    TEST_ASSERT_FLOAT_WITHIN(tol, w * pa, eb);
+    TEST_ASSERT_TRUE(sqrtf(ea * ea + eb * eb) > 0.5f * fabsf(w) * c.psi_f_wb);
+}

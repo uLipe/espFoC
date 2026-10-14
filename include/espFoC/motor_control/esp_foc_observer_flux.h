@@ -79,6 +79,11 @@ typedef struct {
     q16_t ls_mh;
     q16_t psi_f_mwb;
     q16_t inv_ts;
+    /* Ts as multipliers so the update has no 64-bit divide: Ts in Q36
+     * (θ += ω·Ts) and 1000·Ts in Q27 (V to mWb per sample). Both fit
+     * int32 for every Ts init accepts (< 10 ms). */
+    int32_t ts_q36;
+    int32_t ts_mwb_q27;
     q16_t lambda_ts;
     q16_t lpf_b0;
     esp_foc_pid_t pll_pi;
