@@ -27,3 +27,22 @@ void esp_foc_vlim_dq(q16_t *vd, q16_t *vq, q16_t vmax)
 #endif
     esp_foc_vlim_dq_soft(vd, vq, vmax);
 }
+
+void esp_foc_vlim_dq_mag(q16_t *vd, q16_t *vq, q16_t mag, q16_t vmax)
+{
+    const q16_t d = *vd;
+    const q16_t q = *vq;
+
+    if (vmax <= 0) {
+        *vd = 0;
+        *vq = 0;
+        return;
+    }
+    if (mag <= vmax) {
+        return;
+    }
+
+    const q16_t scale = q16_div(vmax, mag);
+    *vd = q16_mul(d, scale);
+    *vq = q16_mul(q, scale);
+}
