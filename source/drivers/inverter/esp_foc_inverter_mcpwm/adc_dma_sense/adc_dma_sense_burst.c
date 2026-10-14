@@ -13,6 +13,7 @@
 #include "esp_check.h"
 #include "esp_cpu.h"
 #include "esp_intr_alloc.h"
+#include "esp_foc_drv_intr.h"
 #include "esp_log.h"
 #include "esp_private/adc_share_hw_ctrl.h"
 #include "esp_private/periph_ctrl.h"
@@ -459,9 +460,9 @@ esp_err_t esp_foc_adc_dma_sense_init(esp_foc_adc_dma_sense_t **out,
     adc_ll_digi_dma_enable();
 
     dma_bring_up(s);
-    esp_err_t err = esp_intr_alloc(ETS_LP_AHB_PDMA_IN_CH0_INTR_SOURCE + ADC_DMA_RX_CH,
-                                   ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL3,
-                                   adc_dma_isr, s, &s->intr);
+    esp_err_t err = esp_foc_drv_intr_alloc(ETS_LP_AHB_PDMA_IN_CH0_INTR_SOURCE + ADC_DMA_RX_CH,
+                                           ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL3,
+                                           0, 0, adc_dma_isr, s, &s->intr);
     ESP_RETURN_ON_ERROR(err, TAG, "lp dma intr");
 
     ESP_LOGI(TAG, "burst ADC%u conv=%u ch=%d,%d %s lead=%lu ns",

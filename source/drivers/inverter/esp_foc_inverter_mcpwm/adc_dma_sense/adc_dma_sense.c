@@ -15,6 +15,7 @@
 #include "esp_cpu.h"
 #include "esp_foc_hal_compat.h"
 #include "esp_intr_alloc.h"
+#include "esp_foc_drv_intr.h"
 #include "esp_private/adc_share_hw_ctrl.h"
 #include "esp_private/regi2c_ctrl.h"
 #include "esp_private/sar_periph_ctrl.h"
@@ -464,9 +465,10 @@ esp_err_t esp_foc_adc_dma_sense_init(esp_foc_adc_dma_sense_t **out,
     gdma_ll_rx_enable_etm_task(s->gdma, ADC_DMA_RX_CH, false);
     gdma_ll_rx_enable_interrupt(s->gdma, ADC_DMA_RX_CH, GDMA_LL_EVENT_RX_SUC_EOF, true);
 
-    esp_err_t err = esp_intr_alloc(
+    esp_err_t err = esp_foc_drv_intr_alloc(
         ETS_DMA_IN_CH0_INTR_SOURCE + ADC_DMA_RX_CH,
         ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL3,
+        0, 0,
         adc_gdma_isr,
         s,
         &s->intr);

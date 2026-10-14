@@ -79,6 +79,7 @@ set(srcs
     "source/motor_control/esp_foc_rotor_est.c"
     "source/motor_control/esp_foc_rotor_pll.c"
     "source/motor_control/esp_foc_if.c"
+    "source/drivers/esp_foc_drv_intr.c"
     "source/drivers/rotor/sensorless/esp_foc_rotor_sensorless.c"
     "source/drivers/inverter/esp_foc_inverter_mcpwm/mcpwm_bridge/mcpwm_bridge.c"
     "source/drivers/inverter/esp_foc_inverter_mcpwm/adc_dma_sense/adc_dma_sense.c"

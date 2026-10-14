@@ -29,6 +29,31 @@ menu "espFoC Settings"
         range 1 8
         default 2
 
+    choice ESP_FOC_CORE
+        prompt "CPU for the espFoC tasks and interrupts"
+        depends on !FREERTOS_UNICORE
+        default ESP_FOC_CORE_0 if ESP_MAIN_TASK_AFFINITY_CPU1
+        default ESP_FOC_CORE_1
+        help
+            The stacks' tasks and every interrupt the espFoC drivers allocate
+            (PWM TEZ, ADC DMA, hall GPIO, AS5600 I2C) run on this CPU, so the
+            control path does not share a core with app_main. Init and the
+            public API can be called from any core.
+
+        config ESP_FOC_CORE_0
+            bool "CPU0"
+        config ESP_FOC_CORE_1
+            bool "CPU1"
+        config ESP_FOC_CORE_NO_AFFINITY
+            bool "No affinity (tasks float, interrupts on the calling CPU)"
+    endchoice
+
+    config ESP_FOC_CORE_ID
+        int
+        default 0 if ESP_FOC_CORE_0
+        default 1 if ESP_FOC_CORE_1
+        default -1
+
     config ESP_FOC_PWM_RATE_HZ
         int "Default PWM carrier frequency [Hz]"
         range 5000 40000
