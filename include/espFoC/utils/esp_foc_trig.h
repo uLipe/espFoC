@@ -13,8 +13,8 @@ extern "C" {
 
 /**
  * Fixed-point trigonometry (Q16.16 radians).
- * Default: software CORDIC (32 iterations, quarter-circle + quadrant map).
- * Optional HW path via CONFIG_ESP_FOC_USE_HW_ACCEL_TRIGO (falls back to soft).
+ * Software CORDIC (quarter-circle + quadrant map), safe from any context.
+ * The TEZ hot path can use espFoC/drivers/esp_foc_trigo_hw.h instead.
  */
 
 /** sin and cos of @p angle in one call. Angle wrapped to (−π, +π]. */

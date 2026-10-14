@@ -956,13 +956,6 @@ menu "espFoC Settings"
 
     endmenu
 
-    config ESP_FOC_USE_HW_ACCEL_TRIGO
-        bool "Use hardware CORDIC for trig when available"
-        default n
-        help
-            When enabled and the SoC exposes a CORDIC accelerator, sin/cos/atan2/sqrt
-            use hardware. Otherwise the software CORDIC path is used (all current targets).
-
     config ESP_FOC_USE_HW_ACCEL_IIR
         bool "Use hardware IIR for biquad when available"
         default n
