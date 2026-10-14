@@ -57,15 +57,23 @@ static const char *TAG = "foc_adc";
 #endif
 #define BURST_CONV_NS 600u
 /*
- * No attenuation (SOC_ADC_ATTEN_NUM 1). Single-ended, a P pad reads 0..2 V as
- * ADC_LL_ZERO_DIFF_CODE..4393 (17-bit weighted result, see
- * adc_digi_output_data_t) and an N pad reads it inverted, ..0; past 2 V both
- * sit on the rail. An amplifier idling at 1.65 V therefore keeps 0.35 V of
- * headroom on the positive side only.
+ * No attenuation (SOC_ADC_ATTEN_NUM 1). Where the SAR is differential each
+ * shunt is converted as its pad pair, P - N over -2..+2 V onto
+ * 0..ADC_LL_ZERO_DIFF_CODE..4393 (17-bit weighted result, see
+ * adc_digi_output_data_t); the board puts its amplifier reference on the N
+ * pad. Single-ended the other side of the SAR sits at 0 V instead, which
+ * leaves only 0..+2 V of a P pad.
  */
 #define BURST_CODE_MAX  4393
 #define BURST_FS_VOLTS  2.0f
 #define BURST_FS_COUNTS (BURST_CODE_MAX - ADC_LL_ZERO_DIFF_CODE)
+#if SOC_ADC_DIFF_SUPPORTED
+/* Bit 0 of a pattern item selects the pad pair, whichever pad the channel
+ * field names; bit 1 had no effect on silicon. Not written by the IDF LL. */
+#define BURST_PATT_DIFF 1u
+#else
+#define BURST_PATT_DIFF 0u
+#endif
 
 struct esp_foc_adc_dma_sense {
     bool inited;
@@ -78,7 +86,6 @@ struct esp_foc_adc_dma_sense {
     uint32_t lead_ns;
     int32_t conv_offset_ns[ADC_MAX_CONV];
     int channels[ADC_MAX_SHUNTS];
-    bool n_pad[ADC_MAX_SHUNTS];
     q16_t scale_q16;
     int32_t offset_raw[ADC_MAX_SHUNTS];
     volatile q16_t iu, iv, iw;
@@ -140,30 +147,45 @@ static int gpio_to_channel(uint8_t unit, int gpio)
 }
 
 /*
- * Pads come in P/N pairs, and the driver numbers each pad as its own channel,
- * N first: channel 2k is CHk_N. Read single-ended, an N pad's code falls as
- * the voltage rises, so its current has to be negated.
+ * Pads come in P/N pairs and the IDF numbers each pad as its own channel,
+ * N first: channel 2k is CHk_N, 2k+1 is CHk_P. The shunt GPIO must be the P
+ * pad so a rising amplifier output reads as a rising code.
  */
-static bool channel_is_n_pad(int ch)
+static bool channel_is_p_pad(int ch)
 {
 #if SOC_ADC_DIFF_SUPPORTED
-    return (ch & 1) == 0;
+    return (ch & 1) == 1;
 #else
     (void)ch;
-    return false;
+    return true;
 #endif
 }
 
-/* Offset-removed counts, positive for a rising pad voltage on either pad. */
-static inline int32_t pad_delta(const esp_foc_adc_dma_sense_t *s, int k, uint32_t raw)
+static inline bool code_on_rail(uint32_t raw)
 {
-    const int32_t d = (int32_t)raw - s->offset_raw[k];
-    return s->n_pad[k] ? -d : d;
+    return raw == 0u || raw >= BURST_CODE_MAX;
 }
 
-static inline bool pad_on_rail(const esp_foc_adc_dma_sense_t *s, int k, uint32_t raw)
+static void patt_set_model(adc_unit_t unit, uint32_t idx, uint32_t model)
 {
-    return s->n_pad[k] ? (raw == 0u) : (raw >= BURST_CODE_MAX);
+    const uint32_t bits = (model & 3u) << (18u - (idx % 4u) * 6u);
+    volatile uint32_t *tab;
+    if (unit == ADC_UNIT_1) {
+        switch (idx / 4u) {
+        case 0: tab = &ADC.sar1_patt_tab1.val; break;
+        case 1: tab = &ADC.sar1_patt_tab2.val; break;
+        case 2: tab = &ADC.sar1_patt_tab3.val; break;
+        default: tab = &ADC.sar1_patt_tab4.val; break;
+        }
+    } else {
+        switch (idx / 4u) {
+        case 0: tab = &ADC.sar2_patt_tab1.val; break;
+        case 1: tab = &ADC.sar2_patt_tab2.val; break;
+        case 2: tab = &ADC.sar2_patt_tab3.val; break;
+        default: tab = &ADC.sar2_patt_tab4.val; break;
+        }
+    }
+    *tab |= bits;
 }
 
 static void gpio_as_analog(int gpio)
@@ -203,8 +225,8 @@ static void adc_parse_and_publish(esp_foc_adc_dma_sense_t *s)
         if (k < 0) {
             continue;
         }
-        delta[k] = pad_delta(s, k, w.type2.data);
-        rail += pad_on_rail(s, k, w.type2.data) ? 1u : 0u;
+        delta[k] = (int32_t)w.type2.data - s->offset_raw[k];
+        rail += code_on_rail(w.type2.data) ? 1u : 0u;
         n[k]++;
     }
     /* A clipped sample is still published (it is the nearest value the pad can
@@ -380,9 +402,14 @@ esp_err_t esp_foc_adc_dma_sense_init(esp_foc_adc_dma_sense_t **out,
         const int ch = gpio_to_channel(s->unit, gpios[i]);
         ESP_RETURN_ON_FALSE(ch >= 0, ESP_ERR_INVALID_ARG, TAG, "gpio %d is not on ADC%u",
                             gpios[i], (unsigned)s->unit + 1u);
+        ESP_RETURN_ON_FALSE(channel_is_p_pad(ch), ESP_ERR_INVALID_ARG, TAG,
+                            "gpio %d is an N pad; give the P pad, N carries the reference",
+                            gpios[i]);
         s->channels[i] = ch;
-        s->n_pad[i] = channel_is_n_pad(ch);
         gpio_as_analog(gpios[i]);
+#if SOC_ADC_DIFF_SUPPORTED
+        gpio_as_analog(adc_channel_io_map[s->unit][ch - 1]);
+#endif
     }
 
     const float den = cfg->amp_gain * cfg->shunt_ohm;
@@ -418,6 +445,7 @@ esp_err_t esp_foc_adc_dma_sense_init(esp_foc_adc_dma_sense_t **out,
             .bit_width = SOC_ADC_DIGI_MAX_BITWIDTH,
         };
         adc_ll_digi_set_pattern_table(unit, i, pat);
+        patt_set_model(unit, i, BURST_PATT_DIFF);
     }
     /*
      * No converter EOF at all. Any non-zero count closes a descriptor early,
@@ -433,10 +461,9 @@ esp_err_t esp_foc_adc_dma_sense_init(esp_foc_adc_dma_sense_t **out,
                                    adc_dma_isr, s, &s->intr);
     ESP_RETURN_ON_ERROR(err, TAG, "lp dma intr");
 
-    ESP_LOGI(TAG, "burst ADC%u conv=%u ch=%d%s,%d%s lead=%lu ns",
+    ESP_LOGI(TAG, "burst ADC%u conv=%u ch=%d,%d %s lead=%lu ns",
              (unsigned)s->unit + 1u, (unsigned)s->conv_count,
-             s->channels[0], s->n_pad[0] ? "(N)" : "(P)",
-             s->channels[1], s->n_pad[1] ? "(N)" : "(P)",
+             s->channels[0], s->channels[1], BURST_PATT_DIFF ? "diff" : "single",
              (unsigned long)s->lead_ns);
 
     s->armed = false;
@@ -657,7 +684,7 @@ uint8_t esp_foc_adc_dma_sense_peek_conversions(esp_foc_adc_dma_sense_t *s,
         if (k < 0) {
             continue;
         }
-        const int32_t delta = pad_delta(s, k, word.type2.data);
+        const int32_t delta = (int32_t)word.type2.data - s->offset_raw[k];
         if (amps != NULL) {
             amps[w] = q16_mul((q16_t)(delta << 16), s->scale_q16);
         }
