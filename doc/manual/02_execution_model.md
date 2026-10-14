@@ -245,16 +245,19 @@ the MCPWM inverter, without the trace:
 
 | Item | Cycles | Time |
 |---|---|---|
-| Stack TEZ callback, mean / worst | 2380 / 2820 | 7.4 / 8.8 µs |
+| Stack TEZ callback, mean / worst | 2320 / 2750 | 7.3 / 8.6 µs |
 | Stack DMA callback | 86 | 0.3 µs |
-| Everything per PWM period (TEZ and DMA interrupts, entry and exit included) | 4384 | 13.7 µs |
-| Supervisor task (encoder fetch at 2.5 kHz, PLL) | — | 5.8 % of the CPU |
+| Everything per PWM period (TEZ and DMA interrupts, entry and exit included) | 4334 | 13.5 µs |
+| Supervisor task (encoder fetch at 2.5 kHz, PLL) | — | 5.7 % of the CPU |
 
 | PWM rate | Load of the espFoC CPU, one sensored axis |
 |---|---|
 | 20 kHz | 33 % |
-| 40 kHz | 61 % (default at 320 MHz) |
-| 80 kHz | does not fit: 13.7 µs of work in a 12.5 µs period |
+| 40 kHz | 60 % (default at 320 MHz) |
+| 80 kHz | does not fit: 13.5 µs of work in a 12.5 µs period |
+
+The sensorless stack's TEZ callback, with the flux observer, costs about
+3840 cycles (12.0 µs) on the same chip and 5340 cycles (33.4 µs) on the C6.
 
 Each axis adds its own interrupts and supervisor on the same CPU, so two axes
 need 20 kHz on that chip. The ESP32-C6 (160 MHz, no CORDIC) runs one axis of
