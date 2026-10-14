@@ -1,11 +1,11 @@
 # espFoC
 
 <p align="center">
-  <img src="doc/images/pos_ctl.gif" alt="espFoC position control on an ESP32-C6" width="320">
+  <img src="doc/images/pos_ctl.gif" alt="espFoC position control on the ESP32-C6 validation bench" width="320">
 </p>
 
-Field-oriented control (FoC) of PMSM and BLDC motors on the ESP32, as an
-ESP-IDF component.
+Field-oriented control (FoC) of PMSM and BLDC motors on Espressif chips, as
+an ESP-IDF component.
 
 espFoC runs the whole FoC current loop in one interrupt per PWM period, in
 Q16.16 fixed point, and wraps it in two ready-to-use controllers: a
@@ -14,7 +14,7 @@ estimates the rotor angle with a flux observer. Before either one runs, espFoC
 can find how the motor is wired and measure the motor's parameters, so a new
 motor needs only its pole pairs and the supply voltage.
 
-espFoC is built for the ESP32 chips that have **ETM**, **MCPWM** and an
+espFoC is built for the Espressif chips that have **ETM**, **MCPWM** and an
 **ADC with DMA**, and it leans on all three. The MCPWM makes the six
 center-aligned PWM outputs with hardware dead time. Its counter-zero event
 starts the ADC conversion through the ETM, with no CPU in the path. The DMA
@@ -35,15 +35,27 @@ the basics and covers every subsystem in detail.
 | Motor identification | Measures phase resistance, inductance and flux linkage and designs the current loop. With a rotor sensor it also measures acceleration per amp, inertia, and the sensor's angle offset and delay. |
 | Inverter driver | MCPWM, 6 complementary center-aligned PWM outputs with dead time, ETM-triggered ADC with DMA, 2 or 3 inline shunts (low-side sensing is not implemented; 3 shunts not yet validated on hardware), bridge enable, optional fault input, current trip. |
 | Rotor sensor drivers | AS5600 magnetic encoder over I²C. Hall-effect sensors with ETM-timestamped edges (driver validated on its own; the examples use the AS5600). |
-| Real-time design | Q16.16 fixed point on the hot path, hot path placed in IRAM by a linker fragment, no heap in the drivers (static pools), the speed and position loops decimated inside the same interrupt. |
+| Real-time design | Q16.16 fixed point on the hot path, hot path placed in IRAM by a linker fragment, no heap in the drivers (static pools), the speed and position loops decimated inside the same interrupt. On chips with a CORDIC unit, the interrupt's sine, cosine, arctangent and vector magnitude run on it; elsewhere the same calls run in software. |
+| Multi-core | On dual-core chips, Kconfig (`ESP_FOC_CORE`) picks the CPU for the control interrupts and the stacks' tasks, by default the one the application's `app_main` is not on. The application can call the API from any CPU. |
 | Portability | Common code talks to the chip through the driver layer and to the RTOS through an OS abstraction layer (OSAL). Driver support is gated on SoC capabilities, not target names. The math blocks can be used on their own with no stack built. |
-| Testing | Unit tests for the common layer run on the Linux host in CI and on the chip with `examples/unit_test_runner`. Every example is validated on an ESP32-C6 with a motor. |
+| Testing | Unit tests for the common layer run on the Linux host in CI and on the chip with `examples/unit_test_runner`. Every example is validated with a motor on an ESP32-C6 bench. |
 
-**Targets.** Validated on the ESP32-C6 with ESP-IDF v5.5. The component
-manifest also lists the ESP32-C5, ESP32-H2 and ESP32-P4, which have the same
-peripheral set; they are not yet validated on hardware. Chips without ETM
-(such as the original ESP32 and the ESP32-S3) are not supported: the build
-stops with an error.
+**Supported chips.** Any Espressif chip with MCPWM, ETM and an ADC with DMA.
+The build checks those SoC capabilities, not the chip name, and the component
+manifest lists the chips that pass: ESP32-C6, ESP32-C5, ESP32-H2, ESP32-P4 and
+ESP32-S31. Chips without ETM (such as the original ESP32 and the ESP32-S3)
+are not supported: the build stops with an error.
+
+**Validation.** The reference bench is an **ESP32-C6** driving a motor, with
+ESP-IDF v5.5. The C6 is one of the smallest chips in the family: a single
+160 MHz RISC-V core with no floating-point unit. On it espFoC runs the
+complete sensored and sensorless stacks at 20 kHz, commissioning included,
+and every example is validated there. That shows how far down espFoC
+scales, and leaves the faster chips headroom for more axes or a higher PWM
+rate. The **ESP32-S31** (two cores at 320 MHz, with CORDIC) runs the drivers
+and the unit tests on silicon, without a motor yet: one sensored axis takes
+61 % of its CPU at 40 kHz, the default PWM rate on 320 MHz chips. The ESP32-C5, ESP32-H2 and ESP32-P4 are not yet
+validated on hardware.
 
 ## Principle of operation
 
@@ -131,9 +143,12 @@ espFoC is layered, and the application can use every layer:
 - **Drivers.** The inverter driver owns the MCPWM, ETM and ADC with DMA, and
   calls the control loop from its counter-zero interrupt. Rotor sensor
   drivers share one interface, so a stack does not care which sensor it
-  reads. Both are written on the ESP-IDF HAL and LL layers, not the
-  high-level drivers, so the hot path stays short. The drivers are public and
-  can be brought up on their own, for example to check the wiring.
+  reads. The optional trig driver runs the interrupt's trigonometry on the
+  chip's CORDIC unit when there is one, and in software otherwise. All are
+  written on the ESP-IDF HAL and LL layers, not the high-level drivers, so
+  the hot path stays short. On dual-core chips every interrupt they allocate
+  lands on the CPU picked in Kconfig. The drivers are public and can be
+  brought up on their own, for example to check the wiring.
 - **OSAL.** Tasks, events, sleeps and critical sections. Only the OSAL talks to
   FreeRTOS; everything above it is RTOS-agnostic.
 - **Dev tools.** The ESP-IDF build system and Kconfig (`idf.py menuconfig`,
@@ -186,10 +201,11 @@ In `idf.py menuconfig`, under **espFoC Settings**, pick the **FoC stack**
 identification** on. Or put the same in `sdkconfig.defaults`:
 
 ```text
+# Any supported chip.
 CONFIG_IDF_TARGET="esp32c6"
 # Phase discovery times its probe pulses in 1 ms sleeps.
 CONFIG_FREERTOS_HZ=1000
-CONFIG_ESP_FOC_PWM_RATE_HZ=20000
+# CONFIG_ESP_FOC_PWM_RATE_HZ defaults to 40000 on 320 MHz chips, 20000 otherwise.
 CONFIG_ESP_FOC_STACK_SENSORED=y
 CONFIG_ESP_FOC_ENABLE_MOTOR_ID=y
 # The control loop runs in an interrupt at the PWM rate.
@@ -201,7 +217,8 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 This is the shape of every espFoC application: create the drivers,
 commission the motor, start the controller, send set points. The snippets
 below spin a motor with an AS5600 encoder at a fixed torque current; the pins
-match the [board connection](#hardware-connection) of the examples.
+match the [board connection](#hardware-connection) of the examples (the
+ESP32-C6 bench; on another chip only the GPIO numbers change).
 
 Headers:
 
@@ -332,7 +349,7 @@ and the console output to expect.
 
 ![Hardware connection](doc/diagram/hardware.png)
 
-The ESP32 provides the control side:
+The Espressif chip provides the control side:
 
 - **MCPWM**: six PWM outputs, high and low side of each phase, with dead time.
 - **ETM**: links the PWM counter-zero event to the ADC start.
@@ -340,6 +357,7 @@ The ESP32 provides the control side:
 - **GPIO**: the bridge enable, and an optional fault input from the power
   stage.
 - **I²C or GPIO**: the rotor sensor, on a sensored setup.
+- **CORDIC**, if the chip has one: the trigonometry of the control interrupt.
 
 The rest is external:
 

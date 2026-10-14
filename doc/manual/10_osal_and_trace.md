@@ -59,6 +59,9 @@ int esp_foc_task_max_priority(void);
 int esp_foc_task_spawn(esp_foc_task_fn_t fn, void *arg, const char *name,
                        size_t stack_bytes, int priority,
                        esp_foc_task_handle_t *out_handle_opt);
+int esp_foc_task_spawn_stack(esp_foc_task_fn_t fn, void *arg, const char *name,
+                             size_t stack_bytes, int priority,
+                             esp_foc_task_handle_t *out_handle_opt);
 bool esp_foc_task_is_alive(esp_foc_task_handle_t handle);
 void esp_foc_task_yield(void);
 void esp_foc_task_delete_self(void);
@@ -69,7 +72,14 @@ void esp_foc_task_delete_self(void);
 - `esp_foc_task_spawn()` takes the stack size in **bytes** and a FreeRTOS
   priority, clamped to `0 .. max`. A `NULL` or empty name becomes `"espfoc"`.
   It returns 0 on success, -1 for a `NULL` function or a zero stack, -2 when
-  the RTOS cannot create the task. `out_handle_opt` may be `NULL`.
+  the RTOS cannot create the task. `out_handle_opt` may be `NULL`. The task is
+  not pinned to a CPU.
+- `esp_foc_task_spawn_stack()` behaves the same but pins the task to the
+  espFoC CPU (`CONFIG_ESP_FOC_CORE_ID`, see
+  [CPU placement](02_execution_model.md#cpu-placement-on-dual-core-chips)).
+  It is unpinned on single-core chips and with
+  `CONFIG_ESP_FOC_CORE_NO_AFFINITY`. The supervisors and the identification
+  tasks use it; application tasks normally use `esp_foc_task_spawn()`.
 - A task function must not return; end it with `esp_foc_task_delete_self()`.
 
 #### Time
@@ -115,6 +125,11 @@ values shared with the TEZ interrupt is read or written together, for example
 the status snapshot or the d/q voltage feedforward pair. Keep the section to a
 few loads and stores: no blocking calls, no logging, no float math you can do
 outside.
+
+The section masks interrupts only on the CPU that enters it. The TEZ never
+takes the lock, so on a dual-core chip a task on the other CPU does not
+exclude it; see
+[CPU placement](02_execution_model.md#cpu-placement-on-dual-core-chips).
 
 #### Events
 
@@ -254,6 +269,7 @@ callback) go through `esp_foc_event_post_auto()` or
 | Symbol | Default | Meaning |
 |---|---|---|
 | `CONFIG_ESP_FOC_MAX_MUTEXES` | 2 | OSAL mutex pool size (range 1–8) |
+| `CONFIG_ESP_FOC_CORE` | CPU1 (CPU0 if `app_main` is on CPU1) | dual-core chips: CPU that `esp_foc_task_spawn_stack()` pins to |
 | `CONFIG_FREERTOS_HZ` (IDF) | IDF default | tick rate; the examples set 1000, phase discovery requires a tick of 1 ms or shorter |
 
 ### Use cases
