@@ -1,7 +1,7 @@
 # espFoC user manual
 
 espFoC is an ESP-IDF component that spins PMSM and BLDC motors with field-oriented control
-(FoC) on ESP32 chips that have MCPWM, ETM and ADC with DMA. The [top README](../../README.md)
+(FoC) on the Espressif chips that have MCPWM, ETM and ADC with DMA. The [top README](../../README.md)
 shows what it does and how to get a first motor turning. This manual is the detailed
 reference: it explains how each subsystem works, how to use its API, and when you would
 pick it.

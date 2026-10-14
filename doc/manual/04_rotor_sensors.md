@@ -217,7 +217,9 @@ What the driver does:
   reads 0.
 - **`step()`** adds speed / `pwm_hz` to the angle when `pwm_hz` is set.
 - **`fetch_start()`** starts the same read asynchronously; the I2C interrupt
-  updates the latch when it completes.
+  updates the latch when it completes. That interrupt, like the Hall sensor's
+  GPIO interrupt below, is allocated on the espFoC CPU (see
+  [CPU placement](02_execution_model.md#cpu-placement-on-dual-core-chips)).
 - **`calibrate_offset(samples)`** averages `samples` reads (handling the wrap
   at 4096), installs the result as the offset so the current position reads
   0, and resets the speed. It returns `ESP_ERR_INVALID_ARG` for `samples < 1`

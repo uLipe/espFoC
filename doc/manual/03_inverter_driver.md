@@ -10,8 +10,8 @@ its own to bring up a new board before any controller is attached.
 
 The public interface is generic
 ([`esp_foc_inverter.h`](../../include/espFoC/drivers/esp_foc_inverter.h)); the
-implementation shipped with espFoC builds it from the ESP32 MCPWM, ETM, ADC and
-GDMA peripherals
+implementation shipped with espFoC builds it from the MCPWM, ETM, ADC and GDMA
+peripherals of the supported Espressif chips
 ([`esp_foc_inverter_mcpwm.h`](../../include/espFoC/drivers/esp_foc_inverter_mcpwm.h)).
 
 ## What it does
@@ -120,6 +120,14 @@ Two interrupt handlers run, both at level 3 and allocated with
 
 Because both handlers share one interrupt level, a long TEZ callback delays
 the EOF handler.
+
+Both are allocated on the espFoC CPU (`CONFIG_ESP_FOC_CORE`, see
+[CPU placement](02_execution_model.md#cpu-placement-on-dual-core-chips)).
+ESP-IDF binds an interrupt to the CPU that allocates it, so when `init()` runs
+on the other CPU the driver performs the allocation there with a blocking
+inter-processor call (`esp_ipc_call_blocking`); `deinit()` frees it the same
+way. With `CONFIG_ESP_FOC_CORE_NO_AFFINITY`, or on a single-core chip, the
+interrupts stay on the CPU that called `init()`.
 
 ### One PWM period
 
@@ -434,7 +442,7 @@ the nominal instant of each conversion relative to the timer peak.
 
 | Symbol | Default | Meaning |
 |---|---|---|
-| `CONFIG_ESP_FOC_PWM_RATE_HZ` | 20000 | Carrier frequency used when `pwm_hz` is 0 (range 5000..40000). The examples pass it explicitly. |
+| `CONFIG_ESP_FOC_PWM_RATE_HZ` | 40000 at ≥ 320 MHz CPU, else 20000 | Carrier frequency used when `pwm_hz` is 0 (range 5000..40000). The examples pass it explicitly. |
 | `CONFIG_ESP_FOC_MAX_INVERTERS` | 1 | Size of the static pools for inverter objects and their ADC sense blocks (range 1..2). |
 | `CONFIG_ESP_FOC_ADC_DIGI_SW_TRIGGER` | n | Debug option described as letting the ADC digital timer start conversions for DMA bring-up. The current driver sources do not read it; the ETM start is the only path. |
 | `CONFIG_ESP_FOC_TRACE_ENABLE` | y | The driver pushes fault steps and interrupt durations into the hot-path trace ring (`CONFIG_ESP_FOC_TRACE_DEPTH`, default 256); see [OSAL and trace](10_osal_and_trace.md). |

@@ -1,6 +1,6 @@
 dependencies:
   idf: '>=5.0'
-description: "Field Oriented Control (FOC) library for PMSM/BLDC motors on ESP32 (ETM-capable targets)."
+description: "Field Oriented Control (FOC) library for PMSM/BLDC motors on Espressif chips with MCPWM, ETM and ADC DMA."
 version: "3.0.0"
 repository: "https://github.com/uLipe/espFoC.git"
 url: "https://github.com/uLipe/espFoC"

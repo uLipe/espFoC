@@ -84,14 +84,17 @@ period (20 kHz), in Q16.16 fixed point.
 
 ![Sensorless board interconnection](images/board_sensorless.png)
 
-| Signal                         | ESP32-C6 GPIO | Direction        |
+The pins are those of the ESP32-C6 validation bench. On another supported
+chip only the GPIO numbers change, in `idf.py menuconfig`.
+
+| Signal                         | Bench GPIO    | Direction        |
 |--------------------------------|---------------|------------------|
-| PWM phase U high / low side    | 18 / 19       | ESP32 → inverter |
-| PWM phase V high / low side    | 20 / 21       | ESP32 → inverter |
-| PWM phase W high / low side    | 22 / 23       | ESP32 → inverter |
-| Bridge enable (active low)     | 15            | ESP32 → inverter |
-| Current sense U (ADC)          | 5             | inverter → ESP32 |
-| Current sense V (ADC)          | 4             | inverter → ESP32 |
+| PWM phase U high / low side    | 18 / 19       | chip → inverter  |
+| PWM phase V high / low side    | 20 / 21       | chip → inverter  |
+| PWM phase W high / low side    | 22 / 23       | chip → inverter  |
+| Bridge enable (active low)     | 15            | chip → inverter  |
+| Current sense U (ADC)          | 5             | inverter → chip  |
+| Current sense V (ADC)          | 4             | inverter → chip  |
 | Current sense W                | not wired     | (two shunts)     |
 | GND                            | GND           | common to all    |
 
@@ -116,7 +119,9 @@ idf.py menuconfig                  # optional: pins, motor, cycle
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
-The target (`esp32c6`) comes from `sdkconfig.defaults`. Replace
+The target comes from `sdkconfig.defaults` (`esp32c6`, the validation
+bench). For another supported chip, run `idf.py set-target <target>` first
+and set its pins in `menuconfig`. Replace
 `/dev/ttyUSB0` with the board's serial port. Leave the monitor with `Ctrl+]`.
 
 Keep the shaft free and keep hands off: commissioning and every start-up spin

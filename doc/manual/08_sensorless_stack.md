@@ -43,8 +43,8 @@ inverter with its own supervisor task; axes share only code.
 
 The work is split over two contexts:
 
-- **TEZ interrupt, every PWM period** (20 kHz with the default
-  `CONFIG_ESP_FOC_PWM_RATE_HZ`): Clarke on the sampled currents, observer update,
+- **TEZ interrupt, every PWM period** (`CONFIG_ESP_FOC_PWM_RATE_HZ`,
+  20 kHz by default, 40 kHz on 320 MHz chips): Clarke on the sampled currents, observer update,
   angle select, Park, current PI on d and q (plus the optional user voltage
   feedforward), voltage limit, inverse Park and SVM. All in Q16.16 fixed point.
 - **Slot inside the same interrupt, every `CONFIG_ESP_FOC_SL_SLOW_DIV` periods**

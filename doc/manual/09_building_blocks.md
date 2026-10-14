@@ -124,6 +124,37 @@ esp_foc_sincos(theta_e, &s, &c);         /* once per period, shared by both Park
 - The unit tests hold sin and cos within 0.002 of `float` over the circle,
   atan2 within 0.003 rad, and sqrt within 2 %.
 
+#### On the chip's CORDIC unit
+
+Some Espressif chips (the ESP32-S31, for example) have a CORDIC peripheral
+that computes these functions in hardware. The `trigo_hw` driver
+([`esp_foc_trigo_hw.h`](../../include/espFoC/drivers/esp_foc_trigo_hw.h)) runs
+the interrupt's trigonometry on it, and on every other chip runs the software
+functions above under the same calls:
+
+```c
+esp_err_t esp_foc_trigo_hw_init(void);       /* task context, idempotent */
+bool  esp_foc_trigo_hw_accelerated(void);    /* true once a CORDIC is up */
+void  esp_foc_trigo_hw_sincos(q16_t angle, q16_t *s_out, q16_t *c_out);
+q16_t esp_foc_trigo_hw_atan2(q16_t y, q16_t x);
+q16_t esp_foc_trigo_hw_magnitude(q16_t x, q16_t y);   /* sqrt(x² + y²) */
+uint32_t esp_foc_trigo_hw_get_timeouts(void);
+```
+
+- The stacks, motor identification and phase discovery call
+  `esp_foc_trigo_hw_init()` from their own `init()`; there is nothing to
+  configure. The driver is selected by SoC capability (`SOC_CORDIC_SUPPORTED`).
+- `esp_foc_trigo_hw_sincos` takes any angle in radians, no wrap needed; on
+  the CORDIC its error is at most 2 LSB.
+- `esp_foc_trigo_hw_magnitude` replaces `esp_foc_sqrt(x² + y²)`. On the CORDIC
+  it never forms the squares; the software fallback saturates them above
+  about 181 per component.
+- **One owner: the TEZ.** The unit runs one operation at a time and the
+  driver takes no lock, so only the TEZ interrupt calls it. Task code keeps
+  using `esp_foc_sincos`, `esp_foc_atan2` and `esp_foc_sqrt`, which are always
+  software. If the unit does not report ready in time the call falls back to
+  software and `esp_foc_trigo_hw_get_timeouts()` counts it.
+
 ### Clarke and Park
 
 Clarke turns the three phase quantities u, v, w into two orthogonal components
@@ -591,19 +622,23 @@ to volts) in a sensorless one. The PWM callback runs in an interrupt: no
 |---|---|---|
 | `CONFIG_ESP_FOC_STACK_NONE` | y (choice default) | no stack; drivers and building blocks only |
 | `CONFIG_ESP_FOC_ENABLE_MOTOR_ID` | n | compile the identification kernels and sequence |
-| `CONFIG_ESP_FOC_PWM_RATE_HZ` | 20000 | default PWM carrier, the rate of the PWM callback |
-| `CONFIG_ESP_FOC_USE_HW_ACCEL_TRIGO`, `_IIR`, `_PID`, `_CLARKE`, `_PARK`, `_VLIM`, `_SVM` | n | try a hardware unit for that block first (see below) |
+| `CONFIG_ESP_FOC_PWM_RATE_HZ` | 40000 at ≥ 320 MHz CPU, else 20000 | default PWM carrier, the rate of the PWM callback |
+| `CONFIG_ESP_FOC_USE_HW_ACCEL_IIR`, `_PID`, `_CLARKE`, `_PARK`, `_VLIM`, `_SVM` | n | try a hardware unit for that block first (see below) |
 
 ### Hardware acceleration hooks
 
-Each math block is split into a software implementation (`*_soft.c`), a
+Trigonometry is the one function with real hardware behind it, and it has
+its own driver ([On the chip's CORDIC unit](#on-the-chips-cordic-unit)), with
+no Kconfig option.
+
+The other blocks are split into a software implementation (`*_soft.c`), a
 hardware hook (`*_hw.c`) and a public dispatcher. With a
 `CONFIG_ESP_FOC_USE_HW_ACCEL_*` option on, the dispatcher first asks the hook
-whether an accelerator is present and otherwise runs the software path. **No
-SoC in the current support set exposes any of these accelerators**: every
+whether an accelerator is present and otherwise runs the software path. No
+supported chip has an accelerator for any of these blocks: every
 `esp_foc_*_hw_available()` returns `false`, so the software path always runs and
 enabling an option only adds that check to each call. The hooks keep the public
-API unchanged for a future target that has such a unit. Design functions
+API unchanged for a future chip that has such a unit. Design functions
 (`esp_foc_pid_init`, `esp_foc_iir_design_lpf`, ...) are always software.
 
 ## Use cases
@@ -634,11 +669,12 @@ cases, accuracy against `float` and closed-loop final values.
   `linux` and runs it, then compile-checks the runner for `esp32c6`.
 - **On the chip.** `examples/unit_test_runner` runs every suite at boot,
   including the stack tests against a mock motor, and prints `PASS unit_tests`
-  or `FAIL unit_tests fails=N`:
+  or `FAIL unit_tests fails=N`. Replace `<target>` with any supported chip
+  (`esp32c6`, `esp32s31`, ...) and the port with your board's:
 
 ```bash
 cd examples/unit_test_runner
-idf.py -D TEST_COMPONENTS=espFoC set-target esp32c6
+idf.py -D TEST_COMPONENTS=espFoC set-target <target>
 idf.py -D TEST_COMPONENTS=espFoC -p /dev/ttyUSB0 flash monitor
 ```
 

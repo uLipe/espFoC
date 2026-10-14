@@ -23,14 +23,16 @@ controller measures the currents, computes new voltages and writes new duties.
 Nothing in the fast path is driven by a software timer; the PWM hardware is
 the heartbeat.
 
-- The default rate is `CONFIG_ESP_FOC_PWM_RATE_HZ` (default 20000 Hz, range
-  5000 to 40000). An inverter uses it when the `pwm_hz` field of
+- The default rate is `CONFIG_ESP_FOC_PWM_RATE_HZ`: 40000 Hz on chips whose
+  CPU runs at 320 MHz or more, 20000 Hz otherwise (range 5000 to 40000). An
+  inverter uses it when the `pwm_hz` field of
   `esp_foc_inverter_mcpwm_config_t` is 0; the examples set `pwm_hz` to this
   symbol explicitly.
 - The stacks read the actual rate from the inverter
   (`inv->get_pwm_rate_hz(inv)`) at init and design every loop on it.
-- At 20 kHz one period is 50 µs. All work of the fast path has to fit in that
-  window, together with everything else the CPU core does.
+- At 20 kHz one period is 50 µs, at 40 kHz 25 µs. All work of the fast path
+  has to fit in that window, together with everything else the CPU core does
+  (see [CPU budget](#cpu-budget)).
 
 The PWM counter counts up and then down (center-aligned PWM). The moment the
 counter reaches zero is called **TEZ** (timer equals zero). At that instant no
@@ -47,11 +49,11 @@ computation of this one. The sensored stack compensates the delay by rotating
 the output voltage ahead (`pwm_delay_ts`, default
 `CONFIG_ESP_FOC_SD_PWM_DELAY_PERMIL` = 1500, that is 1.5 PWM periods).
 
-| At the default 20 kHz | Value |
-|---|---|
-| PWM period | 50 µs |
-| Sensored slot (`CONFIG_ESP_FOC_SD_FETCH_HZ` = 2500 Hz) | every 8 PWM periods |
-| Sensorless slot (`CONFIG_ESP_FOC_SL_SLOW_DIV` = 10) | every 10 PWM periods, 2000 Hz |
+| At the default rates | 20 kHz | 40 kHz |
+|---|---|---|
+| PWM period | 50 µs | 25 µs |
+| Sensored slot (`CONFIG_ESP_FOC_SD_FETCH_HZ` = 2500 Hz) | every 8 PWM periods | every 16 PWM periods |
+| Sensorless slot (`CONFIG_ESP_FOC_SL_SLOW_DIV` = 10) | every 10 PWM periods, 2000 Hz | every 10 PWM periods, 4000 Hz |
 
 ## Three execution contexts
 
@@ -200,6 +202,63 @@ updates the setpoint every 10 ms (`RAMP_STEP_MS`) and sleeps in between.
 | DMA interrupt | PWM rate | current sample, current limit | no |
 | Supervisor task | on demand, at least every 20 ms | state machine, encoder fetch + PLL (sensored), startup (sensorless), event callbacks | yes |
 | Application task | your choice | init, run/stop, setters, getters | yes |
+
+### CPU placement on dual-core chips
+
+On a chip with two CPUs, `CONFIG_ESP_FOC_CORE` picks the CPU that runs the
+control. The thick dashed outline in the diagram above is what moves there:
+
+- every interrupt the espFoC drivers allocate: the TEZ and the DMA end of
+  frame of the inverter, the Hall sensor's GPIO interrupt and the AS5600's
+  I²C interrupt;
+- the stacks' own tasks: the sensored and sensorless supervisors and the
+  motor identification tasks.
+
+| Choice | Effect |
+|---|---|
+| `CONFIG_ESP_FOC_CORE_1` | CPU1. Default, unless `app_main` runs on CPU1 |
+| `CONFIG_ESP_FOC_CORE_0` | CPU0. Default when `app_main` runs on CPU1 |
+| `CONFIG_ESP_FOC_CORE_NO_AFFINITY` | tasks float; each interrupt stays on the CPU that called the driver's `init()` |
+
+The default keeps the control away from the application. On a single-core
+chip the choice is hidden and nothing changes. The application calls `init()`
+and the rest of the API from any CPU, as before; tasks it creates with
+`esp_foc_task_spawn()` are not pinned.
+
+ESP-IDF allocates an interrupt on the CPU that asks for it. When `init()` runs
+on the other CPU, the driver makes the allocation on the espFoC CPU through
+an inter-processor call (`esp_ipc`), so `init()` and `deinit()` must be
+called from a task, which they already require.
+
+The setters update the stack's state inside an OSAL critical section. On a
+single core that also holds off the TEZ. When the TEZ runs on the other CPU it
+does not: a setter that changes several values at once (for example
+`esp_foc_sensored_set_current_pi()`) can be seen half-written by one TEZ
+period. Change gains with the axis stopped, or call such setters from a task
+on the espFoC CPU.
+
+### CPU budget
+
+The PWM rate is bounded by how much of its CPU one period of control takes.
+Measured on an ESP32-S31 at 320 MHz, one sensored axis in position mode on
+the MCPWM inverter, without the trace:
+
+| Item | Cycles | Time |
+|---|---|---|
+| Stack TEZ callback, mean / worst | 2380 / 2820 | 7.4 / 8.8 µs |
+| Stack DMA callback | 86 | 0.3 µs |
+| Everything per PWM period (TEZ and DMA interrupts, entry and exit included) | 4384 | 13.7 µs |
+| Supervisor task (encoder fetch at 2.5 kHz, PLL) | — | 5.8 % of the CPU |
+
+| PWM rate | Load of the espFoC CPU, one sensored axis |
+|---|---|
+| 20 kHz | 33 % |
+| 40 kHz | 61 % (default at 320 MHz) |
+| 80 kHz | does not fit: 13.7 µs of work in a 12.5 µs period |
+
+Each axis adds its own interrupts and supervisor on the same CPU, so two axes
+need 20 kHz on that chip. The ESP32-C6 (160 MHz, no CORDIC) runs one axis of
+either stack at 20 kHz.
 
 ## Fixed point
 
@@ -466,7 +525,8 @@ previous call and re-arms them; use it from one reader only.
 
 | Symbol | Default | Meaning |
 |---|---|---|
-| `CONFIG_ESP_FOC_PWM_RATE_HZ` | 20000 | PWM and current-loop rate when the inverter config leaves `pwm_hz` at 0 |
+| `CONFIG_ESP_FOC_PWM_RATE_HZ` | 40000 at ≥ 320 MHz CPU, else 20000 | PWM and current-loop rate when the inverter config leaves `pwm_hz` at 0 |
+| `CONFIG_ESP_FOC_CORE` | CPU1 (CPU0 if `app_main` is on CPU1) | dual-core chips: CPU for the drivers' interrupts and the stacks' tasks; see [CPU placement](#cpu-placement-on-dual-core-chips) |
 | `CONFIG_ESP_FOC_SD_FETCH_HZ` | 2500 | sensored encoder rate and slot rate; must divide the PWM rate |
 | `CONFIG_ESP_FOC_SL_SLOW_DIV` | 10 | PWM periods per sensorless slot (range 2–64) |
 | `CONFIG_ESP_FOC_SD_TASK_PRIO_BELOW_MAX` | 0 | sensored supervisor priority, levels below the highest |

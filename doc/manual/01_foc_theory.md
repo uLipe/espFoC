@@ -98,8 +98,8 @@ A switch is either on or off, so the inverter cannot output "4.2 V" directly. It
 very fast instead and varies the fraction of time each phase is high. This is **pulse width
 modulation** (PWM); the fraction of time is the **duty cycle**. Because the coil inductance
 smooths the current, the motor only sees the average: a 12 V supply at 35 % duty looks like
-4.2 V. espFoC switches at `CONFIG_ESP_FOC_PWM_RATE_HZ` (20 kHz by default), so one PWM
-period lasts 50 µs.
+4.2 V. espFoC switches at `CONFIG_ESP_FOC_PWM_RATE_HZ` (20 kHz by default, 40 kHz on
+320 MHz chips), so one PWM period lasts 50 µs (25 µs).
 
 To know what the motor is doing, the inverter also measures the phase **currents**, usually
 with small resistors called **shunts** and an amplifier, read by the chip's ADC
