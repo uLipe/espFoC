@@ -49,7 +49,7 @@ typedef struct {
     /*
      * Shunt amplifier outputs. On chips whose SAR converts P/N pad pairs
      * (SOC_ADC_DIFF_SUPPORTED) each one must be the P pad of a pair; the
-     * driver converts P - N over +-2 V and the board drives the paired N pad
+     * driver converts P - N over +-2.2 V and the board drives the paired N pad
      * with the amplifier reference (e.g. its mid-rail bias).
      */
     int gpio_iu;
