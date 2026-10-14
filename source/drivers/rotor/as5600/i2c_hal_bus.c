@@ -10,6 +10,7 @@
  * NACK/timeout sets `need_clear`; the next task kick runs the HW 9-clock clear.
  */
 #include "i2c_hal_bus.h"
+#include "esp_foc_drv_intr.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -301,7 +302,7 @@ esp_err_t esp_foc_i2c_hal_bus_init(esp_foc_i2c_hal_bus_t *bus,
                    i2c_periph_signal[port].scl_out_sig,
                    i2c_periph_signal[port].scl_in_sig);
 
-    esp_err_t ierr = esp_intr_alloc_intrstatus(
+    esp_err_t ierr = esp_foc_drv_intr_alloc(
         i2c_periph_signal[port].irq,
         ESP_INTR_FLAG_SHARED | ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LOWMED,
         (uint32_t)i2c_ll_get_interrupt_status_reg(bus->hal.dev),

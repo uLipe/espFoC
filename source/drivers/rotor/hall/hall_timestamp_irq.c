@@ -17,6 +17,7 @@
 
 #include "esp_check.h"
 #include "esp_intr_alloc.h"
+#include "esp_foc_drv_intr.h"
 #include "esp_log.h"
 #include "hal/gpio_ll.h"
 #include "soc/gpio_struct.h"
@@ -79,15 +80,16 @@ static esp_err_t irq_init(esp_foc_hall_ts_t *ts)
                           : ((level == 2) ? ESP_INTR_FLAG_LEVEL2 : ESP_INTR_FLAG_LEVEL1);
 
     intr_handle_t handle = NULL;
-    esp_err_t err = esp_intr_alloc(GPIO_LL_INTR_SOURCE0, flags, hall_gpio_isr, ts, &handle);
+    esp_err_t err = esp_foc_drv_intr_alloc(GPIO_LL_INTR_SOURCE0, flags, 0, 0, hall_gpio_isr, ts, &handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_intr_alloc: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "intr alloc: %s", esp_err_to_name(err));
         return err;
     }
     ts->isr_handle = handle;
 
+    const uint32_t cpu = (uint32_t)esp_intr_get_cpu(handle);
     for (int i = 0; i < 3; i++) {
-        gpio_ll_intr_enable_on_core(&GPIO, 0, (uint32_t)cfg->gpio[i]);
+        gpio_ll_intr_enable_on_core(&GPIO, cpu, (uint32_t)cfg->gpio[i]);
     }
 
     ESP_LOGI(TAG, "hall ts GPIO IRQ: gpio=%d/%d/%d level=%d tick=%luHz",

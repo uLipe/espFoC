@@ -10,6 +10,7 @@
 #include "esp_check.h"
 #include "esp_foc_hal_compat.h"
 #include "esp_intr_alloc.h"
+#include "esp_foc_drv_intr.h"
 #include "esp_log.h"
 #include "esp_rom_gpio.h"
 #include "hal/mcpwm_hal.h"
@@ -301,7 +302,7 @@ esp_err_t esp_foc_mcpwm_bridge_init(esp_foc_mcpwm_bridge_t *b,
     mcpwm_ll_intr_clear_status(b->dev, b->irq_mask);
     mcpwm_ll_intr_enable(b->dev, b->irq_mask, true);
 
-    esp_err_t err = esp_intr_alloc_intrstatus(
+    esp_err_t err = esp_foc_drv_intr_alloc(
         ESP_FOC_MCPWM_SIGNALS(gid).irq_id,
         ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL3,
         (uint32_t)mcpwm_ll_intr_get_status_reg(b->dev),
