@@ -32,7 +32,11 @@ ESP_FOC_INLINE void esp_foc_vlim_dq_mag(q16_t *vd, q16_t *vq, q16_t mag, q16_t v
         return;
     }
 
-    const q16_t scale = q16_div(vmax, mag);
+    /* 0 < vmax < mag: with vmax < 1.0 the Q16 numerator fits 32 bits and a
+     * single divu replaces the 64-bit divide; same truncated quotient. */
+    const q16_t scale = (vmax < Q16_ONE)
+                            ? (q16_t)(((uint32_t)vmax << 16) / (uint32_t)mag)
+                            : q16_div(vmax, mag);
     *vd = q16_mul(d, scale);
     *vq = q16_mul(q, scale);
 }

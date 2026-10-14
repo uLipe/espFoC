@@ -123,6 +123,31 @@ TEST_CASE("vlim_mag under limit, zero and vmax edges", "[espFoC][vlim]")
     TEST_ASSERT_EQUAL_INT32(0, q);
 }
 
+TEST_CASE("vlim_mag scale matches the q16 divide on both paths", "[espFoC][vlim]")
+{
+    static const q16_t vmaxes[] = {
+        1, 4096, Q16_INV_SQRT3, Q16_ONE - 1, Q16_ONE, 2 * Q16_ONE, 300 * Q16_ONE,
+    };
+    uint32_t x = 0xcafef00du;
+    for (unsigned k = 0; k < sizeof(vmaxes) / sizeof(vmaxes[0]); k++) {
+        const q16_t vmax = vmaxes[k];
+        for (int i = 0; i < 2000; i++) {
+            x = x * 1664525u + 1013904223u;
+            const q16_t d0 = (q16_t)x >> 8;
+            x = x * 1664525u + 1013904223u;
+            const q16_t q0 = (q16_t)x >> 8;
+            x = x * 1664525u + 1013904223u;
+            const q16_t mag = q16_add(vmax, (q16_t)((x >> 4) | 1u));
+            q16_t d = d0;
+            q16_t q = q0;
+            esp_foc_vlim_dq_mag(&d, &q, mag, vmax);
+            const q16_t scale = q16_div(vmax, mag);
+            TEST_ASSERT_EQUAL_INT32(q16_mul(d0, scale), d);
+            TEST_ASSERT_EQUAL_INT32(q16_mul(q0, scale), q);
+        }
+    }
+}
+
 TEST_CASE("vlim_mag exact magnitude lands on vmax and does not grow", "[espFoC][vlim]")
 {
     const q16_t vmax = Q16_INV_SQRT3;

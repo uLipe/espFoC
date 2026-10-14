@@ -21,8 +21,10 @@ extern "C" {
  */
 ESP_FOC_INLINE void esp_foc_clarke(q16_t u, q16_t v, q16_t w, q16_t *alpha, q16_t *beta)
 {
-    const q16_t two_u = q16_add(u, u);
-    *alpha = q16_div(q16_sub(q16_sub(two_u, v), w), (q16_t)196608);
+    const q16_t s = q16_sub(q16_sub(q16_add(u, u), v), w);
+    /* s/3 truncated toward zero for any int32 s, without a 64-bit divide:
+     * ceil(2^32/3) and >>32 floor, then +1 for negatives fixes the rounding. */
+    *alpha = (q16_t)(((int64_t)s * 1431655766LL) >> 32) - (s >> 31);
     *beta = q16_mul(q16_sub(v, w), Q16_INV_SQRT3);
 }
 

@@ -73,6 +73,37 @@ TEST_CASE("clarke inv sum to zero", "[espFoC][clarke]")
     TEST_ASSERT_INT32_WITHIN(64, 0, q16_add(q16_add(u, v), w));
 }
 
+TEST_CASE("clarke alpha is the truncated divide by 3 over int32", "[espFoC][clarke]")
+{
+    static const q16_t edges[] = {
+        0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 196608, -196608,
+        INT32_MAX, INT32_MAX - 1, INT32_MAX - 2, INT32_MIN, INT32_MIN + 1,
+        INT32_MIN + 2, INT32_MIN + 3,
+    };
+    q16_t a;
+    q16_t b;
+    for (unsigned i = 0; i < sizeof(edges) / sizeof(edges[0]); i++) {
+        /* u = 0, w = 0: s = −v except where q16_sub saturates. */
+        const q16_t v = edges[i];
+        const q16_t s = q16_sub(0, v);
+        esp_foc_clarke(0, v, 0, &a, &b);
+        TEST_ASSERT_EQUAL_INT32((q16_t)((int64_t)s / 3), a);
+    }
+
+    uint32_t x = 0x12345678u;
+    for (int i = 0; i < 20000; i++) {
+        x = x * 1664525u + 1013904223u;
+        const q16_t u = (q16_t)x;
+        x = x * 1664525u + 1013904223u;
+        const q16_t v = (q16_t)x >> (i & 15);
+        x = x * 1664525u + 1013904223u;
+        const q16_t w = (q16_t)x >> ((i >> 4) & 15);
+        const q16_t s = q16_sub(q16_sub(q16_add(u, u), v), w);
+        esp_foc_clarke(u, v, w, &a, &b);
+        TEST_ASSERT_EQUAL_INT32((q16_t)((int64_t)s / 3), a);
+    }
+}
+
 TEST_CASE("clarke huge inputs stay finite over loop", "[espFoC][clarke]")
 {
     q16_t a = Q16_ONE;
