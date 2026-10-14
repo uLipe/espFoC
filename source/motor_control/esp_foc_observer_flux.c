@@ -22,9 +22,9 @@
 
 #include "esp_check.h"
 #include "espFoC/motor_control/esp_foc_observer_flux.h"
+#include "espFoC/drivers/esp_foc_trigo_hw.h"
 #include "espFoC/utils/esp_foc_angle.h"
 #include "espFoC/utils/esp_foc_pid.h"
-#include "espFoC/utils/esp_foc_trig.h"
 
 /* ψ is stored in mWb so Q16.16 has LSBs at this magnet flux (~2.5 mWb). */
 #define FLUX_MWB ((q16_t)65536000)
@@ -71,7 +71,7 @@ static void flux_seed_psi(esp_foc_observer_flux_t *o, q16_t i_a, q16_t i_b)
 {
     q16_t s;
     q16_t c;
-    esp_foc_sincos(o->theta, &s, &c);
+    esp_foc_trigo_hw_sincos(o->theta, &s, &c);
     q16_t psi_m_a = q16_mul(o->psi_f_mwb, c);
     q16_t psi_m_b = q16_mul(o->psi_f_mwb, s);
     o->psi_s_a = q16_add(q16_mul(o->ls_mh, i_a), psi_m_a);
@@ -227,7 +227,7 @@ static void flux_update(esp_foc_observer_t *self,
     o->psi_r_b = lpf1(&o->psi_f_b, psi_r_raw_b, o->lpf_b0);
 
     if (o->extract == ESP_FOC_ANGLE_ATAN2) {
-        q16_t th_psi = esp_foc_atan2(o->psi_r_b, o->psi_r_a);
+        q16_t th_psi = esp_foc_trigo_hw_atan2(o->psi_r_b, o->psi_r_a);
         if (!o->have_theta_psi) {
             o->theta_psi = th_psi;
             o->have_theta_psi = true;
@@ -243,7 +243,7 @@ static void flux_update(esp_foc_observer_t *self,
     } else {
         q16_t s;
         q16_t c;
-        esp_foc_sincos(o->theta, &s, &c);
+        esp_foc_trigo_hw_sincos(o->theta, &s, &c);
 
         q16_t pa_abs = (o->psi_r_a < 0) ? q16_neg(o->psi_r_a) : o->psi_r_a;
         q16_t pb_abs = (o->psi_r_b < 0) ? q16_neg(o->psi_r_b) : o->psi_r_b;

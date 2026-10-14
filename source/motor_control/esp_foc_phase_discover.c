@@ -7,12 +7,12 @@
 
 #include "sdkconfig.h"
 #include "espFoC/motor_control/esp_foc_phase_discover.h"
+#include "espFoC/drivers/esp_foc_trigo_hw.h"
 #include "espFoC/osal/esp_foc_osal.h"
 #include "espFoC/utils/esp_foc_angle.h"
 #include "espFoC/utils/esp_foc_clarke.h"
 #include "espFoC/utils/esp_foc_park.h"
 #include "espFoC/utils/esp_foc_svm.h"
-#include "espFoC/utils/esp_foc_trig.h"
 #include "espFoC/utils/esp_foc_vlim.h"
 
 #define PD_CANDIDATES      12
@@ -78,8 +78,8 @@ static void pd_tez(void *arg)
     q16_t du;
     q16_t dv;
     q16_t dw;
-    esp_foc_vlim_dq(&d, &q, Q16_INV_SQRT3);
-    esp_foc_sincos(th, &s, &c);
+    esp_foc_vlim_dq_mag(&d, &q, esp_foc_trigo_hw_magnitude(d, q), Q16_INV_SQRT3);
+    esp_foc_trigo_hw_sincos(th, &s, &c);
     esp_foc_inv_park(s, c, d, q, &a, &b);
     esp_foc_svm(a, b, &du, &dv, &dw);
     inv->set_duties(inv, du, dv, dw);
@@ -756,6 +756,10 @@ esp_err_t esp_foc_phase_discover_init(esp_foc_phase_discover_t *pd,
     const float vdc = q16_to_float(inv->get_dc_link_voltage(inv));
     if (vdc <= 0.0f) {
         return ESP_ERR_INVALID_ARG;
+    }
+    const esp_err_t hw = esp_foc_trigo_hw_init();
+    if (hw != ESP_OK) {
+        return hw;
     }
     const uint32_t pwm_hz = inv->get_pwm_rate_hz(inv);
     if (rotor != NULL) {

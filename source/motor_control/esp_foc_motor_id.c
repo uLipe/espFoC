@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "sdkconfig.h"
+#include "espFoC/drivers/esp_foc_trigo_hw.h"
 #include "espFoC/motor_control/esp_foc_motor_id.h"
 #include "espFoC/motor_control/esp_foc_rotor_pll.h"
 #include "espFoC/osal/esp_foc_osal.h"
@@ -16,7 +17,6 @@
 #include "espFoC/utils/esp_foc_pid.h"
 #include "espFoC/utils/esp_foc_q16.h"
 #include "espFoC/utils/esp_foc_svm.h"
-#include "espFoC/utils/esp_foc_trig.h"
 #include "espFoC/utils/esp_foc_vlim.h"
 #include "esp_foc_mech_id.h"
 #include "esp_foc_motor_id_probe.h"
@@ -253,13 +253,13 @@ static void mid_tez(void *arg)
     esp_foc_clarke(iu, iv, iw, &ia, &ib);
     q16_t s;
     q16_t c;
-    esp_foc_sincos(th, &s, &c);
+    esp_foc_trigo_hw_sincos(th, &s, &c);
     q16_t id;
     q16_t iq;
     esp_foc_park(s, c, ia, ib, &id, &iq);
     q16_t vd = esp_foc_pid_update(&m->pi_d, idr, id);
     q16_t vq = esp_foc_pid_update(&m->pi_q, iqr, iq);
-    esp_foc_vlim_dq(&vd, &vq, Q16_INV_SQRT3);
+    esp_foc_vlim_dq_mag(&vd, &vq, esp_foc_trigo_hw_magnitude(vd, vq), Q16_INV_SQRT3);
     esp_foc_pid_set_applied(&m->pi_d, vd);
     esp_foc_pid_set_applied(&m->pi_q, vq);
 
@@ -1353,6 +1353,10 @@ esp_err_t esp_foc_motor_id_run(esp_foc_inverter_t *inv,
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t err = check_config(cfg, inv, rotor);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = esp_foc_trigo_hw_init();
     if (err != ESP_OK) {
         return err;
     }

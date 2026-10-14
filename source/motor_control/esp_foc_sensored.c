@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "sdkconfig.h"
+#include "espFoC/drivers/esp_foc_trigo_hw.h"
 #include "espFoC/motor_control/esp_foc_rotor_pll.h"
 #include "espFoC/osal/esp_foc_osal.h"
 #include "espFoC/utils/esp_foc_angle.h"
@@ -20,7 +21,6 @@
 #include "espFoC/utils/esp_foc_park.h"
 #include "espFoC/utils/esp_foc_pid.h"
 #include "espFoC/utils/esp_foc_svm.h"
-#include "espFoC/utils/esp_foc_trig.h"
 #include "espFoC/utils/esp_foc_vlim.h"
 
 #define SD_TWO_PI          6.28318530718f
@@ -396,7 +396,7 @@ static void sd_tez(void *arg)
 
     q16_t s;
     q16_t c;
-    esp_foc_sincos(th, &s, &c);
+    esp_foc_trigo_hw_sincos(th, &s, &c);
     q16_t ia;
     q16_t ib;
     q16_t id;
@@ -406,7 +406,7 @@ static void sd_tez(void *arg)
 
     q16_t vd = q16_add(esp_foc_pid_update(&sd->pi_d, idr, id), vd_ff);
     q16_t vq = q16_add(esp_foc_pid_update(&sd->pi_q, iqr, iq), vq_ff);
-    esp_foc_vlim_dq(&vd, &vq, Q16_INV_SQRT3);
+    esp_foc_vlim_dq_mag(&vd, &vq, esp_foc_trigo_hw_magnitude(vd, vq), Q16_INV_SQRT3);
     esp_foc_pid_set_applied(&sd->pi_d, q16_sub(vd, vd_ff));
     esp_foc_pid_set_applied(&sd->pi_q, q16_sub(vq, vq_ff));
 
@@ -1498,6 +1498,11 @@ esp_err_t esp_foc_sensored_init(esp_foc_inverter_t *inv, esp_foc_rotor_sensor_t 
     if ((pwm_hz == 0u) || !(vdc > 0.0f) || (cfg->fetch_hz > pwm_hz) ||
         ((pwm_hz % cfg->fetch_hz) != 0u)) {
         return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_err_t hw = esp_foc_trigo_hw_init();
+    if (hw != ESP_OK) {
+        return hw;
     }
 
     memset(sd, 0, sizeof(*sd));

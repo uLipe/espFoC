@@ -20,8 +20,8 @@
 
 #include "esp_check.h"
 #include "espFoC/motor_control/esp_foc_observer_bemf.h"
+#include "espFoC/drivers/esp_foc_trigo_hw.h"
 #include "espFoC/utils/esp_foc_angle.h"
-#include "espFoC/utils/esp_foc_trig.h"
 
 static esp_foc_observer_bemf_t *bemf_of(esp_foc_observer_t *self)
 {
@@ -150,7 +150,7 @@ static void bemf_update(esp_foc_observer_t *self,
     q16_t w = o->w_slow;
     q16_t w_abs = (w < 0) ? q16_neg(w) : w;
     if (o->lpf_wc > 0) {
-        phi = esp_foc_atan2(w_abs, o->lpf_wc);
+        phi = esp_foc_trigo_hw_atan2(w_abs, o->lpf_wc);
     }
     if (w < 0) {
         phi = q16_neg(phi);
@@ -174,7 +174,7 @@ static void bemf_update(esp_foc_observer_t *self,
         if (o->pll_enable) {
             q16_t s;
             q16_t c;
-            esp_foc_sincos(o->theta, &s, &c);
+            esp_foc_trigo_hw_sincos(o->theta, &s, &c);
             q16_t phase_err = q16_sub(q16_mul(q16_neg(o->e_a), c), q16_mul(o->e_b, s));
             q16_t ea_abs = (o->e_a < 0) ? q16_neg(o->e_a) : o->e_a;
             q16_t eb_abs = (o->e_b < 0) ? q16_neg(o->e_b) : o->e_b;
@@ -188,7 +188,7 @@ static void bemf_update(esp_foc_observer_t *self,
         }
         o->theta = q16_wrap_pi(q16_add(o->theta, q16_mul(o->omega, o->ts)));
     } else {
-        q16_t th_raw = esp_foc_atan2(q16_neg(o->e_a), o->e_b);
+        q16_t th_raw = esp_foc_trigo_hw_atan2(q16_neg(o->e_a), o->e_b);
         if (o->have_theta_prev) {
             q16_t dth = q16_angle_delta(o->theta_prev, th_raw);
             o->omega = q16_mul(dth, o->inv_ts);
