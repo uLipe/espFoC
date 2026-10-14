@@ -1530,9 +1530,9 @@ esp_err_t esp_foc_sensored_init(esp_foc_inverter_t *inv, esp_foc_rotor_sensor_t 
         }
     }
 
-    if (esp_foc_task_spawn(sd_task, sd, k_task_name[sd->axis], CONFIG_ESP_FOC_SD_TASK_STACK,
-                           esp_foc_task_max_priority() - CONFIG_ESP_FOC_SD_TASK_PRIO_BELOW_MAX,
-                           NULL) != 0) {
+    if (esp_foc_task_spawn_stack(sd_task, sd, k_task_name[sd->axis], CONFIG_ESP_FOC_SD_TASK_STACK,
+                                 esp_foc_task_max_priority() - CONFIG_ESP_FOC_SD_TASK_PRIO_BELOW_MAX,
+                                 NULL) != 0) {
         return ESP_ERR_NO_MEM;
     }
     while (!sd->task_alive) {

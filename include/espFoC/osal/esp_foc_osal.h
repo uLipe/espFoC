@@ -33,6 +33,18 @@ int esp_foc_task_spawn(esp_foc_task_fn_t fn,
                        int priority,
                        esp_foc_task_handle_t *out_handle_opt);
 
+/**
+ * As esp_foc_task_spawn, pinned to the CPU the espFoC stacks run on
+ * (CONFIG_ESP_FOC_CORE_ID); unpinned on single-core builds or with no
+ * affinity selected. For the stacks' own tasks, not application tasks.
+ */
+int esp_foc_task_spawn_stack(esp_foc_task_fn_t fn,
+                             void *arg,
+                             const char *name,
+                             size_t stack_bytes,
+                             int priority,
+                             esp_foc_task_handle_t *out_handle_opt);
+
 bool esp_foc_task_is_alive(esp_foc_task_handle_t handle);
 void esp_foc_task_yield(void);
 void esp_foc_task_delete_self(void);

@@ -1734,9 +1734,9 @@ esp_err_t esp_foc_sensorless_init(esp_foc_inverter_t *inv,
         }
     }
 
-    if (esp_foc_task_spawn(sl_task, sl, k_task_name[sl->axis], CONFIG_ESP_FOC_SL_TASK_STACK,
-                           esp_foc_task_max_priority() - CONFIG_ESP_FOC_SL_TASK_PRIO_BELOW_MAX,
-                           NULL) != 0) {
+    if (esp_foc_task_spawn_stack(sl_task, sl, k_task_name[sl->axis], CONFIG_ESP_FOC_SL_TASK_STACK,
+                                 esp_foc_task_max_priority() - CONFIG_ESP_FOC_SL_TASK_PRIO_BELOW_MAX,
+                                 NULL) != 0) {
         return ESP_ERR_NO_MEM;
     }
     while (!sl->task_alive) {
