@@ -44,18 +44,13 @@ the basics and covers every subsystem in detail.
 The build checks those SoC capabilities, not the chip name, and the component
 manifest lists the chips that pass: ESP32-C6, ESP32-C5, ESP32-H2, ESP32-P4 and
 ESP32-S31. Chips without ETM (such as the original ESP32 and the ESP32-S3)
-are not supported: the build stops with an error.
+are not supported yet: the build stops with an error.
 
 **Validation.** The reference bench is an **ESP32-C6** driving a motor, with
 ESP-IDF v5.5. The C6 is one of the smallest chips in the family: a single
 160 MHz RISC-V core with no floating-point unit. On it espFoC runs the
 complete sensored and sensorless stacks at 20 kHz, commissioning included,
-and every example is validated there. That shows how far down espFoC
-scales, and leaves the faster chips headroom for more axes or a higher PWM
-rate. The **ESP32-S31** (two cores at 320 MHz, with CORDIC) runs the drivers
-and the unit tests on silicon, without a motor yet: one sensored axis takes
-61 % of its CPU at 40 kHz, the default PWM rate on 320 MHz chips. The ESP32-C5, ESP32-H2 and ESP32-P4 are not yet
-validated on hardware.
+and every example is validated there.
 
 ## Principle of operation
 
