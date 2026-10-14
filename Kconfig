@@ -987,46 +987,4 @@ menu "espFoC Settings"
 
     endmenu
 
-    config ESP_FOC_USE_HW_ACCEL_IIR
-        bool "Use hardware IIR for biquad when available"
-        default n
-        help
-            When enabled and the SoC exposes an IIR/biquad accelerator, filter update
-            uses hardware. Otherwise the software TDF-II path is used (all current targets).
-
-    config ESP_FOC_USE_HW_ACCEL_PID
-        bool "Use hardware PID (2p2z) when available"
-        default n
-        help
-            When enabled and the SoC exposes a PID accelerator, pid update uses hardware.
-            Otherwise the software 2p2z path is used (all current targets).
-
-    config ESP_FOC_USE_HW_ACCEL_CLARKE
-        bool "Use hardware Clarke transform when available"
-        default n
-        help
-            When enabled and the SoC exposes a Clarke accelerator, clarke/inv_clarke
-            use hardware. Otherwise the software path is used (all current targets).
-
-    config ESP_FOC_USE_HW_ACCEL_PARK
-        bool "Use hardware Park transform when available"
-        default n
-        help
-            When enabled and the SoC exposes a Park accelerator, park/inv_park
-            use hardware. Otherwise the software path is used (all current targets).
-
-    config ESP_FOC_USE_HW_ACCEL_VLIM
-        bool "Use hardware dq voltage limiter when available"
-        default n
-        help
-            When enabled and the SoC exposes a voltage-limit accelerator, vlim uses
-            hardware. Otherwise CORDIC sqrt + Q16 scale is used (all current targets).
-
-    config ESP_FOC_USE_HW_ACCEL_SVM
-        bool "Use hardware SVM when available"
-        default n
-        help
-            When enabled and the SoC exposes an SVM accelerator, svm uses hardware.
-            Otherwise min-max common-mode software SVM is used (all current targets).
-
 endmenu

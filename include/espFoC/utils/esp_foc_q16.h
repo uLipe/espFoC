@@ -19,6 +19,10 @@ typedef int32_t q16_t;
 #define Q16_HALF       ((q16_t)32768)
 #define Q16_MINUS_ONE  ((q16_t)-65536)
 
+/* Hot-path blocks are header-only and forced inline: a call per block costs
+ * the TEZ more than the block itself, and out-parameters stay in registers. */
+#define ESP_FOC_INLINE static inline __attribute__((always_inline))
+
 static inline q16_t q16_from_float(float x)
 {
     double d = (double)x * 65536.0;
@@ -99,6 +103,19 @@ static inline q16_t q16_min(q16_t a, q16_t b)
 static inline q16_t q16_max(q16_t a, q16_t b)
 {
     return a > b ? a : b;
+}
+
+/** Q32 accumulator (sum of Q16×Q16 products) back to Q16, saturated. */
+static inline q16_t q16_sat_shr16(int64_t acc)
+{
+    const int64_t v = acc >> 16;
+    if (v > INT32_MAX) {
+        return (q16_t)INT32_MAX;
+    }
+    if (v < INT32_MIN) {
+        return (q16_t)INT32_MIN;
+    }
+    return (q16_t)v;
 }
 
 /** Saturating Q16.16 divide. b==0 → sign(a)*INT32_MAX (0/0 → 0). */

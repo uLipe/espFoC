@@ -6,6 +6,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "esp_err.h"
 #include "espFoC/utils/esp_foc_q16.h"
@@ -20,8 +21,6 @@ extern "C" {
  * update() does not saturate. After an external clamp, call set_applied() so
  * the a1/a2 delays track the plant input (anti-windup). If set_applied() is
  * skipped, update() tracks its own unsaturated output (no AW).
- *
- * Optional HW via CONFIG_ESP_FOC_USE_HW_ACCEL_PID (soft fallback).
  */
 typedef struct {
     q16_t b0;
@@ -63,9 +62,56 @@ esp_err_t esp_foc_pid_design_imc_zoh(float k_plant, float tau_s, float fs_hz,
 esp_err_t esp_foc_pid_design_integrator(float k_plant, float fs_hz, float bw_hz,
                                         float zeta, float *kp, float *ki);
 void esp_foc_pid_reset(esp_foc_pid_t *p);
-q16_t esp_foc_pid_update(esp_foc_pid_t *p, q16_t sp, q16_t meas);
-void esp_foc_pid_set_applied(esp_foc_pid_t *p, q16_t u_applied);
-void esp_foc_pid_set_ff(esp_foc_pid_t *p, q16_t ff);
+
+ESP_FOC_INLINE q16_t esp_foc_pid_update(esp_foc_pid_t *p, q16_t sp, q16_t meas)
+{
+    if (p == NULL) {
+        return 0;
+    }
+    if (p->bypass) {
+        return q16_add(sp, p->ff);
+    }
+
+    const q16_t b0 = p->b0;
+    const q16_t b1 = p->b1;
+    const q16_t b2 = p->b2;
+    const q16_t a1 = p->a1;
+    const q16_t a2 = p->a2;
+    const q16_t e1 = p->e1;
+    const q16_t e2 = p->e2;
+    const q16_t u1 = p->u1;
+    const q16_t u2 = p->u2;
+    const q16_t ff = p->ff;
+
+    const q16_t e = q16_sub(sp, meas);
+    q16_t u = q16_sat_shr16(((int64_t)b0 * (int64_t)e) +
+                            ((int64_t)b1 * (int64_t)e1) +
+                            ((int64_t)b2 * (int64_t)e2) -
+                            ((int64_t)a1 * (int64_t)u1) -
+                            ((int64_t)a2 * (int64_t)u2));
+    u = q16_add(u, ff);
+
+    p->e2 = e1;
+    p->e1 = e;
+    p->u2 = u1;
+    p->u1 = u;
+    return u;
+}
+
+ESP_FOC_INLINE void esp_foc_pid_set_applied(esp_foc_pid_t *p, q16_t u_applied)
+{
+    if (p != NULL) {
+        p->u1 = u_applied;
+    }
+}
+
+ESP_FOC_INLINE void esp_foc_pid_set_ff(esp_foc_pid_t *p, q16_t ff)
+{
+    if (p != NULL) {
+        p->ff = ff;
+    }
+}
+
 void esp_foc_pid_set_bypass(esp_foc_pid_t *p, bool on);
 /* Rotor-frame decoupling in pu of Vdc: vd* = −ω Ls iq, vq* = ω Ls id + ω ψf. */
 void esp_foc_pid_set_pmsm_ff(esp_foc_pid_t *pd, esp_foc_pid_t *pq, q16_t we,

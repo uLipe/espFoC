@@ -623,23 +623,19 @@ to volts) in a sensorless one. The PWM callback runs in an interrupt: no
 | `CONFIG_ESP_FOC_STACK_NONE` | y (choice default) | no stack; drivers and building blocks only |
 | `CONFIG_ESP_FOC_ENABLE_MOTOR_ID` | n | compile the identification kernels and sequence |
 | `CONFIG_ESP_FOC_PWM_RATE_HZ` | 40000 at ≥ 320 MHz CPU, else 20000 | default PWM carrier, the rate of the PWM callback |
-| `CONFIG_ESP_FOC_USE_HW_ACCEL_IIR`, `_PID`, `_CLARKE`, `_PARK`, `_VLIM`, `_SVM` | n | try a hardware unit for that block first (see below) |
 
-### Hardware acceleration hooks
+### Inline blocks
 
 Trigonometry is the one function with real hardware behind it, and it has
 its own driver ([On the chip's CORDIC unit](#on-the-chips-cordic-unit)), with
 no Kconfig option.
 
-The other blocks are split into a software implementation (`*_soft.c`), a
-hardware hook (`*_hw.c`) and a public dispatcher. With a
-`CONFIG_ESP_FOC_USE_HW_ACCEL_*` option on, the dispatcher first asks the hook
-whether an accelerator is present and otherwise runs the software path. No
-supported chip has an accelerator for any of these blocks: every
-`esp_foc_*_hw_available()` returns `false`, so the software path always runs and
-enabling an option only adds that check to each call. The hooks keep the public
-API unchanged for a future chip that has such a unit. Design functions
-(`esp_foc_pid_init`, `esp_foc_iir_design_lpf`, ...) are always software.
+The per-sample functions of the other blocks (`esp_foc_clarke`,
+`esp_foc_park`, `esp_foc_svm`, `esp_foc_vlim_dq`, `esp_foc_pid_update`,
+`esp_foc_iir_update`, ...) are `static inline` with `always_inline` in their
+headers, so they are compiled into the PWM handler that calls them. Design
+and setup functions (`esp_foc_pid_init`, `esp_foc_iir_design_lpf`, ...) are
+ordinary functions.
 
 ## Use cases
 
