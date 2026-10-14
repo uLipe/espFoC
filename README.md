@@ -53,9 +53,9 @@ complete sensored and sensorless stacks at 20 kHz, commissioning included,
 and every example is validated there. That shows how far down espFoC
 scales, and leaves the faster chips headroom for more axes or a higher PWM
 rate. The **ESP32-S31** (two cores at 320 MHz, with CORDIC) runs the drivers
-and the unit tests on silicon, without a motor yet: one sensored axis takes
-61 % of its CPU at 40 kHz, the default PWM rate on 320 MHz chips. The ESP32-C5, ESP32-H2 and ESP32-P4 are not yet
-validated on hardware.
+and the unit tests on silicon: one sensored axis takes 60 % of its CPU at
+40 kHz, the default PWM rate on 320 MHz chips. The ESP32-C5, ESP32-H2 and
+ESP32-P4 are not yet validated on hardware.
 
 ## Principle of operation
 
