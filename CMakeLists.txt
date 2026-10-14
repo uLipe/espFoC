@@ -87,6 +87,7 @@ set(srcs
     "source/drivers/inverter/esp_foc_inverter_mcpwm.c"
     "source/drivers/rotor/as5600/i2c_hal_bus.c"
     "source/drivers/rotor/as5600/as5600.c"
+    "source/drivers/vref/esp_foc_vref_generator.c"
 )
 
 if(CONFIG_ESP_FOC_ROTOR_HALL)
