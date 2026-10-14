@@ -57,7 +57,13 @@ menu "espFoC Settings"
     config ESP_FOC_PWM_RATE_HZ
         int "Default PWM carrier frequency [Hz]"
         range 5000 40000
+        default 40000 if ESP_DEFAULT_CPU_FREQ_MHZ >= 320
         default 20000
+        help
+            One sensored axis costs about 13.7 us of its CPU per PWM period at
+            320 MHz (TEZ and DMA interrupts), plus about 6 % for its supervisor
+            task: 40 kHz loads that CPU to about 61 %. A second axis on the same
+            CPU needs 20 kHz.
 
     config ESP_FOC_TRACE_ENABLE
         bool "Enable IRAM binary hot-path trace buffer"
