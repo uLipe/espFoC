@@ -58,14 +58,17 @@ static const char *TAG = "foc_adc";
 #define BURST_CONV_NS 600u
 /*
  * No attenuation (SOC_ADC_ATTEN_NUM 1). Where the SAR is differential each
- * shunt is converted as its pad pair, P - N over -2..+2 V onto
+ * shunt is converted as its pad pair, P - N over -2.2..+2.2 V onto
  * 0..ADC_LL_ZERO_DIFF_CODE..4393 (17-bit weighted result, see
  * adc_digi_output_data_t); the board puts its amplifier reference on the N
  * pad. Single-ended the other side of the SAR sits at 0 V instead, which
- * leaves only 0..+2 V of a P pad.
+ * leaves only 0..+2.2 V of a P pad.
+ *
+ * The full scale is measured, not the nominal 2 V: a meter-verified 1.65 V
+ * converts to 1646 counts above the zero code (1.0023 mV/count).
  */
 #define BURST_CODE_MAX  4393
-#define BURST_FS_VOLTS  2.0f
+#define BURST_FS_VOLTS  2.2f
 #define BURST_FS_COUNTS (BURST_CODE_MAX - ADC_LL_ZERO_DIFF_CODE)
 #if SOC_ADC_DIFF_SUPPORTED
 /* Bit 0 of a pattern item selects the pad pair, whichever pad the channel
