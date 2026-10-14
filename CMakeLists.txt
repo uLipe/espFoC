@@ -88,6 +88,7 @@ set(srcs
     "source/drivers/rotor/as5600/i2c_hal_bus.c"
     "source/drivers/rotor/as5600/as5600.c"
     "source/drivers/vref/esp_foc_vref_generator.c"
+    "source/drivers/trigo_hw/esp_foc_trigo_hw.c"
 )
 
 if(CONFIG_ESP_FOC_ROTOR_HALL)
@@ -127,7 +128,7 @@ set(priv_requires freertos hal soc esp_hw_support esp_rom esp_timer)
 if("${IDF_VERSION_MAJOR}" GREATER_EQUAL 6)
     list(APPEND priv_requires
         esp_hal_mcpwm esp_hal_ana_conv esp_hal_dma esp_hal_gpio
-        esp_hal_i2c esp_hal_timg)
+        esp_hal_i2c esp_hal_timg esp_hal_cordic)
 endif()
 
 if(ESP_PLATFORM)
