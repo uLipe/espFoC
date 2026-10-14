@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "espFoC/motor_control/esp_foc_ident.h"
+#include "espFoC/drivers/esp_foc_trigo_hw.h"
 #include "espFoC/utils/esp_foc_trig.h"
 
 /* 2*pi in q16 radians. */
@@ -78,7 +79,7 @@ q16_t esp_foc_ident_zprobe_step(esp_foc_ident_zprobe_t *p, q16_t i_meas)
 
     q16_t s;
     q16_t c;
-    esp_foc_sincos((q16_t)(p->theta_hi >> 16), &s, &c);
+    esp_foc_trigo_hw_sincos((q16_t)(p->theta_hi >> 16), &s, &c);
 
     uint32_t lag = p->cfg.lag_samples;
     q16_t s_ref = (lag == 0u) ? s : p->s_hist[lag - 1u];

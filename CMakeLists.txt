@@ -27,6 +27,8 @@ if(IDF_TARGET STREQUAL "linux")
         "source/utils/esp_foc_svm_soft.c"
         "source/utils/esp_foc_svm.c"
         "source/utils/esp_foc_svm_hw.c"
+        # Without a CORDIC unit every trigo_hw call is the software trig.
+        "source/drivers/trigo_hw/esp_foc_trigo_hw.c"
         "source/motor_control/esp_foc_observer_bemf.c"
         "source/motor_control/esp_foc_observer_flux.c"
         "source/motor_control/esp_foc_rotor_est.c"

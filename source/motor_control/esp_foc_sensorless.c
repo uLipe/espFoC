@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "sdkconfig.h"
+#include "espFoC/drivers/esp_foc_trigo_hw.h"
 #include "espFoC/motor_control/esp_foc_if.h"
 #include "espFoC/motor_control/esp_foc_observer_flux.h"
 #include "espFoC/osal/esp_foc_osal.h"
@@ -379,7 +380,7 @@ static void sl_tez(void *arg)
 
     q16_t s;
     q16_t c;
-    esp_foc_sincos(th, &s, &c);
+    esp_foc_trigo_hw_sincos(th, &s, &c);
     q16_t id;
     q16_t iq;
     esp_foc_park(s, c, ia, ib, &id, &iq);
@@ -391,11 +392,11 @@ static void sl_tez(void *arg)
          * dead zone, so they sit out until to_current_mode seeds them. */
         vd = sl->vf_vd;
         vq = sl->vf_vq;
-        esp_foc_vlim_dq(&vd, &vq, Q16_INV_SQRT3);
+        esp_foc_vlim_dq_mag(&vd, &vq, esp_foc_trigo_hw_magnitude(vd, vq), Q16_INV_SQRT3);
     } else {
         vd = q16_add(esp_foc_pid_update(&sl->pi_d, idr, id), vd_ff);
         vq = q16_add(esp_foc_pid_update(&sl->pi_q, iqr, iq), vq_ff);
-        esp_foc_vlim_dq(&vd, &vq, Q16_INV_SQRT3);
+        esp_foc_vlim_dq_mag(&vd, &vq, esp_foc_trigo_hw_magnitude(vd, vq), Q16_INV_SQRT3);
         esp_foc_pid_set_applied(&sl->pi_d, q16_sub(vd, vd_ff));
         esp_foc_pid_set_applied(&sl->pi_q, q16_sub(vq, vq_ff));
     }
@@ -1708,6 +1709,11 @@ esp_err_t esp_foc_sensorless_init(esp_foc_inverter_t *inv,
     const float vdc = q16_to_float(inv->get_dc_link_voltage(inv));
     if ((pwm_hz == 0u) || !(vdc > 0.0f)) {
         return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_err_t hw = esp_foc_trigo_hw_init();
+    if (hw != ESP_OK) {
+        return hw;
     }
 
     memset(sl, 0, sizeof(*sl));
