@@ -1281,8 +1281,8 @@ static esp_err_t install(mid_t *m)
         m->w_overspeed = q16_from_float(MID_TWO_PI * sc->overspeed_hz);
         m->vlead_q32 = (int32_t)lrintf(sc->pwm_delay_ts / (float)m->pwm_hz * 4294967296.0f);
         m->rotor_alive = true;
-        if (esp_foc_task_spawn(mid_rotor_task, m, "foc_id_rotor", MID_ROTOR_STACK,
-                               esp_foc_task_max_priority(), NULL) != 0) {
+        if (esp_foc_task_spawn_stack(mid_rotor_task, m, "foc_id_rotor", MID_ROTOR_STACK,
+                                     esp_foc_task_max_priority(), NULL) != 0) {
             m->rotor_alive = false;
             return ESP_ERR_NO_MEM;
         }
@@ -1380,8 +1380,8 @@ esp_err_t esp_foc_motor_id_run(esp_foc_inverter_t *inv,
     m->out = out;
 
     m->worker_alive = true;
-    if (esp_foc_task_spawn(mid_worker, m, "foc_id", CONFIG_ESP_FOC_MOTOR_ID_TASK_STACK,
-                           CONFIG_ESP_FOC_MOTOR_ID_TASK_PRIO, NULL) != 0) {
+    if (esp_foc_task_spawn_stack(mid_worker, m, "foc_id", CONFIG_ESP_FOC_MOTOR_ID_TASK_STACK,
+                                 CONFIG_ESP_FOC_MOTOR_ID_TASK_PRIO, NULL) != 0) {
         m->worker_alive = false;
         s_busy = false;
         return ESP_ERR_NO_MEM;

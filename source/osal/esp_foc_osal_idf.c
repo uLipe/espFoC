@@ -33,12 +33,13 @@ int esp_foc_task_max_priority(void)
     return (int)configMAX_PRIORITIES - 1;
 }
 
-int esp_foc_task_spawn(esp_foc_task_fn_t fn,
-                       void *arg,
-                       const char *name,
-                       size_t stack_bytes,
-                       int priority,
-                       esp_foc_task_handle_t *out_handle_opt)
+static int task_spawn(esp_foc_task_fn_t fn,
+                      void *arg,
+                      const char *name,
+                      size_t stack_bytes,
+                      int priority,
+                      BaseType_t core,
+                      esp_foc_task_handle_t *out_handle_opt)
 {
     if (fn == NULL || stack_bytes == 0U) {
         return -1;
@@ -52,12 +53,13 @@ int esp_foc_task_spawn(esp_foc_task_fn_t fn,
     }
     const char *nm = (name != NULL && name[0] != '\0') ? name : "espfoc";
     TaskHandle_t h = NULL;
-    BaseType_t ok = xTaskCreate(fn,
-                                nm,
-                                (configSTACK_DEPTH_TYPE)stack_bytes,
-                                arg,
-                                (UBaseType_t)priority,
-                                &h);
+    BaseType_t ok = xTaskCreatePinnedToCore(fn,
+                                            nm,
+                                            (configSTACK_DEPTH_TYPE)stack_bytes,
+                                            arg,
+                                            (UBaseType_t)priority,
+                                            &h,
+                                            core);
     if (ok != pdPASS) {
         return -2;
     }
@@ -65,6 +67,31 @@ int esp_foc_task_spawn(esp_foc_task_fn_t fn,
         *out_handle_opt = (esp_foc_task_handle_t)h;
     }
     return 0;
+}
+
+int esp_foc_task_spawn(esp_foc_task_fn_t fn,
+                       void *arg,
+                       const char *name,
+                       size_t stack_bytes,
+                       int priority,
+                       esp_foc_task_handle_t *out_handle_opt)
+{
+    return task_spawn(fn, arg, name, stack_bytes, priority, tskNO_AFFINITY, out_handle_opt);
+}
+
+int esp_foc_task_spawn_stack(esp_foc_task_fn_t fn,
+                             void *arg,
+                             const char *name,
+                             size_t stack_bytes,
+                             int priority,
+                             esp_foc_task_handle_t *out_handle_opt)
+{
+#if CONFIG_ESP_FOC_CORE_ID >= 0
+    const BaseType_t core = CONFIG_ESP_FOC_CORE_ID;
+#else
+    const BaseType_t core = tskNO_AFFINITY;
+#endif
+    return task_spawn(fn, arg, name, stack_bytes, priority, core, out_handle_opt);
 }
 
 bool esp_foc_task_is_alive(esp_foc_task_handle_t handle)
