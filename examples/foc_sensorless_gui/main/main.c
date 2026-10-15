@@ -31,12 +31,13 @@
 
 #include <math.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-#include "driver/uart.h"
+#include "hal/uart_ll.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
@@ -71,11 +72,12 @@
 #define DEG_PER_RAD (180.0f / (float)M_PI)
 #define RPM_PER_RADS_EL (60.0f / TWO_PI / (float)POLE_PAIRS)
 
-#define CONSOLE_UART CONFIG_ESP_CONSOLE_UART_NUM
-/* Frames are queued here, so an event callback on the controller's task
- * never waits on the wire. */
-#define UART_TX_BUFFER 4096
-#define UART_RX_BUFFER 512
+/* The console UART is driven straight through its 128-byte FIFOs, polled
+ * from tasks: no UART driver, so no UART interrupt and no critical section
+ * that would hold off the PWM interrupt, which leaves little CPU spare in
+ * sensorless. At 115200 baud the RX FIFO fills in ~11 ms; polled every 5. */
+#define CONSOLE_UART_HW UART_LL_GET_HW(CONFIG_ESP_CONSOLE_UART_NUM)
+#define RX_POLL_MS 5u
 
 #define TELEMETRY_PERIOD_MS 100u
 #define WORKER_STACK 8192u
@@ -165,8 +167,23 @@ static uint8_t crc8(const uint8_t *data, size_t len)
     return crc;
 }
 
-/* One uart_write_bytes call per frame: the driver serialises writers, so
- * frames from different tasks never interleave. */
+/* Several tasks send frames. The flag keeps a frame whole without a
+ * critical section; a writer that finds it taken, or the FIFO short of
+ * room, sleeps a tick. */
+static atomic_flag tx_busy = ATOMIC_FLAG_INIT;
+
+static void uart_write_frame(const uint8_t *frame, size_t len)
+{
+    while (atomic_flag_test_and_set_explicit(&tx_busy, memory_order_acquire)) {
+        esp_foc_sleep_ms(1);
+    }
+    while (uart_ll_get_txfifo_len(CONSOLE_UART_HW) < len) {
+        esp_foc_sleep_ms(1);
+    }
+    uart_ll_write_txfifo(CONSOLE_UART_HW, frame, (uint32_t)len);
+    atomic_flag_clear_explicit(&tx_busy, memory_order_release);
+}
+
 static void send_frame(uint8_t type, const void *payload, size_t len)
 {
     uint8_t frame[FRAME_MAX_PAYLOAD + 4];
@@ -181,7 +198,7 @@ static void send_frame(uint8_t type, const void *payload, size_t len)
         memcpy(&frame[3], payload, len);
     }
     frame[3 + len] = crc8(&frame[1], len + 2u);
-    uart_write_bytes(CONSOLE_UART, frame, len + 4u);
+    uart_write_frame(frame, len + 4u);
 }
 
 static void put_f32(uint8_t *dst, float value)
@@ -793,8 +810,16 @@ static void rx_loop(void)
     uint8_t chunk[64];
 
     for (;;) {
-        const int n = uart_read_bytes(CONSOLE_UART, chunk, sizeof(chunk), esp_foc_ms_to_ticks(20));
-        for (int i = 0; i < n; i++) {
+        uint32_t n = uart_ll_get_rxfifo_len(CONSOLE_UART_HW);
+        if (n == 0u) {
+            esp_foc_sleep_ms(RX_POLL_MS);
+            continue;
+        }
+        if (n > sizeof(chunk)) {
+            n = sizeof(chunk);
+        }
+        uart_ll_read_rxfifo(CONSOLE_UART_HW, chunk, n);
+        for (uint32_t i = 0; i < n; i++) {
             const uint8_t byte = chunk[i];
             switch (state) {
             case RX_SYNC:
@@ -834,7 +859,6 @@ void app_main(void)
            "Run examples/foc_sensored_gui/host/espfoc_gui.py on the host.\n");
     fflush(stdout);
 
-    ESP_ERROR_CHECK(uart_driver_install(CONSOLE_UART, UART_RX_BUFFER, UART_TX_BUFFER, 0, NULL, 0));
     esp_log_set_vprintf(log_to_frame);
 
     esp_err_t err = setup_inverter();
