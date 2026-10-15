@@ -2,13 +2,20 @@
 # SPDX-FileCopyrightText: 2026 Felipe Neves
 # SPDX-License-Identifier: Apache-2.0
 """
-espFoC sensored motor control GUI.
+espFoC motor control GUI.
 
-A single-file desktop front end for examples/foc_sensored_gui. It talks to the
-board over the console UART with a tiny binary protocol, walks the motor
-through commissioning (phase map -> identification -> cogging learn), then
-lets you drive it in torque, speed or position mode while three scopes plot
-reference against measurement.
+A single-file desktop front end for examples/foc_sensored_gui and
+examples/foc_sensorless_gui. It talks to the board over the console UART with
+a tiny binary protocol and adapts to whichever firmware answers:
+
+    sensored    commissioning phase map -> identification -> cogging learn,
+                then torque, speed or position mode, three scopes
+    sensorless  commissioning phase map -> identification, a start-up panel
+                (arm, align, I-f ramp, PLL lock, handoff, running) with its
+                Start button, then torque or speed mode; the scopes shade
+                the start-up window
+
+Scopes plot reference against measurement.
 
     pip install PySide6 pyserial
     python3 espfoc_gui.py                 # pick the port in the window
@@ -68,17 +75,31 @@ CMD_COG = 0x04    # commissioning step 3
 CMD_MODE = 0x05   # u8: 0 torque, 1 speed, 2 position
 CMD_REF = 0x06    # f32 in the unit of the mode: A, rpm or deg
 CMD_STOP = 0x07
+CMD_START = 0x08  # sensorless only: launch with the current reference
 
 # Board -> host
-MSG_INFO = 0x81   # u8 pole pairs, f32 max rpm, f32 max iq [A], f32 max deg
+MSG_INFO = 0x81   # see INFO_FORMAT / INFO_SENSORLESS_FORMAT
 MSG_TEL = 0x82    # telemetry, 10 Hz, see TEL_FORMAT
 MSG_PROG = 0x83   # u8 step, u8 percent (0xFF = unknown)
 MSG_LOG = 0x84    # text
 MSG_ACK = 0x85    # u8 command, i32 esp_err_t
+MSG_STARTUP = 0x86  # sensorless only, one per controller event, STARTUP_FORMAT
+
+# u8 pole pairs, f32 max rpm, f32 max iq [A], f32 max deg. A sensorless
+# board appends u8 kind (1), f32 min rpm, f32 min iq [A]: the references
+# under which its observer cannot hold the rotor.
+INFO_FORMAT = "<B3f"
+INFO_SENSORLESS_FORMAT = "<B3fB2f"
+KIND_SENSORED = 0
+KIND_SENSORLESS = 1
 
 # steps done, busy, controller state, mode, flags, then seven floats:
 # speed ref/meas [rpm], position ref/meas [deg], iq ref/meas [A], Vdc [V]
 TEL_FORMAT = "<BBBBB7f2x"
+
+# event, state, failure, abort, fault, then observer speed [rpm], observer
+# minus open-loop angle [deg], seconds since the start-up began
+STARTUP_FORMAT = "<5B3f"
 
 MODES = ("Torque", "Speed", "Position")
 MODE_UNITS = ("A", "rpm", "deg")
@@ -86,13 +107,36 @@ STEP_NAMES = ("Phase map", "Identify", "Cogging learn")
 BUSY_NAMES = ("", "phase map", "identification", "cogging learn", "starting")
 STATE_NAMES = ("IDLE", "ARMED", "RUNNING", "LEARNING", "FAULT")
 COMMAND_NAMES = {CMD_MAP: "MAP", CMD_IDENT: "IDENT", CMD_COG: "COG",
-                 CMD_MODE: "MODE", CMD_REF: "REF", CMD_STOP: "STOP"}
+                 CMD_MODE: "MODE", CMD_REF: "REF", CMD_STOP: "STOP",
+                 CMD_START: "START"}
 
 FLAG_RUNNING = 1 << 0
 FLAG_ABORT = 1 << 1
 FLAG_FAULT = 1 << 2
-FLAG_INPOS = 1 << 3
-FLAG_COGGING = 1 << 4
+FLAG_INPOS = 1 << 3       # sensored
+FLAG_COGGING = 1 << 4     # sensored
+FLAG_LOCKED = 1 << 3      # sensorless: observer locked
+FLAG_OBSERVER = 1 << 4    # sensorless: Park on the observer angle
+FLAG_START_FAIL = 1 << 5  # sensorless
+FLAG_LAUNCH = 1 << 6      # sensorless: START given
+
+# Sensorless controller (esp_foc_sensorless.h). The enums are mirrored here
+# by value; the board sends them raw.
+SL_STATE_NAMES = ("IDLE", "ARMED", "ALIGN", "I-F RAMP", "PLL ACQUIRE",
+                  "HANDOFF", "CATCH", "RUNNING", "REVERSING", "FAULT")
+SL_ARMED, SL_ALIGN, SL_CATCH, SL_RUNNING, SL_REVERSING = 1, 2, 6, 7, 8
+(SL_EV_ARMED, SL_EV_STARTUP, SL_EV_LOCKED, SL_EV_HANDOFF, SL_EV_RUNNING,
+ SL_EV_REVERSING, SL_EV_CUT, SL_EV_STOPPED, SL_EV_STARTUP_FAILED,
+ SL_EV_ABORT, SL_EV_FAULT, SL_EV_FAULT_CLEARED) = range(12)
+SL_FAIL_NAMES = ("", "inverter refused enable", "sequence config refused",
+                 "no current on the ramp", "shaft not following the ramp",
+                 "PLL lock timeout", "speed too low after handoff",
+                 "speed dropped while settling")
+SL_ABORT_NAMES = ("", "observer lock lost", "overspeed", "back-EMF too low",
+                  "current collapse")
+# Start-up stepper nodes, and which node each controller state is on.
+STARTUP_STAGES = ("Arm", "Align", "I-f ramp", "PLL lock", "Handoff", "Running")
+SL_STATE_STAGE = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 4, 7: 5}
 
 # The esp_err_t values the board actually returns to commands.
 ESP_ERR_NAMES = {
@@ -251,6 +295,7 @@ class SerialLink(QObject):
 # Node tree (built once, geometry refreshed on every update):
 #
 #   root
+#    +- shade      DrawTriangles, background bands over flagged samples
 #    +- grid       DrawLines, thin
 #    +- zero       DrawLines, the y = 0 line when it is in range
 #    +- reference  DrawTriangleStrip
@@ -281,12 +326,14 @@ class ScopeItem(QQuickItem):
         self._history = 300                 # 30 s at the 10 Hz telemetry rate
         self._ref = deque(maxlen=self._history)
         self._meas = deque(maxlen=self._history)
+        self._shade = deque(maxlen=self._history)
         self._y_min, self._y_max = -1.0, 1.0
         self._min_span = 1.0
         self._ref_color = QColor("#ffb020")
         self._meas_color = QColor("#36c5f0")
         self._grid_color = QColor("#2a3440")
         self._zero_color = QColor("#4a5868")
+        self._shade_color = QColor("#2b2a1c")
         # Python keeps a handle on every scene-graph object it created, so
         # the garbage collector never frees one the renderer still uses.
         self._sg = None
@@ -333,10 +380,13 @@ class ScopeItem(QQuickItem):
 
     # --- data in -----------------------------------------------------------
 
-    @Slot(float, float)
-    def push(self, reference, measured):
+    @Slot(float, float, bool)
+    def push(self, reference, measured, shaded):
+        """One sample. shaded paints a band behind it (the sensorless
+        start-up window)."""
         self._ref.append(reference)
         self._meas.append(measured)
+        self._shade.append(bool(shaded))
         self._rescale()
         self.update()
 
@@ -344,6 +394,7 @@ class ScopeItem(QQuickItem):
     def clear(self):
         self._ref.clear()
         self._meas.clear()
+        self._shade.clear()
         self._rescale()
         self.update()
 
@@ -413,6 +464,7 @@ class ScopeItem(QQuickItem):
         if old_node is None or self._sg is None:
             root = QSGNode()
             parts = {
+                "shade": self._make_node(QSGGeometry.DrawTriangles, self._shade_color),
                 "grid": self._make_node(QSGGeometry.DrawLines, self._grid_color),
                 "zero": self._make_node(QSGGeometry.DrawLines, self._zero_color),
                 "ref": self._make_node(QSGGeometry.DrawTriangleStrip, self._ref_color),
@@ -431,6 +483,20 @@ class ScopeItem(QQuickItem):
 
         def to_px(index, value):
             return ((index + offset) * step_x, h - (value - self._y_min) / span * h)
+
+        # One rectangle (two triangles) per run of consecutive flagged
+        # samples, half a sample wider on each side.
+        shade, flags = [], list(self._shade) + [False]
+        run_start = None
+        for i, flagged in enumerate(flags):
+            if flagged and run_start is None:
+                run_start = i
+            elif not flagged and run_start is not None:
+                x0 = max(0.0, (run_start + offset - 0.5) * step_x)
+                x1 = min(w, (i - 1 + offset + 0.5) * step_x)
+                shade += [(x0, 0.0), (x1, 0.0), (x0, h), (x1, 0.0), (x1, h), (x0, h)]
+                run_start = None
+        self._fill(parts["shade"][0], parts["shade"][1], shade)
 
         grid = []
         for i in range(self.GRID_X + 1):
@@ -471,9 +537,11 @@ class Backend(QObject):
     infoChanged = Signal()
     statusChanged = Signal()
     progressChanged = Signal()
+    startupChanged = Signal()
     logLine = Signal(str)
-    # speed ref/meas, position ref/meas, iq ref/meas: one call per TEL frame
-    telemetry = Signal(float, float, float, float, float, float)
+    # speed ref/meas, position ref/meas, iq ref/meas, then whether the
+    # sample falls in a sensorless start-up: one call per TEL frame
+    telemetry = Signal(float, float, float, float, float, float, bool)
 
     REF_PERIOD_MS = 50
 
@@ -488,6 +556,15 @@ class Backend(QObject):
         # From INFO
         self._pole_pairs = 0
         self._max_rpm, self._max_iq, self._max_deg = 2000.0, 0.5, 3600.0
+        self._kind = KIND_SENSORED
+        self._min_rpm, self._min_iq = 0.0, 0.0
+        # From STARTUP (sensorless): the stepper node reached, the node a
+        # start-up failed on (-1 none), and what the last events reported
+        self._stage = -1
+        self._fail_stage = -1
+        self._startup_text = ""
+        self._lock_rpm = self._lock_dang = self._startup_time = float("nan")
+        self._trip_reason = ""
         # From TEL
         self._steps_done = 0
         self._busy = 0
@@ -567,10 +644,36 @@ class Backend(QObject):
     def _get_pole_pairs(self):
         return self._pole_pairs
 
+    def _get_kind(self):
+        return self._kind
+
+    def _get_min_rpm(self):
+        return self._min_rpm
+
+    def _get_min_iq(self):
+        return self._min_iq
+
+    def _get_commissioned(self):
+        # stepsDone once every commissioning step is through
+        return 0b011 if self._kind == KIND_SENSORLESS else 0b111
+
     maxRpm = Property(float, _get_max_rpm, notify=infoChanged)
     maxIq = Property(float, _get_max_iq, notify=infoChanged)
     maxDeg = Property(float, _get_max_deg, notify=infoChanged)
     polePairs = Property(int, _get_pole_pairs, notify=infoChanged)
+    sensorless = Property(bool, lambda self: self._kind == KIND_SENSORLESS, notify=infoChanged)
+    minRpm = Property(float, _get_min_rpm, notify=infoChanged)
+    minIq = Property(float, _get_min_iq, notify=infoChanged)
+    commissioned = Property(int, _get_commissioned, notify=infoChanged)
+
+    # --- sensorless start-up (STARTUP) -------------------------------------
+
+    startupStage = Property(int, lambda self: self._stage, notify=startupChanged)
+    startupFailStage = Property(int, lambda self: self._fail_stage, notify=startupChanged)
+    startupText = Property(str, lambda self: self._startup_text, notify=startupChanged)
+    lockRpm = Property(float, lambda self: self._lock_rpm, notify=startupChanged)
+    lockDang = Property(float, lambda self: self._lock_dang, notify=startupChanged)
+    startupTime = Property(float, lambda self: self._startup_time, notify=startupChanged)
 
     # --- status (TEL) ------------------------------------------------------
 
@@ -597,6 +700,8 @@ class Backend(QObject):
             return "not connected"
         if self._busy:
             return "busy: " + BUSY_NAMES[self._busy] if self._busy < len(BUSY_NAMES) else "busy"
+        if self._kind == KIND_SENSORLESS:
+            return self._sensorless_status()
         text = STATE_NAMES[self._state] if self._state < len(STATE_NAMES) else "?"
         if self._flags & FLAG_ABORT:
             text += "  (abort, press STOP to clear)"
@@ -604,6 +709,15 @@ class Backend(QObject):
             text += "  (fault, press STOP to clear)"
         if self._steps_done == 0b111 and self._state == 0:
             text += "  - select a mode to start again"
+        return text
+
+    def _sensorless_status(self):
+        text = SL_STATE_NAMES[self._state] if self._state < len(SL_STATE_NAMES) else "?"
+        if self._flags & (FLAG_START_FAIL | FLAG_ABORT | FLAG_FAULT):
+            return text + f"  ({self._trip_reason or 'tripped'}, press STOP to clear)"
+        if (self._steps_done == 0b011 and self._state == SL_ARMED
+                and not self._flags & FLAG_LAUNCH):
+            text += "  - set a reference and press Start"
         return text
 
     def _get_measured(self):
@@ -665,6 +779,15 @@ class Backend(QObject):
             self._link.send(CMD_REF, struct.pack("<f", self._pending_ref))
             self._pending_ref = None
 
+    @Slot(float)
+    def startMotor(self, value):
+        """Sensorless launch: the reference first, so the board starts on
+        what the slider shows rather than on a REF still in the throttle."""
+        self._pending_ref = None
+        self._link.send(CMD_REF, struct.pack("<f", value))
+        self._link.send(CMD_START)
+        self.logLine.emit("> Start")
+
     @Slot()
     def stop(self):
         # STOP skips the REF throttle and goes out now.
@@ -679,8 +802,14 @@ class Backend(QObject):
             (self._steps_done, self._busy, self._state, self._mode, self._flags,
              w_ref, w, th_ref, th, iq_ref, iq, self._vdc) = struct.unpack(TEL_FORMAT, payload)
             self._last = (w_ref, w, th_ref, th, iq_ref, iq)
+            starting = False
+            if self._kind == KIND_SENSORLESS:
+                starting = SL_ALIGN <= self._state <= SL_CATCH or self._state == SL_REVERSING
+                self._track_stage()
             self.statusChanged.emit()
-            self.telemetry.emit(w_ref, w, th_ref, th, iq_ref, iq)
+            self.telemetry.emit(w_ref, w, th_ref, th, iq_ref, iq, starting)
+        elif msg_type == MSG_STARTUP and len(payload) == struct.calcsize(STARTUP_FORMAT):
+            self._on_startup(*struct.unpack(STARTUP_FORMAT, payload))
         elif msg_type == MSG_PROG and len(payload) == 2:
             step, pct = payload
             if step < 3:
@@ -691,14 +820,23 @@ class Backend(QObject):
         elif msg_type == MSG_ACK and len(payload) == 5:
             command, err = struct.unpack("<Bi", payload)
             self._on_ack(command, err)
-        elif msg_type == MSG_INFO and len(payload) == 13:
+        elif msg_type == MSG_INFO and len(payload) == struct.calcsize(INFO_FORMAT):
             self._pole_pairs, self._max_rpm, self._max_iq, self._max_deg = \
-                struct.unpack("<B3f", payload)
+                struct.unpack(INFO_FORMAT, payload)
+            self._kind = KIND_SENSORED
             self.infoChanged.emit()
-            self.logLine.emit(f"board: {self._pole_pairs} pole pairs, "
+            self.logLine.emit(f"sensored board: {self._pole_pairs} pole pairs, "
                               f"|speed| <= {self._max_rpm:.0f} rpm, "
                               f"|iq| <= {self._max_iq:.2f} A, "
                               f"|position| <= {self._max_deg:.0f} deg")
+        elif msg_type == MSG_INFO and len(payload) == struct.calcsize(INFO_SENSORLESS_FORMAT):
+            (self._pole_pairs, self._max_rpm, self._max_iq, self._max_deg,
+             self._kind, self._min_rpm, self._min_iq) = \
+                struct.unpack(INFO_SENSORLESS_FORMAT, payload)
+            self.infoChanged.emit()
+            self.logLine.emit(f"sensorless board: {self._pole_pairs} pole pairs, "
+                              f"speed {self._min_rpm:.0f}..{self._max_rpm:.0f} rpm, "
+                              f"iq {self._min_iq:.2f}..{self._max_iq:.2f} A")
 
     def _on_ack(self, command, err):
         step = {CMD_MAP: 0, CMD_IDENT: 1, CMD_COG: 2}.get(command)
@@ -712,6 +850,56 @@ class Backend(QObject):
             self.logLine.emit(f"{COMMAND_NAMES.get(command, hex(command))} refused: {name}")
         elif step is not None:
             self.logLine.emit(f"{STEP_NAMES[step]}: done")
+
+    def _track_stage(self):
+        """Advance the stepper from TEL, which also covers the states no
+        event announces (I-f ramp, PLL acquire)."""
+        stage = SL_STATE_STAGE.get(self._state)
+        if stage is None or self._fail_stage >= 0:
+            return
+        if self._stage < 0 or stage > self._stage:
+            self._stage = stage
+            if stage == 2:
+                self._startup_text = "open-loop I-f ramp"
+            elif stage == 3:
+                self._startup_text = "PLL acquiring the rotor"
+            self.startupChanged.emit()
+
+    def _on_startup(self, event, state, fail, abort, fault, rpm, dang, t_s):
+        if event == SL_EV_STARTUP:
+            self._stage, self._fail_stage = 1, -1
+            self._lock_rpm = self._lock_dang = self._startup_time = float("nan")
+            self._startup_text = "aligning the rotor"
+        elif event == SL_EV_LOCKED:
+            self._lock_rpm, self._lock_dang = rpm, dang
+            self._stage = max(self._stage, 4)
+            self._startup_text = "observer locked"
+        elif event == SL_EV_HANDOFF:
+            self._stage = max(self._stage, 4)
+            self._startup_text = "handoff: Park on the observer"
+        elif event == SL_EV_RUNNING:
+            self._stage, self._startup_time = 5, t_s
+            self._startup_text = f"running, start-up took {t_s:.2f} s"
+        elif event == SL_EV_REVERSING:
+            self._startup_text = "reversing: slowing down to relaunch"
+        elif event == SL_EV_CUT:
+            self._startup_text = "bridge off, coasting"
+        elif event == SL_EV_STARTUP_FAILED:
+            self._fail_stage = SL_STATE_STAGE.get(state, max(self._stage, 0))
+            name = SL_FAIL_NAMES[fail] if fail < len(SL_FAIL_NAMES) else f"failure {fail}"
+            self._trip_reason = self._startup_text = "start-up failed: " + name
+        elif event == SL_EV_ABORT:
+            name = SL_ABORT_NAMES[abort] if abort < len(SL_ABORT_NAMES) else f"abort {abort}"
+            self._trip_reason = self._startup_text = "abort: " + name
+        elif event == SL_EV_FAULT:
+            self._trip_reason = self._startup_text = f"inverter fault {fault}"
+        elif event == SL_EV_FAULT_CLEARED:
+            self._stage, self._fail_stage = 0, -1
+            self._trip_reason, self._startup_text = "", "cleared, armed"
+        else:
+            return
+        self.startupChanged.emit()
+        self.statusChanged.emit()
 
     def shutdown(self):
         if self._link.is_open():
@@ -737,7 +925,8 @@ ApplicationWindow {
     id: win
     width: 1440; height: 880
     visible: true
-    title: "espFoC - sensored motor control"
+    title: backend.sensorless ? "espFoC - sensorless motor control"
+                              : "espFoC - sensored motor control"
     color: "#12171d"
 
     // Set on the window, the palette reaches every control below it. An
@@ -762,8 +951,11 @@ ApplicationWindow {
     readonly property color dim: "#8a97a6"
     readonly property color accent: "#36c5f0"
     readonly property color refCol: "#ffb020"
-    readonly property bool ready: backend.connected && backend.stepsDone === 7
-                                  && backend.busy === 0
+    readonly property bool ready: backend.connected && backend.busy === 0
+                                  && backend.stepsDone === backend.commissioned
+    // A sensorless controller that latched a failure, abort or fault.
+    readonly property bool tripped: (backend.flags & (2 | 4 | 32)) !== 0
+    onReadyChanged: if (ready) control.resetFields(backend.mode)
 
     // Esc is STOP from anywhere in the window.
     Shortcut { sequence: "Esc"; onActivated: backend.stop() }
@@ -869,10 +1061,10 @@ ApplicationWindow {
                 title: "Commissioning"
                 StepRow { step: 0; unlocked: true }
                 StepRow { step: 1; unlocked: backend.stepsDone & 1 }
-                StepRow { step: 2; unlocked: backend.stepsDone & 2 }
+                StepRow { step: 2; unlocked: backend.stepsDone & 2; visible: !backend.sensorless }
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 200
+                    Layout.preferredHeight: backend.sensorless ? 130 : 200
                     color: "#0e1318"; radius: 4; border.color: win.edge
                     ListView {
                         id: logView
@@ -889,23 +1081,105 @@ ApplicationWindow {
                 }
             }
 
+            // Sensorless only: where the last start-up got to, and the
+            // launch button. The stepper follows the board's controller
+            // state and events; a failed node turns red with the reason.
+            Panel {
+                title: "Startup"
+                visible: backend.sensorless
+                enabled: win.ready
+                opacity: enabled ? 1.0 : 0.45
+                Item {
+                    Layout.fillWidth: true
+                    implicitHeight: 46
+                    Repeater {
+                        id: stages
+                        model: ["Arm", "Align", "I-f ramp", "PLL lock", "Handoff", "Running"]
+                        Item {
+                            readonly property real slot: parent.width / stages.count
+                            readonly property bool failed: backend.startupFailStage === index
+                            readonly property bool done: (backend.startupFailStage < 0
+                                                          || index < backend.startupFailStage)
+                                                         && (index < backend.startupStage
+                                                             || backend.startupStage === 5)
+                            readonly property bool active: !failed && !done
+                                                           && index === backend.startupStage
+                            x: index * slot; width: slot; height: parent.height
+                            Rectangle {
+                                // connector to the previous node
+                                visible: index > 0
+                                x: -parent.slot / 2 + 12; y: 10
+                                width: parent.slot - 24; height: 2
+                                color: done || active || failed ? "#4a8a5a" : win.edge
+                            }
+                            Rectangle {
+                                id: dot
+                                x: (parent.width - width) / 2; width: 22; height: 22; radius: 11
+                                color: failed ? "#c62828" : done ? "#2e7d32"
+                                       : active ? "#1f7fa8" : "#262f39"
+                                border.color: active ? win.accent : "transparent"
+                                Label {
+                                    anchors.centerIn: parent; font.pixelSize: 11
+                                    text: failed ? "\u2715" : done ? "\u2713" : index + 1
+                                }
+                            }
+                            Label {
+                                anchors.horizontalCenter: dot.horizontalCenter
+                                y: 26; font.pixelSize: 11
+                                text: modelData
+                                color: failed ? "#ff6b6b" : active ? win.accent : win.dim
+                            }
+                        }
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true; elide: Text.ElideRight
+                    text: backend.startupText || " "
+                    color: backend.startupFailStage >= 0 || win.tripped ? "#ff6b6b" : "#c8d2dc"
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    function show(v, decimals, unit) {
+                        return isNaN(v) ? "\u2013" : v.toFixed(decimals) + " " + unit
+                    }
+                    Label { color: win.dim; text: "\u03c9\u0302 lock"; font.pixelSize: 11 }
+                    Label { text: parent.show(backend.lockRpm, 0, "rpm") }
+                    Label { color: win.dim; text: "\u03b8\u0302\u2212\u03b8ol"; font.pixelSize: 11 }
+                    Label { text: parent.show(backend.lockDang, 1, "deg") }
+                    Label { color: win.dim; text: "took"; font.pixelSize: 11 }
+                    Label { text: parent.show(backend.startupTime, 2, "s") }
+                }
+                Button {
+                    objectName: "startButton"
+                    text: "Start"
+                    Layout.fillWidth: true
+                    highlighted: enabled
+                    enabled: win.ready && backend.state === 1 && !win.tripped
+                    onClicked: backend.startMotor(control.command)
+                }
+            }
+
             Panel {
                 title: "Control"
                 enabled: win.ready
                 opacity: enabled ? 1.0 : 0.45
 
-                // Segmented mode selector.
+                // Segmented mode selector. The sensorless controller has no
+                // position mode and only changes mode while stopped.
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 0
                     Repeater {
-                        model: ["Torque", "Speed", "Position"]
+                        model: backend.sensorless ? ["Torque", "Speed"]
+                                                  : ["Torque", "Speed", "Position"]
                         Button {
                             Layout.fillWidth: true
                             text: modelData
                             checkable: true
                             checked: backend.mode === index
                             highlighted: checked
+                            enabled: !backend.sensorless || backend.state <= 1
                             onClicked: control.selectMode(index)
                         }
                     }
@@ -923,20 +1197,30 @@ ApplicationWindow {
                     readonly property real limit: limits[backend.mode]
                     readonly property real command: slider.value * (reverse.checked ? -1 : 1)
 
-                    function selectMode(m) {
+                    readonly property real observerMin: backend.mode === 0 ? backend.minIq
+                                                                           : backend.minRpm
+
+                    function resetFields(m) {
                         // Torque and speed start at zero, position starts
                         // where the shaft is, so a mode change never jumps.
+                        // Sensorless starts at the observer's minimum: any
+                        // less and the board would not launch.
                         reverse.checked = false
+                        const decimals = m === 0 ? 2 : 0
                         if (m === 2) {
                             const here = backend.measured[3]
                             minField.text = Math.round(here - 360)
                             maxField.text = Math.round(here + 360)
                             slider.value = here
                         } else {
-                            minField.text = 0
-                            maxField.text = (m === 0 ? backend.maxIq : backend.maxRpm).toFixed(m === 0 ? 2 : 0)
-                            slider.value = 0
+                            const low = backend.sensorless ? (m === 0 ? backend.minIq : backend.minRpm) : 0
+                            minField.text = low.toFixed(decimals)
+                            maxField.text = (m === 0 ? backend.maxIq : backend.maxRpm).toFixed(decimals)
+                            slider.value = low
                         }
+                    }
+                    function selectMode(m) {
+                        resetFields(m)
                         backend.setMode(m)
                     }
                     function clampField(t) {
@@ -983,6 +1267,14 @@ ApplicationWindow {
                                 font.pixelSize: 20; color: win.refCol
                             }
                         }
+                        Label {
+                            visible: backend.sensorless
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            color: win.dim; font.pixelSize: 11
+                            text: "below " + control.observerMin.toFixed(backend.mode === 0 ? 2 : 0)
+                                  + " " + control.units[backend.mode]
+                                  + " the observer loses the rotor and the board cuts the bridge"
+                        }
                     }
                 }
             }
@@ -1014,6 +1306,7 @@ ApplicationWindow {
                 ]
                 Rectangle {
                     property alias scope: plot
+                    visible: index !== 1 || !backend.sensorless
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     color: win.panel; radius: 6; border.color: win.edge
@@ -1081,18 +1374,27 @@ ApplicationWindow {
                     color: backend.connected ? "#4caf50" : win.dim }
             Label { text: "state: " + backend.statusText; color: "#c8d2dc" }
             Label { text: "Vdc " + backend.vdc.toFixed(1) + " V"; color: "#c8d2dc" }
-            Label { text: (backend.flags & 16) ? "cogging ff on" : ""; color: win.dim }
-            Label { text: (backend.flags & 8) ? "in position" : ""; color: "#4caf50" }
+            // bits 3 and 4 mean different things on each board kind
+            Label {
+                text: !(backend.flags & 16) ? ""
+                      : backend.sensorless ? "Park on observer" : "cogging ff on"
+                color: win.dim
+            }
+            Label {
+                text: !(backend.flags & 8) ? ""
+                      : backend.sensorless ? "PLL locked" : "in position"
+                color: "#4caf50"
+            }
         }
     }
 
     // ------------------------------------------------------------- wiring
     Connections {
         target: backend
-        function onTelemetry(wr, w, pr, p, ir, i) {
-            scopes.itemAt(0).scope.push(wr, w)
-            scopes.itemAt(1).scope.push(pr, p)
-            scopes.itemAt(2).scope.push(ir, i)
+        function onTelemetry(wr, w, pr, p, ir, i, starting) {
+            scopes.itemAt(0).scope.push(wr, w, starting)
+            scopes.itemAt(1).scope.push(pr, p, starting)
+            scopes.itemAt(2).scope.push(ir, i, starting)
         }
         function onLogLine(text) {
             logModel.append({ line: text })
@@ -1109,7 +1411,7 @@ ApplicationWindow {
 # =============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="espFoC sensored motor control GUI")
+    parser = argparse.ArgumentParser(description="espFoC motor control GUI")
     parser.add_argument("--port", default="", help="serial port to preselect and open")
     args = parser.parse_args()
 
