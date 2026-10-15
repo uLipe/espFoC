@@ -1,0 +1,888 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Felipe Neves
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
+ * Sensored motor control driven from a desktop GUI (host/espfoc_gui.py).
+ *
+ * The board does nothing on its own. The host walks it through
+ * commissioning, one step per button:
+ *
+ *   1. MAP    phase discovery: phase order, current signs, encoder zero and
+ *             direction.
+ *   2. IDENT  motor identification (R, L, flux, K, J, encoder offset and
+ *             delay), then the sensored controller is built from it and
+ *             started, holding position.
+ *   3. COG    cogging learn: slow sweeps both ways, the cogging feedforward
+ *             table is switched on, the current position becomes 0.
+ *
+ * After that the host picks torque, speed or position mode and streams a
+ * reference. The board answers with telemetry at 10 Hz.
+ *
+ * Everything travels over the console UART as small binary frames (see the
+ * README for the layout). ESP_LOG output is wrapped into LOG frames, so the
+ * GUI log shows what the library reports while a step runs.
+ *
+ * STOP while the controller runs is a dry cut (bridge off, controller idle).
+ * Phase discovery and identification cannot be cancelled half way, so STOP
+ * during them reboots the chip; the bridge stays disabled across the reset.
+ */
+
+#include <math.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "driver/uart.h"
+#include "esp_err.h"
+#include "esp_log.h"
+#include "sdkconfig.h"
+#include "espFoC/drivers/esp_foc_inverter_mcpwm.h"
+#include "espFoC/drivers/esp_foc_rotor_as5600.h"
+#include "espFoC/motor_control/esp_foc_motor_id.h"
+#include "espFoC/motor_control/esp_foc_phase_discover.h"
+#include "espFoC/motor_control/esp_foc_sensored.h"
+#include "espFoC/osal/esp_foc_osal.h"
+
+#define MOTOR_AXIS 0u
+
+#define PWM_RATE_HZ ((uint32_t)CONFIG_ESP_FOC_PWM_RATE_HZ)
+#define ENCODER_RATE_HZ ((uint32_t)CONFIG_ESP_FOC_SD_FETCH_HZ)
+#define POLE_PAIRS CONFIG_EXAMPLE_MOTOR_POLE_PAIRS
+#define DC_LINK_VOLTS ((float)CONFIG_EXAMPLE_DC_LINK_MILLIVOLT * 1.0e-3f)
+
+#if CONFIG_EXAMPLE_BRIDGE_ENABLE_ACTIVE_LOW
+#define BRIDGE_ENABLE_ACTIVE_LOW true
+#else
+#define BRIDGE_ENABLE_ACTIVE_LOW false
+#endif
+
+#define GUI_MAX_RPM ((float)CONFIG_EXAMPLE_GUI_MAX_RPM)
+#define GUI_MAX_IQ_A ((float)CONFIG_EXAMPLE_GUI_MAX_IQ_MA * 1.0e-3f)
+#define GUI_MAX_DEG ((float)CONFIG_EXAMPLE_GUI_MAX_DEG)
+#define GUI_ACCEL_RPM_S ((float)CONFIG_EXAMPLE_GUI_ACCEL_RPM_S)
+
+#define TWO_PI (2.0f * (float)M_PI)
+#define DEG_PER_RAD (180.0f / (float)M_PI)
+#define RPM_PER_RADS_MECH (60.0f / TWO_PI)
+
+/* Up to six passes of two-turn sweeps each way at 0.25 rev/s, plus rests. */
+#define COGGING_LEARN_TIMEOUT_MS 150000u
+
+#define CONSOLE_UART CONFIG_ESP_CONSOLE_UART_NUM
+/* Frames are queued here, so an event callback on the controller's task
+ * never waits on the wire. */
+#define UART_TX_BUFFER 4096
+#define UART_RX_BUFFER 512
+
+#define TELEMETRY_PERIOD_MS 100u
+#define WORKER_STACK 8192u
+#define WORKER_PRIORITY 4
+#define TELEMETRY_PRIORITY 3
+
+/* ---------------------------------------------------------------------------
+ * Wire protocol
+ *
+ *   0xA5 | type | len | payload[len] | crc8(type, len, payload)
+ *
+ * crc8 is polynomial 0x07, initial value 0. Multi-byte fields are little
+ * endian, floats are IEEE-754 single precision.
+ * ------------------------------------------------------------------------- */
+#define FRAME_SYNC 0xA5u
+#define FRAME_MAX_PAYLOAD 64u
+
+/* Host -> board */
+#define CMD_PING 0x01u  /* no payload; the board answers INFO */
+#define CMD_MAP 0x02u   /* start phase discovery */
+#define CMD_IDENT 0x03u /* start identification, then start the controller */
+#define CMD_COG 0x04u   /* start cogging learn */
+#define CMD_MODE 0x05u  /* u8 mode: 0 torque, 1 speed, 2 position */
+#define CMD_REF 0x06u   /* f32 reference: A, rpm or deg by the current mode */
+#define CMD_STOP 0x07u  /* no payload */
+
+/* Board -> host */
+#define MSG_INFO 0x81u /* u8 pole pairs, f32 max rpm, f32 max iq A, f32 max deg */
+#define MSG_TEL 0x82u  /* see send_telemetry() */
+#define MSG_PROG 0x83u /* u8 step, u8 percent (0xFF: not known) */
+#define MSG_LOG 0x84u  /* text, not terminated */
+#define MSG_ACK 0x85u  /* u8 command, i32 esp_err_t */
+
+/* Commissioning steps; also the bit positions of the "done" mask. */
+typedef enum {
+    STEP_MAP = 0,
+    STEP_IDENT,
+    STEP_COG,
+    STEP_COUNT,
+} step_t;
+
+/* What the worker task is doing; reported in every TEL frame. */
+typedef enum {
+    BUSY_NONE = 0,
+    BUSY_MAP,
+    BUSY_IDENT,
+    BUSY_COG,
+    BUSY_START,
+} busy_t;
+
+#define TEL_FLAG_RUNNING (1u << 0)
+#define TEL_FLAG_ABORT (1u << 1)
+#define TEL_FLAG_FAULT (1u << 2)
+#define TEL_FLAG_INPOS (1u << 3)
+#define TEL_FLAG_COGGING (1u << 4)
+
+static const char *TAG = "gui";
+
+static esp_foc_inverter_t *inverter;
+static esp_foc_rotor_sensor_t *encoder;
+
+static esp_foc_phase_discover_result_t phase_map;
+static esp_foc_motor_id_result_t plant;
+static esp_foc_sensored_config_t controller_config;
+
+/* Written by the RX loop and the worker; read by telemetry. Byte-sized, so
+ * a read never tears. */
+static volatile uint8_t steps_done;
+static volatile uint8_t busy;
+static volatile bool controller_ready;
+static volatile uint8_t active_mode = ESP_FOC_SD_MODE_POSITION;
+
+/* ------------------------------------------------------------------------- */
+
+static uint8_t crc8(const uint8_t *data, size_t len)
+{
+    uint8_t crc = 0;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; bit++) {
+            crc = (crc & 0x80u) ? (uint8_t)((crc << 1) ^ 0x07u) : (uint8_t)(crc << 1);
+        }
+    }
+    return crc;
+}
+
+/* One uart_write_bytes call per frame: the driver serialises writers, so
+ * frames from different tasks never interleave. */
+static void send_frame(uint8_t type, const void *payload, size_t len)
+{
+    uint8_t frame[FRAME_MAX_PAYLOAD + 4];
+
+    if (len > FRAME_MAX_PAYLOAD) {
+        len = FRAME_MAX_PAYLOAD;
+    }
+    frame[0] = FRAME_SYNC;
+    frame[1] = type;
+    frame[2] = (uint8_t)len;
+    if (len > 0u) {
+        memcpy(&frame[3], payload, len);
+    }
+    frame[3 + len] = crc8(&frame[1], len + 2u);
+    uart_write_bytes(CONSOLE_UART, frame, len + 4u);
+}
+
+static void put_f32(uint8_t *dst, float value)
+{
+    memcpy(dst, &value, sizeof(value));
+}
+
+static void send_ack(uint8_t command, esp_err_t err)
+{
+    uint8_t payload[5];
+    int32_t code = (int32_t)err;
+
+    payload[0] = command;
+    memcpy(&payload[1], &code, sizeof(code));
+    send_frame(MSG_ACK, payload, sizeof(payload));
+}
+
+static void send_progress(step_t step, uint8_t percent)
+{
+    const uint8_t payload[2] = {(uint8_t)step, percent};
+    send_frame(MSG_PROG, payload, sizeof(payload));
+}
+
+static void send_info(void)
+{
+    uint8_t payload[13];
+
+    payload[0] = (uint8_t)POLE_PAIRS;
+    put_f32(&payload[1], GUI_MAX_RPM);
+    put_f32(&payload[5], GUI_MAX_IQ_A);
+    put_f32(&payload[9], GUI_MAX_DEG);
+    send_frame(MSG_INFO, payload, sizeof(payload));
+}
+
+static void send_text(const char *text)
+{
+    size_t len = strlen(text);
+
+    while (len > 0u) {
+        const size_t chunk = (len > FRAME_MAX_PAYLOAD) ? FRAME_MAX_PAYLOAD : len;
+        send_frame(MSG_LOG, text, chunk);
+        text += chunk;
+        len -= chunk;
+    }
+}
+
+static void log_line(const char *format, ...)
+{
+    char text[128];
+    va_list args;
+
+    va_start(args, format);
+    vsnprintf(text, sizeof(text), format, args);
+    va_end(args);
+    send_text(text);
+}
+
+/* Every ESP_LOGx after the hook is installed lands here instead of on the
+ * wire as plain text. Trailing newlines are dropped: one frame, one line. */
+static int log_to_frame(const char *format, va_list args)
+{
+    char text[160];
+    int len = vsnprintf(text, sizeof(text), format, args);
+
+    if (len <= 0) {
+        return len;
+    }
+    size_t n = strnlen(text, sizeof(text));
+    while ((n > 0u) && ((text[n - 1u] == '\n') || (text[n - 1u] == '\r'))) {
+        text[--n] = '\0';
+    }
+    if (n > 0u) {
+        send_text(text);
+    }
+    return len;
+}
+
+/* ---------------------------------------------------------------------------
+ * Telemetry
+ *
+ * TEL payload, 35 bytes:
+ *   u8  steps done mask (bit per step_t)
+ *   u8  busy (busy_t)
+ *   u8  controller state (esp_foc_sensored_state_t, 0 before the controller
+ *       exists)
+ *   u8  mode (esp_foc_sensored_mode_t)
+ *   u8  flags (TEL_FLAG_*)
+ *   f32 speed reference [rpm], f32 speed [rpm]
+ *   f32 position reference [deg], f32 position [deg]
+ *   f32 iq reference [A], f32 iq [A]
+ *   f32 DC link [V]
+ * ------------------------------------------------------------------------- */
+static void send_telemetry(void)
+{
+    uint8_t payload[35];
+    esp_foc_sensored_status_t status;
+    uint8_t flags = 0;
+    const float rpm_per_rads_el = RPM_PER_RADS_MECH / (float)POLE_PAIRS;
+
+    memset(&status, 0, sizeof(status));
+    if (controller_ready) {
+        esp_foc_sensored_get_status(MOTOR_AXIS, &status);
+        flags |= (status.state == ESP_FOC_SD_STATE_RUNNING) ? TEL_FLAG_RUNNING : 0u;
+        flags |= (status.abort != ESP_FOC_SD_ABORT_NONE) ? TEL_FLAG_ABORT : 0u;
+        flags |= (status.fault != ESP_FOC_FAULT_NONE) ? TEL_FLAG_FAULT : 0u;
+        flags |= status.inpos ? TEL_FLAG_INPOS : 0u;
+        flags |= status.cogging_on ? TEL_FLAG_COGGING : 0u;
+        /* A loop that is not running keeps its last reference; report the
+         * measurement instead so the scope does not show a stale target. */
+        if (status.mode != ESP_FOC_SD_MODE_POSITION) {
+            status.theta_ref_rad = status.theta_m_rad;
+        }
+        if (status.mode == ESP_FOC_SD_MODE_TORQUE) {
+            status.w_ref_rads = status.we_rads;
+        }
+    } else {
+        /* No controller yet: show the shaft angle the encoder last latched,
+         * so the position scope already moves during commissioning. */
+        status.theta_m_rad = q16_to_float(esp_foc_rotor_sensor_get_position(encoder));
+        status.theta_ref_rad = status.theta_m_rad;
+        status.vdc_v = DC_LINK_VOLTS;
+    }
+
+    payload[0] = steps_done;
+    payload[1] = busy;
+    payload[2] = controller_ready ? (uint8_t)status.state : 0u;
+    payload[3] = active_mode;
+    payload[4] = flags;
+    put_f32(&payload[5], status.w_ref_rads * rpm_per_rads_el);
+    put_f32(&payload[9], status.we_rads * rpm_per_rads_el);
+    put_f32(&payload[13], status.theta_ref_rad * DEG_PER_RAD);
+    put_f32(&payload[17], status.theta_m_rad * DEG_PER_RAD);
+    put_f32(&payload[21], status.iq_ref_a);
+    put_f32(&payload[25], status.iq_a);
+    put_f32(&payload[29], status.vdc_v);
+    payload[33] = 0;
+    payload[34] = 0;
+    send_frame(MSG_TEL, payload, sizeof(payload));
+}
+
+static void telemetry_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        send_telemetry();
+        esp_foc_sleep_ms(TELEMETRY_PERIOD_MS);
+    }
+}
+
+/* ---------------------------------------------------------------------------
+ * Board bring-up (same wiring as the other sensored examples)
+ * ------------------------------------------------------------------------- */
+static esp_err_t setup_inverter(void)
+{
+    inverter = esp_foc_inverter_mcpwm_acquire(0);
+    if (inverter == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    /* The driver encodes an active-low enable as the negated GPIO number. */
+    int enable_gpio = CONFIG_EXAMPLE_BRIDGE_ENABLE_GPIO;
+    if ((enable_gpio >= 0) && BRIDGE_ENABLE_ACTIVE_LOW) {
+        enable_gpio = -enable_gpio;
+    }
+
+    const esp_foc_inverter_mcpwm_config_t inverter_config = {
+        .gpio_uh = CONFIG_EXAMPLE_PWM_U_HIGH_GPIO,
+        .gpio_ul = CONFIG_EXAMPLE_PWM_U_LOW_GPIO,
+        .gpio_vh = CONFIG_EXAMPLE_PWM_V_HIGH_GPIO,
+        .gpio_vl = CONFIG_EXAMPLE_PWM_V_LOW_GPIO,
+        .gpio_wh = CONFIG_EXAMPLE_PWM_W_HIGH_GPIO,
+        .gpio_wl = CONFIG_EXAMPLE_PWM_W_LOW_GPIO,
+        .gpio_enable = enable_gpio,
+        .pwm_hz = PWM_RATE_HZ,
+        .deadtime_ns = CONFIG_EXAMPLE_PWM_DEAD_TIME_NS,
+        .dc_link_volts = DC_LINK_VOLTS,
+        .shunt_ohm = (float)CONFIG_EXAMPLE_SHUNT_MILLIOHM * 1.0e-3f,
+        .amp_gain = (float)CONFIG_EXAMPLE_CURRENT_AMP_GAIN,
+        .shunt_count = (CONFIG_EXAMPLE_CURRENT_W_GPIO < 0) ? 2u : 3u,
+        .sense_topology = ESP_FOC_SENSE_INLINE,
+        .gpio_iu = CONFIG_EXAMPLE_CURRENT_U_GPIO,
+        .gpio_iv = CONFIG_EXAMPLE_CURRENT_V_GPIO,
+        .gpio_iw = CONFIG_EXAMPLE_CURRENT_W_GPIO,
+        .i_limit_amps = (float)CONFIG_EXAMPLE_BRIDGE_TRIP_MA * 1.0e-3f,
+        .gpio_fault = -1,
+    };
+    return esp_foc_inverter_mcpwm_init(inverter, &inverter_config);
+}
+
+static esp_err_t setup_encoder(void)
+{
+    encoder = esp_foc_rotor_as5600_acquire(0);
+    if (encoder == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    const esp_foc_rotor_as5600_config_t encoder_config = {
+        .sda = CONFIG_EXAMPLE_ENCODER_SDA_GPIO,
+        .scl = CONFIG_EXAMPLE_ENCODER_SCL_GPIO,
+        .i2c_port = 0,
+        .i2c_hz = CONFIG_EXAMPLE_ENCODER_I2C_HZ,
+        .dt_seconds = 1.0f / (float)ENCODER_RATE_HZ,
+        /* Phase discovery measures the counting direction; start unflipped. */
+        .invert = false,
+        .pole_pairs = POLE_PAIRS,
+        .pwm_hz = PWM_RATE_HZ,
+    };
+    return esp_foc_rotor_as5600_init(encoder, &encoder_config);
+}
+
+/* ---------------------------------------------------------------------------
+ * Commissioning step 1: phase discovery
+ *
+ * Progress: the 12 candidate maps of stage A cover 0..60 %, the accepted
+ * map 70 %, then the encoder stages (sweep, rest, zero, direction).
+ * ------------------------------------------------------------------------- */
+static void on_discover_event(void *context, const esp_foc_phase_discover_event_t *event)
+{
+    (void)context;
+    switch (event->ev) {
+    case ESP_FOC_PHASE_DISCOVER_EV_ATTEMPT:
+        log_line("map: attempt %d", event->idx);
+        send_progress(STEP_MAP, 0);
+        break;
+    case ESP_FOC_PHASE_DISCOVER_EV_CANDIDATE:
+        send_progress(STEP_MAP, (uint8_t)((event->idx + 1) * 60 / 12));
+        break;
+    case ESP_FOC_PHASE_DISCOVER_EV_REFUSED:
+        log_line("map: attempt refused (%s)", esp_err_to_name(event->err));
+        break;
+    case ESP_FOC_PHASE_DISCOVER_EV_MAP:
+        log_line("map: phase order accepted");
+        send_progress(STEP_MAP, 70);
+        break;
+    case ESP_FOC_PHASE_DISCOVER_EV_WELL:
+        send_progress(STEP_MAP, 80);
+        break;
+    case ESP_FOC_PHASE_DISCOVER_EV_STILL:
+        send_progress(STEP_MAP, 85);
+        break;
+    case ESP_FOC_PHASE_DISCOVER_EV_ZERO:
+        send_progress(STEP_MAP, 90);
+        break;
+    case ESP_FOC_PHASE_DISCOVER_EV_DIR:
+        send_progress(STEP_MAP, 100);
+        break;
+    default:
+        break;
+    }
+}
+
+static esp_err_t discover_phases(void)
+{
+    static const char letters[] = "UVW";
+    esp_foc_phase_discover_t discovery;
+    esp_foc_phase_discover_config_t discovery_config;
+
+    log_line("map: finding the phase order and zeroing the encoder");
+    /* init() and cleanup() read the object's flags before setting them. */
+    memset(&discovery, 0, sizeof(discovery));
+    esp_foc_phase_discover_default_config(&discovery_config);
+    discovery_config.on_event = on_discover_event;
+    memset(&phase_map, 0, sizeof(phase_map));
+    esp_err_t err = esp_foc_phase_discover_init(&discovery, inverter, encoder, &discovery_config);
+    if (err == ESP_OK) {
+        err = esp_foc_phase_discover_run(&discovery, &phase_map);
+    }
+    esp_foc_phase_discover_cleanup(&discovery);
+    if (err != ESP_OK) {
+        log_line("map: failed (%s)", esp_err_to_name(err));
+        return err;
+    }
+
+    /* From here on the encoder counts positive in the motor's forward direction. */
+    esp_foc_rotor_as5600_set_invert(encoder, phase_map.sensor_reversed);
+    log_line("map: U->%c(%+d) V->%c(%+d) W->%c(%+d), encoder %s",
+             letters[phase_map.map.pwm_to_hw[0] % 3u], phase_map.map.i_sign[0],
+             letters[phase_map.map.pwm_to_hw[1] % 3u], phase_map.map.i_sign[1],
+             letters[phase_map.map.pwm_to_hw[2] % 3u], phase_map.map.i_sign[2],
+             phase_map.sensor_reversed ? "reversed (corrected)" : "as mounted");
+    return ESP_OK;
+}
+
+/* ---------------------------------------------------------------------------
+ * Commissioning step 2: identification, then the controller
+ *
+ * Progress: one slice per identification phase (BIAS .. PARK_ANGLE). Phases
+ * do not run in enum order and BIAS repeats before every leg, so the bar
+ * only moves forward.
+ * ------------------------------------------------------------------------- */
+static uint8_t ident_percent;
+
+static void on_motor_id_event(void *context, const esp_foc_motor_id_event_t *event)
+{
+    (void)context;
+    const unsigned first = ESP_FOC_MOTOR_ID_BIAS;
+    const unsigned span = ESP_FOC_MOTOR_ID_DONE - ESP_FOC_MOTOR_ID_BIAS;
+
+    switch (event->ev) {
+    case ESP_FOC_MOTOR_ID_EV_PHASE:
+        if ((event->phase >= ESP_FOC_MOTOR_ID_BIAS) && (event->phase <= ESP_FOC_MOTOR_ID_DONE)) {
+            const uint8_t pct = (uint8_t)(((unsigned)event->phase - first) * 100u / span);
+            if (pct > ident_percent) {
+                ident_percent = pct;
+                send_progress(STEP_IDENT, pct);
+            }
+        }
+        log_line("ident: %s", esp_foc_motor_id_phase_name(event->phase));
+        break;
+    case ESP_FOC_MOTOR_ID_EV_MECH:
+        log_line("ident: K %.0f rad/s2/A, J %.2e kg m2", (double)event->v[0],
+                 (double)event->v[3]);
+        break;
+    default:
+        break;
+    }
+}
+
+static void on_controller_event(void *context, const esp_foc_sensored_event_t *event)
+{
+    (void)context;
+    switch (event->ev) {
+    case ESP_FOC_SD_EV_LEARN_PASS:
+        log_line("cog: pass %u, change %.1f mA rms", (unsigned)event->pass,
+                 (double)(event->change_rms_a * 1.0e3f));
+        send_progress(STEP_COG,
+                      (uint8_t)((event->pass * 100u) / controller_config.cogging.passes_max));
+        break;
+    case ESP_FOC_SD_EV_ABORT:
+        log_line("controller: abort %d, bridge off", (int)event->abort);
+        break;
+    case ESP_FOC_SD_EV_FAULT:
+        log_line("controller: fault %d, bridge off", (int)event->fault);
+        break;
+    case ESP_FOC_SD_EV_RUN_FAIL:
+        log_line("controller: start failed (%d)", (int)event->fail);
+        break;
+    default:
+        break;
+    }
+}
+
+static void build_controller_config(void)
+{
+    esp_foc_sensored_default_config(&controller_config);
+    controller_config.axis = MOTOR_AXIS;
+    /* POSITION is the top level, so all three modes are reachable. */
+    controller_config.control = ESP_FOC_SD_CONTROL_POSITION;
+    controller_config.pole_pairs = POLE_PAIRS;
+    controller_config.fetch_hz = ENCODER_RATE_HZ;
+    esp_foc_sensored_config_from_motor_id(&controller_config, &plant);
+    esp_foc_sensored_config_from_phase_map(&controller_config, &phase_map);
+    controller_config.guard.overspeed_hz =
+        (float)CONFIG_EXAMPLE_OVERSPEED_RPM / 60.0f * (float)POLE_PAIRS;
+    controller_config.on_event = on_controller_event;
+}
+
+static esp_err_t start_controller(void)
+{
+    esp_err_t err = esp_foc_sensored_run(MOTOR_AXIS);
+    if (err == ESP_OK) {
+        esp_foc_sensored_set_speed_slew(MOTOR_AXIS, GUI_ACCEL_RPM_S / 60.0f * (float)POLE_PAIRS);
+        err = esp_foc_sensored_set_mode(MOTOR_AXIS, (esp_foc_sensored_mode_t)active_mode);
+    }
+    return err;
+}
+
+static esp_err_t identify_motor(void)
+{
+    esp_foc_motor_id_config_t id_config;
+
+    log_line("ident: about 90 s, the shaft will spin");
+    ident_percent = 0;
+    send_progress(STEP_IDENT, 0);
+    esp_foc_motor_id_default_config(&id_config);
+    id_config.pole_pairs = POLE_PAIRS;
+    id_config.vdc = DC_LINK_VOLTS;
+    id_config.on_event = on_motor_id_event;
+    esp_err_t err = esp_foc_motor_id_run(inverter, encoder, &id_config, &plant);
+    if (err != ESP_OK) {
+        log_line("ident: failed at '%s' (%s)", esp_foc_motor_id_phase_name(plant.failed_at),
+                 esp_err_to_name(err));
+        return err;
+    }
+    /* The speed loop under position and speed modes is designed from K. */
+    if ((plant.valid_mask & ESP_FOC_MOTOR_ID_VALID_K) == 0u) {
+        log_line("ident: acceleration per amp not measured");
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    send_progress(STEP_IDENT, 100);
+
+    build_controller_config();
+    log_line("ident: Rs %.3f ohm, Ls %.0f uH, psi %.0f uWb", (double)controller_config.rs_ohm,
+             (double)(controller_config.ls_h * 1.0e6f), (double)(controller_config.psi_wb * 1.0e6f));
+    err = esp_foc_sensored_init(inverter, encoder, &controller_config);
+    if (err != ESP_OK) {
+        log_line("controller: init failed (%s)", esp_err_to_name(err));
+        return err;
+    }
+    controller_ready = true;
+    active_mode = ESP_FOC_SD_MODE_POSITION;
+    err = start_controller();
+    if (err != ESP_OK) {
+        /* Identification owns the inverter on a retry; take the controller off it. */
+        controller_ready = false;
+        esp_foc_sensored_deinit(MOTOR_AXIS);
+        log_line("controller: did not start (%s)", esp_err_to_name(err));
+        return err;
+    }
+    log_line("controller: running, holding position");
+    return ESP_OK;
+}
+
+/* ---------------------------------------------------------------------------
+ * Commissioning step 3: cogging learn
+ * ------------------------------------------------------------------------- */
+static esp_err_t learn_cogging(void)
+{
+    esp_foc_sensored_cogging_info_t cogging;
+    esp_err_t err = ESP_OK;
+
+    /* The sweep needs a running controller in position mode; a STOP during
+     * an earlier attempt left it idle. */
+    active_mode = ESP_FOC_SD_MODE_POSITION;
+    if (esp_foc_sensored_get_state(MOTOR_AXIS) == ESP_FOC_SD_STATE_IDLE) {
+        err = start_controller();
+    } else {
+        err = esp_foc_sensored_set_mode(MOTOR_AXIS, ESP_FOC_SD_MODE_POSITION);
+    }
+    if (err != ESP_OK) {
+        log_line("cog: controller not running (%s)", esp_err_to_name(err));
+        return err;
+    }
+
+    log_line("cog: slow sweeps both ways, up to 2 min");
+    send_progress(STEP_COG, 0);
+    memset(&cogging, 0, sizeof(cogging));
+    err = esp_foc_sensored_cogging_learn(MOTOR_AXIS, COGGING_LEARN_TIMEOUT_MS, &cogging);
+    if (err != ESP_OK) {
+        log_line("cog: failed (%s)", esp_err_to_name(err));
+        return err;
+    }
+    log_line("cog: %u passes, %s, %.1f mA p-p, %u/%u bins", (unsigned)cogging.passes,
+             cogging.converged ? "converged" : "not converged", (double)(cogging.p2p_a * 1.0e3f),
+             (unsigned)cogging.bins_mapped, (unsigned)cogging.bins);
+    send_progress(STEP_COG, 100);
+    /* Position references from the GUI are measured from here. */
+    return esp_foc_sensored_set_origin(MOTOR_AXIS);
+}
+
+/* ---------------------------------------------------------------------------
+ * Worker: one blocking job at a time, off the RX loop so STOP is always heard
+ * ------------------------------------------------------------------------- */
+static void worker_task(void *arg)
+{
+    const uint8_t command = (uint8_t)(uintptr_t)arg;
+    esp_err_t err;
+
+    switch (command) {
+    case CMD_MAP:
+        err = discover_phases();
+        if (err == ESP_OK) {
+            steps_done |= 1u << STEP_MAP;
+        }
+        break;
+    case CMD_IDENT:
+        err = identify_motor();
+        if (err == ESP_OK) {
+            steps_done |= 1u << STEP_IDENT;
+        }
+        break;
+    case CMD_COG:
+        err = learn_cogging();
+        if (err == ESP_OK) {
+            steps_done |= 1u << STEP_COG;
+        }
+        break;
+    case CMD_MODE:
+        err = start_controller();
+        break;
+    default:
+        err = ESP_ERR_NOT_SUPPORTED;
+        break;
+    }
+    send_ack(command, err);
+    busy = BUSY_NONE;
+    esp_foc_task_delete_self();
+}
+
+static esp_err_t start_job(uint8_t command, busy_t what)
+{
+    busy = (uint8_t)what;
+    if (esp_foc_task_spawn(worker_task, (void *)(uintptr_t)command, "gui_job", WORKER_STACK,
+                           WORKER_PRIORITY, NULL) != 0) {
+        busy = BUSY_NONE;
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+/* ---------------------------------------------------------------------------
+ * Commands
+ * ------------------------------------------------------------------------- */
+static float clampf(float value, float limit)
+{
+    return (value > limit) ? limit : ((value < -limit) ? -limit : value);
+}
+
+static esp_err_t apply_reference(float value)
+{
+    switch ((esp_foc_sensored_mode_t)active_mode) {
+    case ESP_FOC_SD_MODE_TORQUE:
+        return esp_foc_sensored_set_iq(MOTOR_AXIS, clampf(value, GUI_MAX_IQ_A));
+    case ESP_FOC_SD_MODE_VELOCITY:
+        return esp_foc_sensored_set_speed_ref_hz(
+            MOTOR_AXIS, clampf(value, GUI_MAX_RPM) / 60.0f * (float)POLE_PAIRS);
+    case ESP_FOC_SD_MODE_POSITION:
+        return esp_foc_sensored_set_position_ref_rad(MOTOR_AXIS,
+                                                     clampf(value, GUI_MAX_DEG) / DEG_PER_RAD);
+    default:
+        return ESP_ERR_INVALID_STATE;
+    }
+}
+
+static void stop(void)
+{
+    if ((busy == BUSY_MAP) || (busy == BUSY_IDENT)) {
+        log_line("stop: cannot cancel this step, rebooting");
+        inverter->disable(inverter);
+        esp_foc_sleep_ms(50);
+        esp_foc_reboot();
+    }
+    if (!controller_ready) {
+        return;
+    }
+    if (esp_foc_sensored_get_state(MOTOR_AXIS) == ESP_FOC_SD_STATE_FAULT) {
+        esp_foc_sensored_clear_fault(MOTOR_AXIS);
+        log_line("stop: fault cleared, controller idle");
+    } else {
+        esp_foc_sensored_stop(MOTOR_AXIS);
+        log_line("stop: bridge off, controller idle");
+    }
+}
+
+static void handle_command(uint8_t type, const uint8_t *payload, uint8_t len)
+{
+    esp_err_t err = ESP_OK;
+
+    switch (type) {
+    case CMD_PING:
+        send_info();
+        return;
+    case CMD_STOP:
+        stop();
+        break;
+    case CMD_MAP:
+        err = (busy != BUSY_NONE) || (steps_done != 0u) ? ESP_ERR_INVALID_STATE
+                                                         : start_job(CMD_MAP, BUSY_MAP);
+        if (err == ESP_OK) {
+            return; /* the worker acknowledges when the step ends */
+        }
+        break;
+    case CMD_IDENT:
+        err = (busy != BUSY_NONE) || (steps_done != (1u << STEP_MAP))
+                  ? ESP_ERR_INVALID_STATE
+                  : start_job(CMD_IDENT, BUSY_IDENT);
+        if (err == ESP_OK) {
+            return;
+        }
+        break;
+    case CMD_COG:
+        if ((busy != BUSY_NONE) || (steps_done != ((1u << STEP_MAP) | (1u << STEP_IDENT)))) {
+            err = ESP_ERR_INVALID_STATE;
+            break;
+        }
+        err = start_job(CMD_COG, BUSY_COG);
+        if (err == ESP_OK) {
+            return;
+        }
+        break;
+    case CMD_MODE:
+        if ((len != 1u) || (payload[0] > ESP_FOC_SD_MODE_POSITION)) {
+            err = ESP_ERR_INVALID_ARG;
+            break;
+        }
+        if ((busy != BUSY_NONE) || ((steps_done & (1u << STEP_COG)) == 0u)) {
+            err = ESP_ERR_INVALID_STATE;
+            break;
+        }
+        active_mode = payload[0];
+        if (esp_foc_sensored_get_state(MOTOR_AXIS) == ESP_FOC_SD_STATE_RUNNING) {
+            err = esp_foc_sensored_set_mode(MOTOR_AXIS, (esp_foc_sensored_mode_t)active_mode);
+        } else if (esp_foc_sensored_get_state(MOTOR_AXIS) == ESP_FOC_SD_STATE_IDLE) {
+            /* After a STOP: start the controller again, straight in this mode. */
+            err = start_job(CMD_MODE, BUSY_START);
+            if (err == ESP_OK) {
+                return;
+            }
+        } else {
+            err = ESP_ERR_INVALID_STATE;
+        }
+        break;
+    case CMD_REF: {
+        float value;
+        if (len != sizeof(value)) {
+            err = ESP_ERR_INVALID_ARG;
+            break;
+        }
+        memcpy(&value, payload, sizeof(value));
+        if ((busy != BUSY_NONE) || ((steps_done & (1u << STEP_COG)) == 0u) || !isfinite(value)) {
+            err = ESP_ERR_INVALID_STATE;
+            break;
+        }
+        err = apply_reference(value);
+        break;
+    }
+    default:
+        err = ESP_ERR_NOT_SUPPORTED;
+        break;
+    }
+    send_ack(type, err);
+}
+
+/* ---------------------------------------------------------------------------
+ * RX: byte-wise frame parser. Anything that is not a valid frame (a terminal
+ * typing, a truncated frame) is skipped until the next 0xA5.
+ * ------------------------------------------------------------------------- */
+typedef enum {
+    RX_SYNC,
+    RX_TYPE,
+    RX_LEN,
+    RX_PAYLOAD,
+    RX_CRC,
+} rx_state_t;
+
+static void rx_loop(void)
+{
+    rx_state_t state = RX_SYNC;
+    /* type, len, payload: the bytes the CRC covers, back to back. */
+    uint8_t frame[2 + FRAME_MAX_PAYLOAD];
+    uint8_t received = 0;
+    uint8_t chunk[64];
+
+    for (;;) {
+        const int n = uart_read_bytes(CONSOLE_UART, chunk, sizeof(chunk), esp_foc_ms_to_ticks(20));
+        for (int i = 0; i < n; i++) {
+            const uint8_t byte = chunk[i];
+            switch (state) {
+            case RX_SYNC:
+                state = (byte == FRAME_SYNC) ? RX_TYPE : RX_SYNC;
+                break;
+            case RX_TYPE:
+                frame[0] = byte;
+                state = RX_LEN;
+                break;
+            case RX_LEN:
+                frame[1] = byte;
+                received = 0;
+                state = (byte > FRAME_MAX_PAYLOAD) ? RX_SYNC : ((byte == 0u) ? RX_CRC : RX_PAYLOAD);
+                break;
+            case RX_PAYLOAD:
+                frame[2 + received++] = byte;
+                if (received == frame[1]) {
+                    state = RX_CRC;
+                }
+                break;
+            case RX_CRC:
+                if (crc8(frame, 2u + frame[1]) == byte) {
+                    handle_command(frame[0], &frame[2], frame[1]);
+                }
+                state = RX_SYNC;
+                break;
+            }
+        }
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+void app_main(void)
+{
+    /* Plain text before the protocol starts, for whoever opens a terminal. */
+    printf("\nespFoC sensored GUI example: binary protocol on this UART from here on.\n"
+           "Run examples/foc_sensored_gui/host/espfoc_gui.py on the host.\n");
+    fflush(stdout);
+
+    ESP_ERROR_CHECK(uart_driver_install(CONSOLE_UART, UART_RX_BUFFER, UART_TX_BUFFER, 0, NULL, 0));
+    esp_log_set_vprintf(log_to_frame);
+
+    esp_err_t err = setup_inverter();
+    if (err == ESP_OK) {
+        err = setup_encoder();
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "board setup failed (%s); check the Kconfig pins", esp_err_to_name(err));
+        for (;;) {
+            esp_foc_sleep_ms(1000);
+        }
+    }
+
+    send_info();
+    log_line("board ready: press 1. Phase map");
+    if (esp_foc_task_spawn(telemetry_task, NULL, "gui_tel", 3072, TELEMETRY_PRIORITY, NULL) != 0) {
+        ESP_LOGE(TAG, "telemetry task not started");
+    }
+    rx_loop();
+}
