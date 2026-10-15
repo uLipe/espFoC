@@ -11,7 +11,10 @@ The GUI is a single Python file, [`host/espfoc_gui.py`](host/espfoc_gui.py):
 PySide6 with the QML inline. The scopes are drawn as Qt Quick scene-graph
 geometry, so the GPU does the drawing through Qt's RHI (OpenGL, Vulkan, Metal
 or Direct3D, whatever the platform offers). The file is commented top to
-bottom as a starting point for your own front end.
+bottom as a starting point for your own front end. The same file drives
+[`foc_sensorless_gui`](../foc_sensorless_gui): it reads the board kind from
+the `INFO` frame and shows the sensorless start-up panel instead of the
+position controls.
 
 ## How the host connects to the board
 
@@ -184,3 +187,45 @@ example `IDENT` before `MAP`) is refused with `ESP_ERR_INVALID_STATE`.
 Everything the GUI shows comes from `TEL`: it does not track the sequence
 itself, so after a reconnect or a board reboot it simply shows what the board
 reports.
+
+### Sensorless boards
+
+[`foc_sensorless_gui`](../foc_sensorless_gui) speaks the same protocol with
+these differences:
+
+- `INFO` is 22 bytes: the 13 above, then `u8` kind (1 = sensorless), `f32`
+  minimum rpm, `f32` minimum iq [A]. Under those the observer cannot hold the
+  rotor; a 13-byte `INFO` is a sensored board.
+- Commissioning is map and identify only: `COG` answers
+  `ESP_ERR_NOT_SUPPORTED`, steps done reaches `0b011`. `MODE` takes 0 torque
+  or 1 speed, only while the motor is stopped.
+- `REF` only stores the reference until the motor is started:
+
+  | Type   | Name    | Payload | Effect |
+  |--------|---------|---------|--------|
+  | `0x08` | `START` | –       | launch with the stored reference; refused with `ESP_ERR_INVALID_ARG` under the minimum |
+
+  After `START`, a `REF` under the minimum cuts the bridge and one above
+  launches again; a sign change reverses. `STOP` cuts the bridge and clears
+  any trip; the next launch needs `START` again.
+- `TEL` state is the sensorless controller state: 0 idle, 1 armed, 2 align,
+  3 I-f ramp, 4 PLL acquire, 5 handoff, 6 catch, 7 running, 8 reversing,
+  9 fault. Flags: bit 0 running, 1 abort, 2 fault, 3 observer locked,
+  4 Park on the observer, 5 start-up failed, 6 started. The position fields
+  are 0.
+- One `STARTUP` frame per controller event:
+
+  | Type   | Name      | Payload |
+  |--------|-----------|---------|
+  | `0x86` | `STARTUP` | 17 bytes, below |
+
+  | Offset | Type  | Field |
+  |--------|-------|-------|
+  | 0      | `u8`  | event: 0 armed, 1 start-up, 2 locked, 3 handoff, 4 running, 5 reversing, 6 cut, 7 stopped, 8 start-up failed, 9 abort, 10 fault, 11 fault cleared |
+  | 1      | `u8`  | controller state at the event |
+  | 2      | `u8`  | start-up failure: 0 none, 1 enable refused, 2 sequence refused, 3 no current, 4 shaft not following, 5 PLL timeout, 6 speed low after handoff, 7 speed drop while settling |
+  | 3      | `u8`  | abort: 0 none, 1 lock lost, 2 overspeed, 3 back-EMF low, 4 current collapse |
+  | 4      | `u8`  | inverter fault reason, 0 none |
+  | 5      | `f32` | observer speed [rpm] |
+  | 9      | `f32` | observer minus open-loop angle [deg] |
+  | 13     | `f32` | seconds since the start-up began |
