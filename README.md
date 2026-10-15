@@ -335,6 +335,7 @@ events, status, error handling and the sensorless stack, see the examples:
 | [foc_sensored_velocity](examples/foc_sensored_velocity) | Speed cycle, speed loop designed from the measured encoder noise |
 | [foc_sensored_servo](examples/foc_sensored_servo) | Position servo with minimum-jerk moves, cogging compensation and a console (`servo.py`) |
 | [foc_sensored_gui](examples/foc_sensored_gui) | Desktop GUI (PySide6/QML, GPU scopes) over a binary UART protocol: commissioning buttons, torque/speed/position modes |
+| [foc_sensorless_gui](examples/foc_sensorless_gui) | The same GUI on a sensorless board: map/identify, start-up stepper with a Start button, torque/speed modes |
 | [foc_sensorless_torque](examples/foc_sensorless_torque) | Sensorless torque cycle with the start-up events printed |
 | [foc_sensorless_velocity](examples/foc_sensorless_velocity) | Sensorless speed cycle |
 
