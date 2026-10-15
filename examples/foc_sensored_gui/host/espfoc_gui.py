@@ -787,7 +787,11 @@ ApplicationWindow {
     component StepRow: ColumnLayout {
         property int step
         property bool unlocked
-        property var action
+        function start() {
+            if (step === 0) backend.runMap()
+            else if (step === 1) backend.runIdent()
+            else backend.runCog()
+        }
         readonly property bool done: (backend.stepsDone >> step) & 1
         readonly property bool running: backend.busy === step + 1
         readonly property bool failed: backend.failed[step]
@@ -799,7 +803,7 @@ ApplicationWindow {
                 text: (step + 1) + ". " + ["Phase map", "Identify", "Cogging learn"][step]
                 Layout.preferredWidth: 190
                 enabled: backend.connected && unlocked && !done && backend.busy === 0
-                onClicked: action()
+                onClicked: start()
             }
             Item { Layout.fillWidth: true }
             Rectangle {
@@ -863,9 +867,9 @@ ApplicationWindow {
 
             Panel {
                 title: "Commissioning"
-                StepRow { step: 0; unlocked: true; action: backend.runMap }
-                StepRow { step: 1; unlocked: backend.stepsDone & 1; action: backend.runIdent }
-                StepRow { step: 2; unlocked: backend.stepsDone & 2; action: backend.runCog }
+                StepRow { step: 0; unlocked: true }
+                StepRow { step: 1; unlocked: backend.stepsDone & 1 }
+                StepRow { step: 2; unlocked: backend.stepsDone & 2 }
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 200
