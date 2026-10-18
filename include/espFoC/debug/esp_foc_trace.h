@@ -27,6 +27,10 @@ typedef enum {
     ESP_FOC_TRACE_DMA_EOF   = 0x1004,
     ESP_FOC_TRACE_SAMPLE_RD = 0x1005,
     ESP_FOC_TRACE_USER_MARK = 0x1006,
+    /* Current loop, one set per PWM period, Q16: (iq*, iq), (id*, id), (vd, vq) pu of Vdc */
+    ESP_FOC_TRACE_DQ_IQ     = 0x1007,
+    ESP_FOC_TRACE_DQ_ID     = 0x1008,
+    ESP_FOC_TRACE_DQ_V      = 0x1009,
 
     /* Fault / protection class 0x11xx */
     ESP_FOC_TRACE_FAULT_ILIMIT_HIT = 0x1101,
