@@ -290,7 +290,9 @@ static void adc_dma_isr(void *arg)
     if ((st & GDMA_LL_EVENT_RX_DONE) == 0) {
         return;
     }
+#if CONFIG_ESP_FOC_TRACE_ENABLE
     const uint32_t t0 = esp_cpu_get_cycle_count();
+#endif
     const uint8_t conv = s->conv_count;
     uint8_t idx = s->ring_idx;
     uint8_t got = 0;
@@ -319,11 +321,13 @@ static void adc_dma_isr(void *arg)
         s->on_done(s->on_done_arg);
     }
 
+#if CONFIG_ESP_FOC_TRACE_ENABLE
     /* a = µs, b = CPU cycles — full DMA done ISR (hand-back + parse + on_done). */
     const uint32_t dt = esp_cpu_get_cycle_count() - t0;
     const uint32_t tpus = esp_rom_get_cpu_ticks_per_us();
     esp_foc_trace_push(ESP_FOC_TRACE_DMA_EOF,
                        (int32_t)((tpus > 0u) ? (dt / tpus) : 0u), (int32_t)dt);
+#endif
 }
 
 static void dma_bring_up(esp_foc_adc_dma_sense_t *s)

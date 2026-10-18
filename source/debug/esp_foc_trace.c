@@ -106,13 +106,6 @@ void esp_foc_trace_reset(void)
 {
 }
 
-void esp_foc_trace_push(uint16_t type, int32_t a, int32_t b)
-{
-    (void)type;
-    (void)a;
-    (void)b;
-}
-
 size_t esp_foc_trace_snapshot(esp_foc_trace_rec_t *out, size_t max_out)
 {
     (void)out;
