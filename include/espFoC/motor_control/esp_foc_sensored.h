@@ -146,9 +146,11 @@ typedef struct {
 
     float i_max_a;                /* |iq| ceiling of the speed loop and the setters */
     float i_bw_hz;
-    float i_tune_backoff;         /* scales the IMC-zoh gains */
-    float kp_i;                   /* 0 = IMC-zoh from R, L (pu of Vdc per A) */
+    float i_tune_backoff;         /* PI: scales the IMC-zoh gains; ADRC: scales i_bw_hz */
+    float kp_i;                   /* PI: 0 = IMC-zoh from R, L (pu of Vdc per A) */
     float ki_i;
+    float i_wo_ratio;             /* ADRC: observer over loop bandwidth */
+    uint32_t i_delay_ts;          /* ADRC: PWM periods from current sample to duty acting */
 
     /* Speed PI at fetch_hz. bw = min(want, noise ceiling, phase ceiling):
      * want is speed_bw_hz or speed_bw_frac·f_base clamped to [min, max];
@@ -249,8 +251,10 @@ typedef struct {
 } esp_foc_sensored_window_t;
 
 typedef struct {
-    float kp_i;
+    float kp_i;                   /* PI; 0 under ADRC */
     float ki_i;
+    float i_wc_hz;                /* ADRC; 0 under PI */
+    float i_wo_hz;
     float f_base_hz;
     float ripple_rads;            /* feedback sigma at rest, electrical */
     float speed_bw_want_hz;
@@ -339,6 +343,7 @@ esp_err_t esp_foc_sensored_set_origin(uint8_t axis);
 esp_err_t esp_foc_sensored_set_joint(uint8_t axis, float theta_rad, float w_ff_rads,
                                      float iq_ff_a);
 
+/* ESP_ERR_NOT_SUPPORTED when the current loop is the ADRC. */
 esp_err_t esp_foc_sensored_set_current_pi(uint8_t axis, float kp, float ki);
 esp_err_t esp_foc_sensored_set_speed_pi(uint8_t axis, float kp, float ki);
 /* Redesigns the speed PI on K at this bandwidth, ceilings not applied. */

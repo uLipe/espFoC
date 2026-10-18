@@ -157,6 +157,8 @@ static void cfg_mock(esp_foc_sensored_config_t *c, esp_foc_sensored_control_t co
     /* 5 kHz: the bench current bandwidth would sit at the one-sample edge. */
     c->i_bw_hz = 300.0f;
     c->i_tune_backoff = 1.0f;
+    /* The mock applies the duty in the period it is written. */
+    c->i_delay_ts = 0u;
     c->guard.overspeed_hz = 450.0f;
     c->on_event = on_ev;
 }
@@ -262,12 +264,20 @@ TEST_CASE("sensored rejects bad configs, calls before init and setters above the
 
     esp_foc_sensored_tuning_t t;
     esp_foc_sensored_get_tuning(0, &t);
+#if CONFIG_ESP_FOC_SD_CURRENT_CTRL_ADRC
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, t.kp_i);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 300.0f, t.i_wc_hz);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 300.0f * (float)CONFIG_ESP_FOC_SD_ADRC_WO_RATIO, t.i_wo_hz);
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_SUPPORTED, esp_foc_sensored_set_current_pi(0, 0.1f, 10.0f));
+#else
     float kp_i = 0.0f;
     float ki_i = 0.0f;
     TEST_ASSERT_EQUAL(ESP_OK, esp_foc_pid_design_imc_zoh(12.0f / 2.0f, 1.0e-3f / 2.0f, 5000.0f,
                                                          300.0f, &kp_i, &ki_i));
     TEST_ASSERT_FLOAT_WITHIN(kp_i * 1.0e-4f, kp_i, t.kp_i);
     TEST_ASSERT_FLOAT_WITHIN(ki_i * 1.0e-4f, ki_i, t.ki_i);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, t.i_wo_hz);
+#endif
     TEST_ASSERT_FLOAT_WITHIN(0.5f, 2500.0f, t.slot_hz);
     TEST_ASSERT_FLOAT_WITHIN(0.5f, 220.5f, t.f_base_hz);
     bench_reset();
