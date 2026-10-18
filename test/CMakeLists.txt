@@ -5,6 +5,7 @@ if(IDF_TARGET STREQUAL "linux")
                                "test_esp_foc_adrc.c"
                                "test_esp_foc_angle.c"
                                "test_esp_foc_clarke.c"
+                               "test_esp_foc_current_ctrl.c"
                                "test_esp_foc_ident.c"
                                "test_esp_foc_if.c"
                                "test_esp_foc_iir.c"

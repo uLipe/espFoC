@@ -35,6 +35,7 @@ if(IDF_TARGET STREQUAL "linux")
         "source/motor_control/esp_foc_rotor_est.c"
         "source/motor_control/esp_foc_rotor_pll.c"
         "source/motor_control/esp_foc_if.c"
+        "source/motor_control/esp_foc_current_ctrl.c"
     )
     if(CONFIG_ESP_FOC_ENABLE_MOTOR_ID)
         list(APPEND srcs
@@ -81,6 +82,7 @@ set(srcs
     "source/motor_control/esp_foc_rotor_est.c"
     "source/motor_control/esp_foc_rotor_pll.c"
     "source/motor_control/esp_foc_if.c"
+    "source/motor_control/esp_foc_current_ctrl.c"
     "source/drivers/esp_foc_drv_intr.c"
     "source/drivers/rotor/sensorless/esp_foc_rotor_sensorless.c"
     "source/drivers/inverter/esp_foc_inverter_mcpwm/mcpwm_bridge/mcpwm_bridge.c"
