@@ -65,8 +65,8 @@ part you need.
    Torque and velocity control without a sensor: start-up sequence, flux observer, events
    and guards.
 9. [Building blocks](09_building_blocks.md)
-   The fixed-point math, transforms, PI, SVM, filters, PLL and observers the stacks are made
-   of, usable on their own.
+   The fixed-point math, transforms, PI, ADRC, the current controller interface, SVM,
+   filters, PLL and observers the stacks are made of, usable on their own.
 10. [OS abstraction and trace](10_osal_and_trace.md)
     The portability layer between espFoC and the RTOS, and the hot-path trace for debugging.
 

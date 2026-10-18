@@ -42,7 +42,7 @@ The work is split over three contexts, each running only what fits its rate:
 
 | Context | Rate | What runs there |
 |---|---|---|
-| TEZ interrupt | every PWM period | sensor angle step, Park angle, Clarke, Park, current PI d/q plus the voltage feedforward, voltage limit, inverse Park, SVM, duty update |
+| TEZ interrupt | every PWM period | sensor angle step, Park angle, Clarke, Park, current controller d/q (PI or ADRC) plus the voltage feedforward, voltage limit, inverse Park, SVM, duty update |
 | Slot | inside the TEZ, once per fresh encoder sample | position P, speed PI, cogging feedforward, overspeed and stale-sensor guards |
 | Supervisor task | woken every `PWM rate / fetch_hz` periods | encoder read, PLL update, unwrapped position, in-position flag, state machine, run/stop/learn requests, every event callback |
 
@@ -105,14 +105,33 @@ turned by hand is not lost.
 All designs use the motor parameters in the config and the DC-link voltage
 reported by the inverter.
 
-**Current loop** (at `init()`, unless `kp_i` or `ki_i` is non-zero). The
-winding is a resistor and an inductor in series: a first-order plant with
-gain `Vdc/R` and time constant `L/R`. The stack uses an internal-model (IMC)
-design for that plant sampled at the PWM rate: the PI cancels the winding's
-time constant and leaves a first-order closed loop with bandwidth `i_bw_hz`
-(default 200 Hz). Both gains are then scaled by `i_tune_backoff` (default
-0.5) for margin. The d and q PIs share the same gains, in per-unit of `Vdc`
-per amp.
+**Current loop** (at `init()`). The winding is a resistor and an inductor in
+series: a first-order plant with gain `Vdc/R` and time constant `L/R`. Two
+controllers can close it, chosen at build time with
+`CONFIG_ESP_FOC_SD_CURRENT_CTRL` (see
+[the current controller interface](09_building_blocks.md#current-controller-interface)):
+
+- **PI** (default). An internal-model (IMC) design for that plant sampled at
+  the PWM rate: the PI cancels the winding's time constant and leaves a
+  first-order closed loop with bandwidth `i_bw_hz` (default 200 Hz). Both
+  gains are then scaled by `i_tune_backoff` (default 0.5) for margin. The d
+  and q PIs share the same gains, in per-unit of `Vdc` per amp. A non-zero
+  `kp_i` or `ki_i` skips the design.
+- **ADRC** (active disturbance rejection control). An extended state observer
+  (ESO) per axis estimates the current and everything the R-L model does not
+  explain (back-EMF, d/q cross-coupling, dead time, parameter error); a
+  proportional law then places the closed loop at
+  `wc = i_bw_hz · i_tune_backoff` (100 Hz with the defaults). The model uses
+  `b0 = Vdc/L` and the winding pole `R/L`. The observer bandwidth is
+  `wo = max(i_wo_ratio · wc, min(0.8 · R/(2π·L), PWM/16))`: never slower than
+  the winding itself, so the ESO keeps up with the plant, and capped so
+  measurement noise does not dominate. `i_delay_ts` (default 2) is the number
+  of PWM periods from a current sample to the duty computed from it acting on
+  the bridge; the controller predicts across it. `kp_i`/`ki_i` are ignored.
+
+Both controllers receive the voltage the bridge really delivered, after the
+feedforward and the voltage limit, so neither winds up when the voltage
+saturates.
 
 **Speed loop** (during `run()`, above torque). The plant from `iq` to
 electrical speed is an integrator with gain `k_rads2_a`: one amp accelerates
@@ -225,7 +244,7 @@ if (esp_foc_sensored_run(0) != ESP_OK) {
 ```
 
 `init()` must be called from a task with the bridge disabled. It validates
-the config, designs the current PI and the PLL, applies the phase map,
+the config, designs the current controller and the PLL, applies the phase map,
 installs the inverter's TEZ, DMA and fault callbacks and starts the
 supervisor task (`foc_sd0`..`foc_sd3`). It returns `ESP_ERR_INVALID_ARG` for
 a NULL rotor, an axis out of range, a bad config or a `fetch_hz` that does not
@@ -246,7 +265,7 @@ position.
 ```c
 esp_foc_sensored_set_iq(0, 0.30f);         /* amps, |a| <= i_max_a */
 esp_foc_sensored_set_id(0, 0.0f);          /* d-axis current, normally 0 */
-esp_foc_sensored_set_vdq_ff(0, 0.0f, 0.0f); /* volts added to the PI outputs */
+esp_foc_sensored_set_vdq_ff(0, 0.0f, 0.0f); /* volts added to the current controller outputs */
 ```
 
 **Velocity** (signed electrical Hz; shaft rpm = Hz · 60 / pole pairs):
@@ -314,7 +333,10 @@ float rpm = st.we_rads / (2.0f * (float)M_PI) / 13 * 60.0f;
 The status holds state and mode, Park angle, PLL speed and speed reference
 (electrical), position and reference (mechanical, from the origin), currents,
 voltages, the in-position and cogging flags, counters (`tez`, `fetch_n`,
-`fetch_fail`) and the last `fail`/`abort`/`fault` reasons.
+`fetch_fail`) and the last `fail`/`abort`/`fault` reasons. The tuning from
+`esp_foc_sensored_get_tuning()` reports the current controller in use:
+`kp_i`/`ki_i` under PI (0 under ADRC), `i_wc_hz`/`i_wo_hz` under ADRC (0 under
+PI).
 `esp_foc_sensored_get_window()` returns speed-error statistics (mean, sums,
 min, max, mean crossings, `iq` means) gathered per encoder sample since the
 previous call, and resets them: use one reader only.
@@ -323,13 +345,15 @@ previous call, and resets them: use one reader only.
 
 | Call | Effect | Allowed when |
 |---|---|---|
-| `set_current_pi(axis, kp, ki)` | both current PIs, per-unit of Vdc per A | any level |
+| `set_current_pi(axis, kp, ki)` | both current PIs, per-unit of Vdc per A; `ESP_ERR_NOT_SUPPORTED` under ADRC | any level |
 | `set_speed_pi(axis, kp, ki)` | speed PI, A per electrical rad/s | `cfg.control` ≥ velocity |
 | `set_speed_bw(axis, hz)` | redesigns the speed PI on `K` at `hz`, ceilings not applied, `hz < fetch_hz/4` | `cfg.control` ≥ velocity |
 | `set_position_kp(axis, kp)` | position gain, 1/s | `cfg.control` = position |
 
-The config fields `kp_i`/`ki_i`, `kp_w`/`ki_w` and `kp_pos` do the same at
-init/run time: any non-zero value skips the corresponding design.
+The config fields `kp_i`/`ki_i` (PI only), `kp_w`/`ki_w` and `kp_pos` do the
+same at init/run time: any non-zero value skips the corresponding design.
+Under ADRC the current loop is set through `i_bw_hz`, `i_tune_backoff`,
+`i_wo_ratio` and `i_delay_ts` before `init()`.
 
 ### 7. Cogging compensation
 
@@ -438,7 +462,11 @@ change them per axis in the struct.
 | `CONFIG_ESP_FOC_SD_PLL_BW_HZ` / `_PLL_ZETA_PERMIL` | 180 / 1000 | PLL bandwidth (Hz) and damping (1.0) |
 | `CONFIG_ESP_FOC_SD_PWM_DELAY_PERMIL` | 1500 | inverse-Park lead, 1.5 PWM periods |
 | `CONFIG_ESP_FOC_SD_I_MAX_MA` | 700 | `i_max_a`, 0.7 A |
-| `CONFIG_ESP_FOC_SD_I_BW_HZ` / `_I_BACKOFF_PERMIL` | 200 / 500 | current loop bandwidth (Hz), gains × 0.5 |
+| `CONFIG_ESP_FOC_SD_I_BW_HZ` / `_I_BACKOFF_PERMIL` | 200 / 500 | current loop bandwidth (Hz); PI gains × 0.5, or ADRC `wc` = bandwidth × 0.5 |
+| `CONFIG_ESP_FOC_SD_CURRENT_CTRL_PI` / `_ADRC` | PI | current controller |
+| `CONFIG_ESP_FOC_SD_ADRC_WO_RATIO` | 5 | ADRC: lower bound of the observer bandwidth, × `wc` (`i_wo_ratio`) |
+| `CONFIG_ESP_FOC_SD_ADRC_DELAY_TS` | 2 | ADRC: PWM periods from current sample to duty acting (`i_delay_ts`) |
+| `CONFIG_ESP_FOC_SD_TRACE_DQ` | n | three trace records per PWM period: (iq\*, iq), (id\*, id), (vd, vq); needs `CONFIG_ESP_FOC_TRACE_ENABLE` |
 | `CONFIG_ESP_FOC_SD_SPEED_BW_E4` | 154 | wanted speed bandwidth, 0.0154 · `f_base` |
 | `CONFIG_ESP_FOC_SD_SPEED_BW_MIN_HZ` / `_MAX_HZ` | 4 / 8 | clamp of the wanted bandwidth |
 | `CONFIG_ESP_FOC_SD_SPEED_ZETA_PERMIL` | 1150 | speed loop damping |
@@ -480,6 +508,13 @@ change them per axis in the struct.
 
 ## Limits and pitfalls
 
+- **ADRC has no manual gains.** `set_current_pi()` returns
+  `ESP_ERR_NOT_SUPPORTED` and `kp_i`/`ki_i` are ignored; change the
+  bandwidths in the config before `init()`. Motor identification keeps its
+  own PI whatever the stack uses.
+- **ADRC trusts its model.** `b0` and the pole come from `ls_h` and `rs_ohm`;
+  a wrong inductance scales the loop gain, and a wrong `i_delay_ts` costs
+  phase margin. Identify the motor first.
 - **Speeds are electrical.** Speed references, `we_rads`, `still_hz`,
   `inpos_w_hz` and the overspeed guard are electrical (shaft speed × pole
   pairs). Positions, `w_ff_rads`, `corr_max_hz`, `wm_max_hz` and

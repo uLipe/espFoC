@@ -2,7 +2,8 @@
 
 The sensored and sensorless stacks are assembled from small, portable modules:
 fixed-point math, trigonometry, the Clarke and Park transforms, a PI
-controller, a voltage limiter, space-vector modulation, a biquad filter, rotor
+controller, a first-order ADRC, a current controller interface over both, a
+voltage limiter, space-vector modulation, a biquad filter, rotor
 angle estimators, sensorless observers, an open-loop start-up generator and
 identification kernels. Each one is a plain C unit with no driver and no RTOS
 inside, so you can call it from your own code. You need this chapter when you
@@ -38,8 +39,8 @@ the identification kernels, compiled only with `CONFIG_ESP_FOC_ENABLE_MOTOR_ID`.
 ## How they fit together
 
 One PWM period of a current loop runs the blocks in a fixed order: the measured
-phase currents go through Clarke and Park into the rotor frame, two PI
-controllers turn the current error into voltages, the limiter keeps the voltage
+phase currents go through Clarke and Park into the rotor frame, a current
+controller (a PI or an ADRC per axis) turns the current error into voltages, the limiter keeps the voltage
 vector inside what the inverter can produce, and inverse Park plus SVM turn it
 into three duties. The rotor angle that both Park transforms need comes from one
 of the estimators.
@@ -250,6 +251,132 @@ esp_foc_pid_set_applied(&pi_q, vq);                /* anti-windup */
   in a task and swap the struct inside `esp_foc_critical_enter()` /
   `esp_foc_critical_leave()`, as the sensored stack does.
 - Cost per `update`: five 64-bit multiply-accumulates, no division.
+
+### ADRC controller
+
+Active disturbance rejection control (ADRC) treats everything the plant model
+does not explain as one disturbance, estimates it every sample and cancels it.
+The block is a first-order linear ADRC for a plant
+
+`dy/dt = −a·y + b0·u + f`
+
+where `a` is a known pole (`Rs/Ls` for a winding, 0 for a pure integrator),
+`b0` the input gain and `f` the lumped unknown part: back-EMF, resistance
+error, dead time, cross-coupling. It is fully discrete: the model is the exact
+zero-order-hold sampling of that plant, `y[k+1] = α·y[k] + g·u[k] + z2`, with
+`α = exp(−a·Ts)` and `g = b0·(1 − α)/a`.
+
+Each `update` does three things:
+
+1. **Observe.** A two-state extended state observer (ESO) corrects its
+   estimates of `y` and of the disturbance `z2` against the measurement. Both
+   observer poles sit at `exp(−2π·wo·Ts)`.
+2. **Predict.** When the input computed now only acts `delay` samples later
+   (the PWM pipeline), the ESO runs its model forward over the inputs already
+   sent, so the law acts on the current the new input will meet.
+3. **Control.** `u = (kp·(r − ŷ) + (1 − α)·ŷ − z2) / g` with
+   `kp = 1 − exp(−2π·wc·Ts)`: the disturbance is subtracted and the remaining
+   plant is a unit gain with a first-order closed loop of bandwidth `wc`.
+
+API in [`esp_foc_adrc.h`](../../include/espFoC/utils/esp_foc_adrc.h):
+
+```c
+esp_err_t esp_foc_adrc_init(esp_foc_adrc_t *a, float b0, float a_pole, float wc_hz,
+                            float wo_hz, float ts, uint32_t delay);
+q16_t     esp_foc_adrc_update(esp_foc_adrc_t *a, q16_t ref, q16_t meas);
+void      esp_foc_adrc_set_applied(esp_foc_adrc_t *a, q16_t u_applied);
+void      esp_foc_adrc_reset(esp_foc_adrc_t *a);
+```
+
+```c
+/* current loop on q: input in per unit of Vdc, output in amps */
+ESP_ERROR_CHECK(esp_foc_adrc_init(&adrc_q, vdc / ls, rs / ls, 100.0f, 900.0f,
+                                  1.0f / 20000.0f, 2));
+
+q16_t vq = esp_foc_adrc_update(&adrc_q, iq_ref, iq);  /* every period */
+vq = q16_clamp(vq, q16_neg(vmax), vmax);
+esp_foc_adrc_set_applied(&adrc_q, vq);                /* the input really applied */
+```
+
+- **Model the pole when it is fast.** If `a` is left at 0 while the winding
+  pole is faster than the observer, the disturbance moves as fast as `y`
+  itself and the ESO cannot follow it. With the pole in the model the ESO
+  only has to track what is really unknown.
+- **Observer bandwidth.** `wo` must be above `wc` and below `fs/2`. An
+  observer slower than the plant pole corrects against the measurement
+  instead of following it; one much faster amplifies measurement noise.
+- **`set_applied` is mandatory.** The ESO predicts with the inputs it is
+  told were applied. Pass the clamped value, after any feedforward is removed,
+  every period; this is also what keeps the ADRC from winding up.
+- **`delay`** is 0..`ESP_FOC_ADRC_DELAY_MAX` (3) samples. It should match the
+  real pipeline: too short costs phase margin, too long makes the prediction
+  run ahead of the plant.
+- `init` returns `ESP_ERR_INVALID_ARG` for `b0 <= 0`, a negative pole, a pole
+  too fast to sample (`a·Ts > 4`), `wc <= 0`, `wo <= wc`, `wo` at or above
+  `fs/2`, a `delay` out of range, or a per-sample input gain `g` outside
+  [1/256, 256], which Q16 cannot hold with enough resolution.
+- Cost per `update`: the ESO correction, `delay` model steps and the law,
+  all 64-bit multiply-accumulates, no division.
+
+### Current controller interface
+
+The sensored stack does not call the PI or the ADRC directly. It closes the
+d/q current loop through one small interface, so the controller is chosen by
+configuration and the interrupt code stays the same. The sensorless stack
+runs two PIs directly.
+API in [`esp_foc_current_ctrl.h`](../../include/espFoC/motor_control/esp_foc_current_ctrl.h):
+
+```c
+typedef struct {
+    float rs_ohm, ls_h, vdc_v;
+    float fs_hz;        /* rate update() runs at */
+    float bw_hz;
+    float gain_scale;   /* PI: scales the IMC gains; ADRC: scales bw_hz */
+    float kp, ki;       /* PI only; 0 and 0 = design */
+    float wo_ratio;     /* ADRC only: observer floor over the loop bandwidth */
+    uint32_t delay_ts;  /* ADRC only: samples from measurement to input acting */
+} esp_foc_current_ctrl_design_t;
+
+esp_foc_current_ctrl_t *esp_foc_current_pi_bind(esp_foc_current_pi_t *pi);
+esp_foc_current_ctrl_t *esp_foc_current_adrc_bind(esp_foc_current_adrc_t *adrc);
+
+esp_err_t esp_foc_current_ctrl_design(esp_foc_current_ctrl_t *c,
+                                      const esp_foc_current_ctrl_design_t *d);
+void esp_foc_current_ctrl_update(esp_foc_current_ctrl_t *c, q16_t id_ref, q16_t iq_ref,
+                                 q16_t id, q16_t iq, q16_t *vd, q16_t *vq);
+void esp_foc_current_ctrl_set_applied(esp_foc_current_ctrl_t *c, q16_t vd, q16_t vq);
+void esp_foc_current_ctrl_reset(esp_foc_current_ctrl_t *c);
+```
+
+You own the concrete object (`esp_foc_current_pi_t` or
+`esp_foc_current_adrc_t`, no allocation); `bind` returns its interface, and
+`design` fills it from the motor in `float`, in a task. After `design`,
+`c->tune` holds what it settled on: `kp`/`ki` for the PI, `wc_hz`/`wo_hz` and
+`b0` for the ADRC, zeros for the fields a controller does not use.
+
+| Design field | PI | ADRC |
+|---|---|---|
+| `rs_ohm`, `ls_h`, `vdc_v`, `fs_hz` | plant `Vdc/Rs`, `Ls/Rs` at `fs_hz` | `b0 = Vdc/Ls`, pole `Rs/Ls` |
+| `bw_hz` × `gain_scale` | IMC bandwidth `bw_hz`, gains × `gain_scale` | `wc = bw_hz · gain_scale` |
+| `kp`, `ki` | non-zero skips the design | ignored |
+| `wo_ratio` | ignored | `wo = max(wo_ratio·wc, min(0.8·Rs/(2π·Ls), fs/16))` |
+| `delay_ts` | ignored | samples predicted across |
+
+Per PWM period, from the control interrupt:
+
+```c
+esp_foc_current_ctrl_update(ictl, id_ref, iq_ref, id, iq, &vd, &vq); /* controller share */
+vd = q16_add(vd, vd_ff);
+vq = q16_add(vq, vq_ff);
+esp_foc_vlim_dq_mag(&vd, &vq, esp_foc_trigo_hw_magnitude(vd, vq), Q16_INV_SQRT3);
+esp_foc_current_ctrl_set_applied(ictl, q16_sub(vd, vd_ff), q16_sub(vq, vq_ff));
+```
+
+`set_applied` takes the share the bridge really delivered once the
+feedforward and the limit are accounted for. For the PI that is the
+anti-windup; for the ADRC it also means an exact feedforward leaves the ESO
+nothing to estimate, instead of being counted twice. The hot-path helpers
+do not check for `NULL`.
 
 ### Voltage limit and SVM
 
@@ -659,7 +786,8 @@ API unchanged for a future chip that has such a unit. Design functions
 
 The common layer has Unity suites in `test/`, one per block
 (`test_esp_foc_angle.c`, `_clarke`, `_park`, `_pid`, `_vlim`, `_svm`, `_iir`,
-`_trig`, `_rotor_pll`, `_rotor_est`, `_observer`, `_observer_flux`, `_if`,
+`_trig`, `_adrc`, `_current_ctrl`, `_rotor_pll`, `_rotor_est`, `_observer`,
+`_observer_flux`, `_if`,
 `_ident`, plus the identification suites). They cover the happy path, edge
 cases, accuracy against `float` and closed-loop final values.
 
@@ -682,8 +810,9 @@ idf.py -D TEST_COMPONENTS=espFoC -p /dev/ttyUSB0 flash monitor
 
 - **Wrap every angle** and take errors with `q16_angle_delta`; a raw difference
   across ±π is a 2π jump.
-- **Limit, then `set_applied`.** The PI never limits itself; without
-  `esp_foc_pid_set_applied` the integrator winds up while the output saturates.
+- **Limit, then `set_applied`.** Neither the PI nor the ADRC limits itself;
+  without `set_applied` the PI integrator winds up and the ADRC observer
+  predicts with an input the bridge never delivered.
 - **Keep units straight.** Amps for currents; per unit of Vdc for the PI, vlim
   and SVM; volts for the observers. Feeding per-unit voltage to an observer
   scales its flux estimate by Vdc.
