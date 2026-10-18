@@ -69,10 +69,13 @@ interrupt:
 3. **Park.** `i_αβ` is rotated by the electrical rotor angle `θ_e` into the
    rotor frame: `i_d` along the magnet flux and `i_q`, the current that makes
    torque. At steady state both are DC.
-4. **Current PI.** One PI per axis drives `i_d` to `i_d*` and `i_q` to `i_q*`,
-   giving the voltages `v_d`, `v_q`.
+4. **Current controller.** One controller per axis drives `i_d` to `i_d*` and
+   `i_q` to `i_q*`, giving the voltages `v_d`, `v_q`. The sensored stack can
+   use a PI or an ADRC (a model-based controller with a disturbance observer),
+   picked in Kconfig; the sensorless stack uses the PI. Both are designed from
+   `Rs`, `Ls`, `Vdc` and a bandwidth.
 5. **Voltage limit.** The voltage vector is clamped to what the bridge can
-   make, `|v_dq| ≤ V_dc/√3`, and the PIs are told so they do not wind up.
+   make, `|v_dq| ≤ V_dc/√3`, and the controllers are told so they do not wind up.
 6. **Inverse Park and SVM.** `v_dq` is rotated back into the stator frame and
    space-vector modulation turns it into three duty cycles for the MCPWM.
 
@@ -132,7 +135,7 @@ espFoC is layered, and the application can use every layer:
 - **Motor control.** The sensored and sensorless stacks, chosen in Kconfig
   (one stack, or none to use only the building blocks), plus the optional
   phase map discovery and motor identification. They are built from the
-  **building blocks**: Q16.16 math, Clarke and Park transforms, PI, SVM,
+  **building blocks**: Q16.16 math, Clarke and Park transforms, PI, ADRC, SVM,
   voltage limit, PLL, observers and the I-f generator, each usable on its own.
   An optional binary **trace** records hot-path signals for debugging.
 - **Drivers.** The inverter driver owns the MCPWM, ETM and ADC with DMA, and

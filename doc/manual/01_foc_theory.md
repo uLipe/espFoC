@@ -174,9 +174,30 @@ integrator must stop accumulating, otherwise it "winds up" and the loop overshoo
 once the limit is released. This is **anti-windup**: the espFoC stacks tell each PI the
 value that was actually applied after the limit, and the PI tracks that instead.
 
+### An alternative for the current loop: ADRC
+
+A PI only knows the error. **Active disturbance rejection control** (ADRC) also uses a
+model of the winding, `L·di/dt = v − R·i − (everything else)`. An observer runs that model
+next to the real current and lumps whatever does not fit (back-EMF, an error in `R` or `L`,
+dead time, coupling between the axes) into one estimated disturbance, which the controller
+subtracts from its command. What is left behaves like a simple first-order plant, and the
+loop places it at the bandwidth you choose.
+
+The trade-offs:
+
+- ADRC has no `Kp`/`Ki` to tune. It has a loop bandwidth and an **observer bandwidth**, a
+  few times faster, that decides how quickly the disturbance estimate follows;
+- it rejects load and back-EMF changes faster than a PI at the same bandwidth, because it
+  does not wait for an integrator to build up;
+- it relies on `R`, `L` and the supply voltage being close to the real ones, and it costs
+  more computation per PWM period.
+
+The sensored stack offers both for the current loop and picks one in Kconfig; the rest of
+the pipeline is the same. The sensorless stack uses the PI.
+
 ## Back to the motor: inverse Park, voltage limit, SVM
 
-The two current PIs output two voltages, `v_d` and `v_q`, in the rotor axes. They have to
+The current controllers (two PIs, or two ADRCs) output two voltages, `v_d` and `v_q`, in the rotor axes. They have to
 go back the way the currents came:
 
 - **voltage limit**: the inverter can only produce so much voltage from the supply. The
@@ -198,7 +219,7 @@ Put together, one step of the current loop is:
 1. read the phase currents;
 2. Clarke: `(i_a, i_b, i_c)` to `(i_α, i_β)`;
 3. Park with `θe`: to `(i_d, i_q)`;
-4. two PIs: `(i_d, i_q)` versus `(i_d*, i_q*)` to `(v_d, v_q)`;
+4. two current controllers (PI or ADRC): `(i_d, i_q)` versus `(i_d*, i_q*)` to `(v_d, v_q)`;
 5. voltage limit;
 6. inverse Park with `θe`: to `(v_α, v_β)`;
 7. SVM: to three duty cycles;
@@ -275,7 +296,7 @@ The order is always the same: phase map, then identification, then the control s
   the field is 90 electrical degrees ahead of the magnets.
 - FoC looks at the currents from the rotor (Clarke, then Park with the rotor angle), where
   they are two constant numbers: `i_d` (along the magnet, kept at 0) and `i_q` (torque).
-- Two PI controllers drive `i_d` and `i_q` to their references; their output voltages go
+- Two current controllers (PI or ADRC) drive `i_d` and `i_q` to their references; their output voltages go
   back through inverse Park and SVM to three PWM duty cycles.
 - All of this runs once per PWM period. The rotor angle comes from a sensor (sensored) or an
   observer (sensorless, needs speed and a start-up sequence).
@@ -285,6 +306,7 @@ The order is always the same: phase map, then identification, then the control s
 
 | Term | Meaning |
 |---|---|
+| ADRC | Active disturbance rejection control: a model plus an observer that estimates and cancels what the model misses |
 | Anti-windup | Stops a PI integrator from accumulating while its output is limited |
 | Back EMF | Voltage a spinning motor generates, proportional to speed |
 | Bandwidth | How fast a loop follows its reference, in Hz |
@@ -292,6 +314,7 @@ The order is always the same: phase map, then identification, then the control s
 | Clarke transform | Three phase quantities to two fixed axes `α, β` |
 | d / q axes | Axes turning with the rotor: d along the magnet, q 90° ahead |
 | Dead time | Pause between switching one transistor of a half bridge off and the other on |
+| Disturbance observer | Part of an ADRC that estimates, every period, the effects the plant model does not include |
 | Duty cycle | Fraction of a PWM period a phase is connected to the supply |
 | Electrical angle | Rotor angle times pole pairs, as seen by the stator coils |
 | Flux linkage `ψ` | Magnet strength seen by the coils; torque per amp and volts per speed |
