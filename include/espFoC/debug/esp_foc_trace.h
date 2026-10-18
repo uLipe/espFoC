@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "sdkconfig.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -61,8 +62,18 @@ typedef struct {
 esp_err_t esp_foc_trace_init(void);
 void esp_foc_trace_reset(void);
 
-/** ISR-safe O(1) push. No-op if trace disabled or not initialized. */
+#if CONFIG_ESP_FOC_TRACE_ENABLE
+/** ISR-safe O(1) push. No-op if not initialized. */
 void esp_foc_trace_push(uint16_t type, int32_t a, int32_t b);
+#else
+/* Inline so the push sites in the control interrupts compile to nothing. */
+static inline void esp_foc_trace_push(uint16_t type, int32_t a, int32_t b)
+{
+    (void)type;
+    (void)a;
+    (void)b;
+}
+#endif
 
 /**
  * Copy up to max_out records into out (oldest first among available).

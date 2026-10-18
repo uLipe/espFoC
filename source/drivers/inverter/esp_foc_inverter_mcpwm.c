@@ -49,6 +49,7 @@
 #define ESP_FOC_SENSE_STALE_FRAMES 512u
 #endif
 
+#if CONFIG_ESP_FOC_TRACE_ENABLE
 static inline void trace_isr_duration(uint16_t type, uint32_t t0_cycles)
 {
     uint32_t dt = esp_cpu_get_cycle_count() - t0_cycles;
@@ -56,6 +57,7 @@ static inline void trace_isr_duration(uint16_t type, uint32_t t0_cycles)
     uint32_t us = (tpus > 0u) ? (dt / tpus) : 0u;
     esp_foc_trace_push(type, (int32_t)us, (int32_t)dt);
 }
+#endif
 
 static const char *TAG = "foc_inv_mcpwm";
 
@@ -173,13 +175,17 @@ static void trip(esp_foc_inverter_mcpwm_obj_t *o, esp_foc_fault_reason_t reason,
 static void on_tez(void *arg)
 {
     esp_foc_inverter_mcpwm_obj_t *o = (esp_foc_inverter_mcpwm_obj_t *)arg;
+#if CONFIG_ESP_FOC_TRACE_ENABLE
     uint32_t t0 = esp_cpu_get_cycle_count();
     esp_foc_trace_push(ESP_FOC_TRACE_TEZ_ENTER, 0, 0);
+#endif
     if (o->pwm_cb != NULL) {
         o->pwm_cb(o->pwm_arg);
     }
+#if CONFIG_ESP_FOC_TRACE_ENABLE
     /* a = µs, b = CPU cycles (includes pwm_cb + TEZ_ENTER push). */
     trace_isr_duration(ESP_FOC_TRACE_TEZ_EXIT, t0);
+#endif
 }
 
 static void reset_i_filters(esp_foc_inverter_mcpwm_obj_t *o)

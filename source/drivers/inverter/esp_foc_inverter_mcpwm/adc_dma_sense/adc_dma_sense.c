@@ -259,7 +259,9 @@ static void adc_gdma_isr(void *arg)
     if ((st & GDMA_LL_EVENT_RX_SUC_EOF) == 0) {
         return;
     }
+#if CONFIG_ESP_FOC_TRACE_ENABLE
     uint32_t t0 = esp_cpu_get_cycle_count();
+#endif
     gdma_ll_rx_clear_interrupt_status(s->gdma, ADC_DMA_RX_CH, GDMA_LL_EVENT_RX_SUC_EOF);
 
     /*
@@ -296,6 +298,7 @@ static void adc_gdma_isr(void *arg)
         adc_rearm(s);
     }
 
+#if CONFIG_ESP_FOC_TRACE_ENABLE
     /* a = µs, b = CPU cycles — full GDMA EOF ISR (parse + on_done + rearm). */
     {
         uint32_t dt = esp_cpu_get_cycle_count() - t0;
@@ -303,6 +306,7 @@ static void adc_gdma_isr(void *arg)
         uint32_t us = (tpus > 0u) ? (dt / tpus) : 0u;
         esp_foc_trace_push(ESP_FOC_TRACE_DMA_EOF, (int32_t)us, (int32_t)dt);
     }
+#endif
 }
 
 esp_err_t esp_foc_adc_dma_sense_init(esp_foc_adc_dma_sense_t **out,
