@@ -422,10 +422,17 @@ static void print_controller_table(void)
     esp_foc_sensored_get_tuning(MOTOR_AXIS, &tuning);
     printf("\n  Controller (designed from the identified motor)\n");
     printf("  +----------------------------+-----------------+\n");
+#if CONFIG_ESP_FOC_SD_CURRENT_CTRL_ADRC
+    snprintf(text, sizeof(text), "%.0f Hz", (double)tuning.i_wc_hz);
+    printf("  | %-26s | %-15s |\n", "Current ADRC bandwidth", text);
+    snprintf(text, sizeof(text), "%.0f Hz", (double)tuning.i_wo_hz);
+    printf("  | %-26s | %-15s |\n", "Current ADRC observer", text);
+#else
     snprintf(text, sizeof(text), "%.4f", (double)tuning.kp_i);
     printf("  | %-26s | %-15s |\n", "Current loop Kp", text);
     snprintf(text, sizeof(text), "%.1f", (double)tuning.ki_i);
     printf("  | %-26s | %-15s |\n", "Current loop Ki", text);
+#endif
     snprintf(text, sizeof(text), "%.3f rad/s el", (double)tuning.ripple_rads);
     printf("  | %-26s | %-15s |\n", "Speed noise at rest", text);
     snprintf(text, sizeof(text), "%.1f Hz", (double)tuning.speed_bw_hz);
