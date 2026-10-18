@@ -407,9 +407,57 @@ menu "espFoC Settings"
                 default 200
 
             config ESP_FOC_SD_I_BACKOFF_PERMIL
-                int "Current PI gain backoff [permil of IMC-zoh]"
+                int "Current loop backoff [permil]"
                 range 100 1000
                 default 500
+                help
+                    PI: scales the IMC-zoh gains. ADRC: scales the loop
+                    bandwidth, wc = bandwidth x backoff.
+
+            choice ESP_FOC_SD_CURRENT_CTRL
+                prompt "Current controller"
+                default ESP_FOC_SD_CURRENT_CTRL_PI
+
+                config ESP_FOC_SD_CURRENT_CTRL_PI
+                    bool "PI (IMC-zoh)"
+
+                config ESP_FOC_SD_CURRENT_CTRL_ADRC
+                    bool "First-order linear ADRC"
+                    help
+                        ESO + proportional law per axis, b0 = Vdc / Ls,
+                        with the Rs / Ls pole in the ESO model.
+                        Motor identification keeps its own PI.
+            endchoice
+
+            config ESP_FOC_SD_ADRC_WO_RATIO
+                int "ADRC observer bandwidth [x loop bandwidth]"
+                depends on ESP_FOC_SD_CURRENT_CTRL_ADRC
+                range 2 20
+                default 5
+                help
+                    Lower bound only. The observer is also held at
+                    0.8 x Rs / (2 pi Ls) of the identified plant, capped
+                    at PWM / 16: an observer slower than the plant pole
+                    corrects against the measurement.
+
+            config ESP_FOC_SD_ADRC_DELAY_TS
+                int "ADRC input delay [PWM periods]"
+                depends on ESP_FOC_SD_CURRENT_CTRL_ADRC
+                range 0 3
+                default 2
+                help
+                    Periods from the current sample to the duty computed
+                    from it reaching the bridge. The MCPWM inverter reads
+                    the sample of the previous period and loads the duty
+                    on the next TEZ: 2.
+
+            config ESP_FOC_SD_TRACE_DQ
+                bool "Trace the dq references, currents and voltages every PWM period"
+                depends on ESP_FOC_TRACE_ENABLE
+                default n
+                help
+                    Three records per period into the trace ring, for step
+                    responses read back with esp_foc_trace_snapshot().
 
         endmenu
 

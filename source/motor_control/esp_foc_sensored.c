@@ -13,7 +13,9 @@
 #include <string.h>
 
 #include "sdkconfig.h"
+#include "espFoC/debug/esp_foc_trace.h"
 #include "espFoC/drivers/esp_foc_trigo_hw.h"
+#include "espFoC/motor_control/esp_foc_current_ctrl.h"
 #include "espFoC/motor_control/esp_foc_rotor_pll.h"
 #include "espFoC/osal/esp_foc_osal.h"
 #include "espFoC/utils/esp_foc_angle.h"
@@ -81,14 +83,19 @@ typedef struct {
     volatile q16_t vd_ff;
     volatile q16_t vq_ff;
     volatile q16_t iq_ref;
-    esp_foc_pid_t pi_d;
-    esp_foc_pid_t pi_q;
+    esp_foc_current_ctrl_t *ictl;
     volatile q16_t theta;
     volatile q16_t id;
     volatile q16_t iq;
     volatile q16_t vd;
     volatile q16_t vq;
     volatile uint32_t tez;
+
+#if CONFIG_ESP_FOC_SD_CURRENT_CTRL_ADRC
+    esp_foc_current_adrc_t ictl_obj;
+#else
+    esp_foc_current_pi_t ictl_obj;
+#endif
 
     /* --- Slot --- */
     volatile int64_t kp_w_q32;
@@ -404,11 +411,13 @@ static void sd_tez(void *arg)
     esp_foc_clarke(iu, iv, iw, &ia, &ib);
     esp_foc_park(s, c, ia, ib, &id, &iq);
 
-    q16_t vd = q16_add(esp_foc_pid_update(&sd->pi_d, idr, id), vd_ff);
-    q16_t vq = q16_add(esp_foc_pid_update(&sd->pi_q, iqr, iq), vq_ff);
+    esp_foc_current_ctrl_t *const ictl = sd->ictl;
+    q16_t vd, vq;
+    esp_foc_current_ctrl_update(ictl, idr, iqr, id, iq, &vd, &vq);
+    vd = q16_add(vd, vd_ff);
+    vq = q16_add(vq, vq_ff);
     esp_foc_vlim_dq_mag(&vd, &vq, esp_foc_trigo_hw_magnitude(vd, vq), Q16_INV_SQRT3);
-    esp_foc_pid_set_applied(&sd->pi_d, q16_sub(vd, vd_ff));
-    esp_foc_pid_set_applied(&sd->pi_q, q16_sub(vq, vq_ff));
+    esp_foc_current_ctrl_set_applied(ictl, q16_sub(vd, vd_ff), q16_sub(vq, vq_ff));
 
     /* The PWM-delay lead rotates (s, c) by a cubic instead of a second
      * CORDIC, which does not fit the period; |vlead| stays under 0.3 rad
@@ -435,6 +444,11 @@ static void sd_tez(void *arg)
     sd->iq = iq;
     sd->vd = vd;
     sd->vq = vq;
+#if CONFIG_ESP_FOC_SD_TRACE_DQ
+    esp_foc_trace_push(ESP_FOC_TRACE_DQ_IQ, iqr, iq);
+    esp_foc_trace_push(ESP_FOC_TRACE_DQ_ID, idr, id);
+    esp_foc_trace_push(ESP_FOC_TRACE_DQ_V, vd, vq);
+#endif
 
     uint8_t why = ESP_FOC_SD_ABORT_NONE;
     if (sd->fresh) {
@@ -858,7 +872,8 @@ static bool sd_cfg_ok(const esp_foc_sensored_config_t *c)
                        (c->pwm_delay_ts >= 0.0f) && (fabsf(c->park_lead_s) < 0.01f);
     const bool sense = (c->fetch_hz > 0u) && (c->pll_bw_hz > 0.0f) && (c->pll_zeta > 0.0f);
     const bool cur = (c->i_max_a > 0.0f) && (c->i_bw_hz > 0.0f) && (c->i_tune_backoff > 0.0f) &&
-                     (c->i_tune_backoff <= 1.0f) && (c->kp_i >= 0.0f) && (c->ki_i >= 0.0f);
+                     (c->i_tune_backoff <= 1.0f) && (c->kp_i >= 0.0f) && (c->ki_i >= 0.0f) &&
+                     (c->i_wo_ratio > 1.0f) && (c->i_delay_ts <= ESP_FOC_ADRC_DELAY_MAX);
     const bool speed = (c->speed_bw_hz >= 0.0f) && (c->speed_bw_frac > 0.0f) &&
                        (c->speed_bw_min_hz > 0.0f) &&
                        (c->speed_bw_max_hz >= c->speed_bw_min_hz) && (c->speed_zeta > 0.4f) &&
@@ -889,21 +904,24 @@ static esp_err_t sd_design(sd_t *sd)
     sd->slot_hz = (float)c->fetch_hz;
     sd->slow_div = sd->pwm_hz / c->fetch_hz;
 
-    float kp_i = c->kp_i;
-    float ki_i = c->ki_i;
-    if ((kp_i == 0.0f) && (ki_i == 0.0f)) {
-        err = esp_foc_pid_design_imc_zoh(sd->vdc_v / c->rs_ohm, c->ls_h / c->rs_ohm, pwm,
-                                         c->i_bw_hz, &kp_i, &ki_i);
-        if (err != ESP_OK) {
-            return err;
-        }
-        kp_i *= c->i_tune_backoff;
-        ki_i *= c->i_tune_backoff;
-    }
-    err = esp_foc_pid_init(&sd->pi_d, kp_i, ki_i, 0.0f, 0.0f, 1.0f / pwm);
-    if (err == ESP_OK) {
-        err = esp_foc_pid_init(&sd->pi_q, kp_i, ki_i, 0.0f, 0.0f, 1.0f / pwm);
-    }
+#if CONFIG_ESP_FOC_SD_CURRENT_CTRL_ADRC
+    sd->ictl = esp_foc_current_adrc_bind(&sd->ictl_obj);
+#else
+    sd->ictl = esp_foc_current_pi_bind(&sd->ictl_obj);
+#endif
+    const esp_foc_current_ctrl_design_t idz = {
+        .rs_ohm = c->rs_ohm,
+        .ls_h = c->ls_h,
+        .vdc_v = sd->vdc_v,
+        .fs_hz = pwm,
+        .bw_hz = c->i_bw_hz,
+        .gain_scale = c->i_tune_backoff,
+        .kp = c->kp_i,
+        .ki = c->ki_i,
+        .wo_ratio = c->i_wo_ratio,
+        .delay_ts = c->i_delay_ts,
+    };
+    err = esp_foc_current_ctrl_design(sd->ictl, &idz);
     if (err != ESP_OK) {
         return err;
     }
@@ -917,8 +935,10 @@ static esp_err_t sd_design(sd_t *sd)
         return err;
     }
 
-    sd->tune.kp_i = kp_i;
-    sd->tune.ki_i = ki_i;
+    sd->tune.kp_i = sd->ictl->tune.kp;
+    sd->tune.ki_i = sd->ictl->tune.ki;
+    sd->tune.i_wc_hz = sd->ictl->tune.wc_hz;
+    sd->tune.i_wo_hz = sd->ictl->tune.wo_hz;
     sd->tune.slot_hz = sd->slot_hz;
     sd->tune.f_base_hz = sd->vdc_v * SD_INV_SQRT3 / (SD_TWO_PI * c->psi_wb);
 
@@ -1041,8 +1061,7 @@ static sd_out_t sd_start(sd_t *sd)
     esp_foc_rotor_state_t st;
     esp_foc_rotor_sensor_snapshot(sd->rotor, &st);
     esp_foc_critical_enter();
-    esp_foc_pid_reset(&sd->pi_d);
-    esp_foc_pid_reset(&sd->pi_q);
+    esp_foc_current_ctrl_reset(sd->ictl);
     esp_foc_rotor_pll_seed(&sd->pll, st.theta_e, 0);
     sd->wi_q32 = 0;
     sd->iq_ref = 0;
@@ -1402,6 +1421,13 @@ void esp_foc_sensored_default_config(esp_foc_sensored_config_t *cfg)
     cfg->i_max_a = (float)CONFIG_ESP_FOC_SD_I_MAX_MA * 1.0e-3f;
     cfg->i_bw_hz = (float)CONFIG_ESP_FOC_SD_I_BW_HZ;
     cfg->i_tune_backoff = (float)CONFIG_ESP_FOC_SD_I_BACKOFF_PERMIL * 1.0e-3f;
+#if CONFIG_ESP_FOC_SD_CURRENT_CTRL_ADRC
+    cfg->i_wo_ratio = (float)CONFIG_ESP_FOC_SD_ADRC_WO_RATIO;
+    cfg->i_delay_ts = CONFIG_ESP_FOC_SD_ADRC_DELAY_TS;
+#else
+    cfg->i_wo_ratio = 5.0f;
+    cfg->i_delay_ts = 2u;
+#endif
     cfg->speed_bw_frac = (float)CONFIG_ESP_FOC_SD_SPEED_BW_E4 * 1.0e-4f;
     cfg->speed_bw_min_hz = (float)CONFIG_ESP_FOC_SD_SPEED_BW_MIN_HZ;
     cfg->speed_bw_max_hz = (float)CONFIG_ESP_FOC_SD_SPEED_BW_MAX_HZ;
@@ -1805,6 +1831,7 @@ esp_err_t esp_foc_sensored_set_joint(uint8_t axis, float theta_rad, float w_ff_r
     return ESP_OK;
 }
 
+#if !CONFIG_ESP_FOC_SD_CURRENT_CTRL_ADRC
 static void sd_pid_take(esp_foc_pid_t *dst, const esp_foc_pid_t *src)
 {
     dst->b0 = src->b0;
@@ -1815,6 +1842,7 @@ static void sd_pid_take(esp_foc_pid_t *dst, const esp_foc_pid_t *src)
     dst->kp = src->kp;
     dst->ki = src->ki;
 }
+#endif
 
 esp_err_t esp_foc_sensored_set_current_pi(uint8_t axis, float kp, float ki)
 {
@@ -1823,10 +1851,15 @@ esp_err_t esp_foc_sensored_set_current_pi(uint8_t axis, float kp, float ki)
     if (sd == NULL) {
         return err;
     }
+#if CONFIG_ESP_FOC_SD_CURRENT_CTRL_ADRC
+    (void)kp;
+    (void)ki;
+    return ESP_ERR_NOT_SUPPORTED;
+#else
     if (!(kp > 0.0f) || !(ki >= 0.0f) || (kp >= 32000.0f) || (ki / (float)sd->pwm_hz >= 32000.0f)) {
         return ESP_ERR_INVALID_ARG;
     }
-    esp_foc_pid_t tmp = sd->pi_d;
+    esp_foc_pid_t tmp = sd->ictl_obj.d;
     err = esp_foc_pid_set_kp(&tmp, kp);
     if (err == ESP_OK) {
         err = esp_foc_pid_set_ki(&tmp, ki);
@@ -1835,12 +1868,13 @@ esp_err_t esp_foc_sensored_set_current_pi(uint8_t axis, float kp, float ki)
         return err;
     }
     esp_foc_critical_enter();
-    sd_pid_take(&sd->pi_d, &tmp);
-    sd_pid_take(&sd->pi_q, &tmp);
+    sd_pid_take(&sd->ictl_obj.d, &tmp);
+    sd_pid_take(&sd->ictl_obj.q, &tmp);
     esp_foc_critical_leave();
     sd->tune.kp_i = kp;
     sd->tune.ki_i = ki;
     return ESP_OK;
+#endif
 }
 
 esp_err_t esp_foc_sensored_set_speed_pi(uint8_t axis, float kp, float ki)
