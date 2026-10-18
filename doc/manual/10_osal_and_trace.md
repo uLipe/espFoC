@@ -352,6 +352,15 @@ The MCPWM inverter pushes these records:
 | `ESP_FOC_TRACE_FAULT_CLEAR_REQ` / `_OK` / `_REJ` | `clear_fault()` asked / done / refused | previous reason | 0, or `ESP_ERR_INVALID_STATE` |
 | `ESP_FOC_TRACE_FAULT_ENABLE_REJ` | `enable()` refused while faulted | reason | 0 |
 
+With `CONFIG_ESP_FOC_SD_TRACE_DQ` the sensored stack adds three records at
+the end of every PWM period, for step responses of the current loop:
+
+| Type | `a` | `b` |
+|---|---|---|
+| `ESP_FOC_TRACE_DQ_IQ` | iq reference (Q16 A) | measured iq (Q16 A) |
+| `ESP_FOC_TRACE_DQ_ID` | id reference (Q16 A) | measured id (Q16 A) |
+| `ESP_FOC_TRACE_DQ_V` | vd applied (Q16 per unit of Vdc) | vq applied (Q16 per unit of Vdc) |
+
 The TEZ duration covers the whole interrupt, including the stack's callback
 and the `TEZ_ENTER` push. The DMA duration covers the ADC parse, the inverter
 callback and the rearm. `ESP_FOC_TRACE_USER_MARK` is not pushed by the
@@ -366,8 +375,10 @@ new periods.
 1. **Enable it.** `CONFIG_ESP_FOC_TRACE_ENABLE` is `y` by default in Kconfig,
    but the examples turn it off in `sdkconfig.defaults`
    (`CONFIG_ESP_FOC_TRACE_ENABLE=n`). Set it back to `y` in your project and
-   choose `CONFIG_ESP_FOC_TRACE_DEPTH`. With the option off, every trace call
-   is an empty stub: `snapshot` returns 0 and the counters read 0.
+   choose `CONFIG_ESP_FOC_TRACE_DEPTH`. With the option off,
+   `esp_foc_trace_push()` is an empty inline function, so no push site and
+   no timestamp read is compiled into the interrupts; `snapshot` returns 0
+   and the counters read 0.
 2. **Initialisation is automatic.** `esp_foc_inverter_mcpwm_init()` calls
    `esp_foc_trace_init()`, which clears the ring. Call
    `esp_foc_trace_reset()` to empty it before a test.
@@ -418,8 +429,9 @@ static array `s_ring` in `source/debug/esp_foc_trace.c`.
 
 | Symbol | Default | Meaning |
 |---|---|---|
-| `CONFIG_ESP_FOC_TRACE_ENABLE` | y | build the trace ring; off makes every call a stub |
+| `CONFIG_ESP_FOC_TRACE_ENABLE` | y | build the trace ring and the push sites; off compiles them out of the interrupts |
 | `CONFIG_ESP_FOC_TRACE_DEPTH` | 256 | records in the ring, power of two (range 16–4096) |
+| `CONFIG_ESP_FOC_SD_TRACE_DQ` | n | sensored stack: push the d/q references, currents and voltages every period (needs `TRACE_ENABLE`) |
 
 ### Use cases
 
@@ -445,8 +457,13 @@ static array `s_ring` in `source/debug/esp_foc_trace.c`.
   when the interrupts are stopped.
 - **A second inverter clears the ring.** Each `esp_foc_inverter_mcpwm_init()`
   calls `esp_foc_trace_init()`.
-- **Cost.** Each push is a few stores inside the interrupt. Measure with the
-  trace on, then decide whether to ship with it off, as the examples do.
+- **Cost.** Each push is a few stores inside the interrupt, plus the cycle
+  counter and timer reads that time the TEZ and DMA interrupts. On a loop
+  near its time budget that matters: measure with the trace on, then ship
+  with it off, as the examples do.
+- **DQ records fill the ring fast.** Three extra records per period shorten
+  the history to a few hundred microseconds at 256 records; raise
+  `CONFIG_ESP_FOC_TRACE_DEPTH` for a full step response.
 
 ## Other debug option: ADC software trigger
 
