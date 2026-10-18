@@ -2,6 +2,7 @@ if(IDF_TARGET STREQUAL "linux")
     # Unit tests only: no inverter, rotor driver or RTOS behind them. The
     # mock-inverter suites run the stacks' tasks and stay on silicon.
     idf_component_register(SRCS
+                               "test_esp_foc_adrc.c"
                                "test_esp_foc_angle.c"
                                "test_esp_foc_clarke.c"
                                "test_esp_foc_ident.c"
