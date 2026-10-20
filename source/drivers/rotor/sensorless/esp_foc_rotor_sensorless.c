@@ -120,6 +120,20 @@ static esp_err_t calibrate_offset(esp_foc_rotor_sensor_t *self, int samples)
     return ESP_OK;
 }
 
+static esp_err_t get_offset(const esp_foc_rotor_sensor_t *self, q16_t *offset_rad)
+{
+    (void)self;
+    (void)offset_rad;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+static esp_err_t set_offset(esp_foc_rotor_sensor_t *self, q16_t offset_rad)
+{
+    (void)self;
+    (void)offset_rad;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
 esp_foc_rotor_sensor_t *esp_foc_rotor_sensorless_acquire(unsigned index)
 {
     if (index >= CONFIG_ESP_FOC_MAX_ROTOR_SENSORS) {
@@ -136,6 +150,8 @@ esp_foc_rotor_sensor_t *esp_foc_rotor_sensorless_acquire(unsigned index)
     o->iface.fetch = fetch;
     o->iface.fetch_start = fetch_start;
     o->iface.calibrate_offset = calibrate_offset;
+    o->iface.get_offset = get_offset;
+    o->iface.set_offset = set_offset;
     o->iface.caps = caps;
     o->iface.step = step;
     o->iface.snapshot = snapshot;

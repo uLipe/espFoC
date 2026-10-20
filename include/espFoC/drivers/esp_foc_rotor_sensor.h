@@ -84,6 +84,14 @@ struct esp_foc_rotor_sensor_s {
      * Caller must not fetch beforehand.
      */
     esp_err_t (*calibrate_offset)(esp_foc_rotor_sensor_t *self, int samples);
+    /**
+     * The zero calibrate_offset installed, as the raw mechanical angle [rad]
+     * that reads 0, before any direction flip. Lets a caller store it and
+     * reinstall it with set_offset on a later boot instead of re-zeroing.
+     */
+    esp_err_t (*get_offset)(const esp_foc_rotor_sensor_t *self, q16_t *offset_rad);
+    /** Task context. Installs a zero from get_offset; restarts the speed estimate. */
+    esp_err_t (*set_offset)(esp_foc_rotor_sensor_t *self, q16_t offset_rad);
     /** Bitwise OR of esp_foc_rotor_caps_t. */
     uint32_t (*caps)(const esp_foc_rotor_sensor_t *self);
     /**
@@ -138,6 +146,24 @@ static inline esp_err_t esp_foc_rotor_sensor_calibrate_offset(esp_foc_rotor_sens
     }
     return (s->calibrate_offset != NULL) ? s->calibrate_offset(s, samples)
                                          : ESP_ERR_NOT_SUPPORTED;
+}
+
+static inline esp_err_t esp_foc_rotor_sensor_get_offset(const esp_foc_rotor_sensor_t *s,
+                                                       q16_t *offset_rad)
+{
+    if (s == NULL || offset_rad == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return (s->get_offset != NULL) ? s->get_offset(s, offset_rad) : ESP_ERR_NOT_SUPPORTED;
+}
+
+static inline esp_err_t esp_foc_rotor_sensor_set_offset(esp_foc_rotor_sensor_t *s,
+                                                       q16_t offset_rad)
+{
+    if (s == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return (s->set_offset != NULL) ? s->set_offset(s, offset_rad) : ESP_ERR_NOT_SUPPORTED;
 }
 
 static inline uint32_t esp_foc_rotor_sensor_caps(const esp_foc_rotor_sensor_t *s)
