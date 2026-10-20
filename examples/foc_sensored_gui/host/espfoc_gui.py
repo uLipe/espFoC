@@ -994,7 +994,9 @@ ApplicationWindow {
             Button {
                 text: (step + 1) + ". " + ["Phase map", "Identify", "Cogging learn"][step]
                 Layout.preferredWidth: 190
-                enabled: backend.connected && unlocked && !done && backend.busy === 0
+                // A done step can run again; the board discards it and the
+                // steps after it.
+                enabled: backend.connected && unlocked && backend.busy === 0
                 onClicked: start()
             }
             Item { Layout.fillWidth: true }
