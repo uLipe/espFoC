@@ -53,8 +53,9 @@ RTS released, so connecting does not reset the board.
 
 1. **Connect**: pick the board's serial port, press *Connect*. The board
    answers with its limits (pole pairs, slider ranges).
-2. **Commission**, in order; each button unlocks when the previous step is
-   done, and the log under them shows what the board reports:
+2. **Commission**, in order; a step unlocks once the one before it is done,
+   a done step can run again, and the log under them shows what the board
+   reports:
    1. *Phase map*: which bridge output drives which phase, current signs,
       encoder zero and direction (~4 s).
    2. *Identify*: resistance, inductance, flux, acceleration per amp, inertia,
@@ -72,6 +73,31 @@ RTS released, so connecting does not reset the board.
    abort or fault (overspeed, current trip, encoder lost). Phase map and
    identification cannot be interrupted half way: STOP during them reboots
    the board, with the bridge held off across the reset.
+
+### Commissioning across reboots
+
+With **Keep the commissioning results across reboots (NVS)** on (the
+default, `CONFIG_EXAMPLE_GUI_PERSIST`), each step saves its result to NVS
+when it finishes: the phase map with the encoder zero and direction, the
+identified plant, the cogging table. On boot the board applies them in order
+and logs `nvs: saved commissioning found, restoring`, one
+`nvs: <step> restored` per step, and on every connect
+`nvs: running on saved commissioning: map ident cog; any step can run again`.
+With all three back it is ready to drive; pick a mode.
+
+- **Running a step again** discards it and every step after it, in NVS too:
+  a new phase map needs a new identification and cogging learn, a new
+  identification a new cogging learn.
+- **A saved step is discarded** when it is corrupt, from another firmware
+  format, or when the board configuration it was taken with changed (pins,
+  pole pairs, DC link, PWM, shunt, gain, encoder bus, cogging bins). The log
+  says which and why, and that step and the ones after it run again.
+- **Not detected:** a motor swapped for another of the same configuration,
+  or an encoder magnet remounted. Run the phase map again after either.
+- Saving writes flash, so the bridge is off while a step is saved; after a
+  cogging learn the controller stops for that moment and starts again.
+
+With the option off, nothing is saved and every boot starts at step 1.
 
 The board clamps every reference to the ranges in `menuconfig`
 (**espFoC example: sensored GUI → GUI limits**), whatever the host sends:

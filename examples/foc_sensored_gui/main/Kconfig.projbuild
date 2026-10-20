@@ -182,4 +182,19 @@ menu "espFoC example: sensored GUI"
 
     endmenu
 
+    config EXAMPLE_GUI_PERSIST
+        bool "Keep the commissioning results across reboots (NVS)"
+        default y
+        help
+            Each commissioning step saves its result to NVS. On boot the
+            saved steps are restored and their buttons stay available: any
+            step can be run again, which discards it and the steps after it
+            and saves the new result. A result measured under other board
+            settings (pole pairs, DC link, PWM, current sense, encoder
+            wiring) is discarded.
+
+            The restored encoder zero and cogging table only hold while the
+            encoder stays mounted as it was; run phase map again after
+            touching it.
+
 endmenu
