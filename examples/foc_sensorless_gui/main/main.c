@@ -1051,6 +1051,19 @@ void app_main(void)
         }
     }
 
+    /*
+     * One short bridge session before anything else uses the inverter. On the
+     * first session after reset the observer locks 45-60 degrees off during the
+     * open-loop spin-up and the launch fails; later sessions lock within about
+     * 30 degrees. Commissioning used to be that first session and absorbed it. A
+     * restored board launches straight away, so it gets the session here. The
+     * register left different by a never-run inverter is not identified yet.
+     */
+    inverter->set_duties(inverter, Q16_HALF, Q16_HALF, Q16_HALF);
+    if (inverter->enable(inverter) == ESP_OK) {
+        inverter->disable(inverter);
+    }
+
     send_info();
 #if CONFIG_EXAMPLE_GUI_PERSIST
     restore_commissioning();

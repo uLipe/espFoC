@@ -75,6 +75,12 @@ board configuration (pins, pole pairs, DC link, PWM, shunt, gain) is
 discarded with a log line saying why, and runs again. A different motor of
 the same configuration is not detected; commission it again.
 
+A restored board launches without a commissioning step before it, so the
+example turns the bridge on and off once at boot: the first launch on a
+never-run inverter fails (see the
+[sensorless chapter](../../doc/manual/08_sensorless_stack.md#limits-and-pitfalls),
+Limits and pitfalls).
+
 ## Getting started
 
 ### Board
