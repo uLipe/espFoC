@@ -5,5 +5,5 @@ else()
     set(uart_ll_component hal)
 endif()
 
-idf_component_register(SRCS "main.c"
-                       PRIV_REQUIRES espFoC ${uart_ll_component})
+idf_component_register(SRCS "main.c" "commissioning_store.c"
+                       PRIV_REQUIRES espFoC ${uart_ll_component} nvs_flash esp_rom)

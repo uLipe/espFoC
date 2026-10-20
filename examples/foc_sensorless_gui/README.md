@@ -33,7 +33,7 @@ without the AS5600: the motor has only its three phase wires to the inverter.
 ## Using it
 
 1. **Connect**: pick the board's serial port, press *Connect*.
-2. **Commission**, in order:
+2. **Commission**, in order (a done step can run again):
    1. *Phase map*: which bridge output drives which phase and the current
       signs, from currents only (~3 s).
    2. *Identify*: resistance, inductance and flux (~20 s, the shaft spins).
@@ -59,6 +59,21 @@ motor is stopped. The board clamps every reference to the ranges in
 `menuconfig` (**espFoC example: sensorless GUI → GUI limits**). The overspeed
 abort (1.25 × the rated 2300 rpm) protects torque mode, where an unloaded
 shaft keeps speeding up.
+
+### Commissioning across reboots
+
+With **Keep the commissioning results across reboots (NVS)** on (the
+default, `CONFIG_EXAMPLE_GUI_PERSIST`), the phase map and the identified
+plant are saved to NVS when each step finishes and applied again on boot,
+which ends armed: set a reference and press *Start*. The log reads
+`nvs: saved commissioning found, restoring`, then `nvs: <step> restored`,
+and on every connect `nvs: running on saved commissioning: map ident`.
+
+Running the phase map again discards the identification too. A saved step
+that is corrupt, from another firmware format or taken with a different
+board configuration (pins, pole pairs, DC link, PWM, shunt, gain) is
+discarded with a log line saying why, and runs again. A different motor of
+the same configuration is not detected; commission it again.
 
 ## Getting started
 

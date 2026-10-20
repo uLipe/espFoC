@@ -167,4 +167,15 @@ menu "espFoC example: sensorless GUI"
 
     endmenu
 
+    config EXAMPLE_GUI_PERSIST
+        bool "Keep the commissioning results across reboots (NVS)"
+        default y
+        help
+            Phase map and identification save their results to NVS. On
+            boot the saved steps are restored, the controller is armed and
+            the step buttons stay available: a step can be run again, which
+            discards it and the step after it and saves the new result. A
+            result measured under other board settings (pole pairs, DC link,
+            PWM, current sense) is discarded.
+
 endmenu
