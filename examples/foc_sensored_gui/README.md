@@ -67,7 +67,9 @@ RTS released, so connecting does not reset the board.
 3. **Drive**: choose *Torque* (A), *Speed* (rpm) or *Position* (deg). Set the
    slider's *min* and *max*, move the slider; *Reverse direction* flips the
    sign of the reference. Torque and speed start at 0; position starts
-   where the shaft is, so changing mode never makes the shaft jump.
+   where the shaft is, so changing mode never makes the shaft jump. Entering
+   position takes off the whole turns speed or torque added, so the angle is
+   back within half a turn of 0 deg, the same shaft point as before.
 4. **STOP** (or *Esc*) turns the bridge off. Selecting a mode afterwards
    starts the controller again; commissioning is kept. STOP also clears an
    abort or fault (overspeed, current trip, encoder lost). Phase map and

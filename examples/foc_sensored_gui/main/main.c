@@ -163,6 +163,9 @@ static volatile uint8_t steps_done;
 static volatile uint8_t busy;
 static volatile bool controller_ready;
 static volatile uint8_t active_mode = ESP_FOC_SD_MODE_POSITION;
+/* Whole turns between the shaft and the origin when position mode was last
+ * entered, taken off every angle the GUI sees or sends. */
+static volatile int32_t turns_folded;
 
 /* ------------------------------------------------------------------------- */
 
@@ -310,6 +313,9 @@ static void send_telemetry(void)
         if (status.mode == ESP_FOC_SD_MODE_TORQUE) {
             status.w_ref_rads = status.we_rads;
         }
+        const float fold_rad = (float)turns_folded * 360.0f / DEG_PER_RAD;
+        status.theta_m_rad -= fold_rad;
+        status.theta_ref_rad -= fold_rad;
     } else {
         /* No controller yet: show the shaft angle the encoder last latched,
          * so the position scope already moves during commissioning. */
@@ -671,12 +677,29 @@ static void build_controller_config(void)
     controller_config.on_event = on_controller_event;
 }
 
+/*
+ * Speed and torque can leave the shaft many turns from the origin, past the
+ * GUI's position limit, and the slider would then have no room. Entering
+ * position mode takes the whole turns off, so the angle comes back within
+ * half a turn of the origin, the same physical point the cogging learn set.
+ */
+static void fold_turns(void)
+{
+    esp_foc_sensored_status_t status;
+    memset(&status, 0, sizeof(status));
+    esp_foc_sensored_get_status(MOTOR_AXIS, &status);
+    turns_folded = (int32_t)lroundf(status.theta_m_rad * DEG_PER_RAD / 360.0f);
+}
+
 static esp_err_t start_controller(void)
 {
     esp_err_t err = esp_foc_sensored_run(MOTOR_AXIS);
     if (err == ESP_OK) {
         esp_foc_sensored_set_speed_slew(MOTOR_AXIS, GUI_ACCEL_RPM_S / 60.0f * (float)POLE_PAIRS);
         err = esp_foc_sensored_set_mode(MOTOR_AXIS, (esp_foc_sensored_mode_t)active_mode);
+    }
+    if ((err == ESP_OK) && (active_mode == ESP_FOC_SD_MODE_POSITION)) {
+        fold_turns();
     }
     return err;
 }
@@ -695,6 +718,7 @@ static esp_err_t apply_plant(void)
     }
     controller_ready = true;
     active_mode = ESP_FOC_SD_MODE_POSITION;
+    turns_folded = 0;
     return ESP_OK;
 }
 
@@ -830,6 +854,7 @@ static esp_err_t learn_cogging(void)
     }
 #endif
     /* Position references from the GUI are measured from here. */
+    turns_folded = 0;
     return esp_foc_sensored_set_origin(MOTOR_AXIS);
 }
 
@@ -952,8 +977,8 @@ static esp_err_t apply_reference(float value)
         return esp_foc_sensored_set_speed_ref_hz(
             MOTOR_AXIS, clampf(value, GUI_MAX_RPM) / 60.0f * (float)POLE_PAIRS);
     case ESP_FOC_SD_MODE_POSITION:
-        return esp_foc_sensored_set_position_ref_rad(MOTOR_AXIS,
-                                                     clampf(value, GUI_MAX_DEG) / DEG_PER_RAD);
+        return esp_foc_sensored_set_position_ref_rad(
+            MOTOR_AXIS, (clampf(value, GUI_MAX_DEG) + (float)turns_folded * 360.0f) / DEG_PER_RAD);
     default:
         return ESP_ERR_INVALID_STATE;
     }
@@ -1027,9 +1052,14 @@ static void handle_command(uint8_t type, const uint8_t *payload, uint8_t len)
             err = ESP_ERR_INVALID_STATE;
             break;
         }
+        const uint8_t was = active_mode;
         active_mode = payload[0];
         if (esp_foc_sensored_get_state(MOTOR_AXIS) == ESP_FOC_SD_STATE_RUNNING) {
             err = esp_foc_sensored_set_mode(MOTOR_AXIS, (esp_foc_sensored_mode_t)active_mode);
+            if ((err == ESP_OK) && (was != ESP_FOC_SD_MODE_POSITION) &&
+                (active_mode == ESP_FOC_SD_MODE_POSITION)) {
+                fold_turns();
+            }
         } else if (esp_foc_sensored_get_state(MOTOR_AXIS) == ESP_FOC_SD_STATE_IDLE) {
             /* After a STOP: start the controller again, straight in this mode. */
             err = start_job(CMD_MODE, BUSY_START);
