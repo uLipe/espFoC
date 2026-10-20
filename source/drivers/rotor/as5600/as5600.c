@@ -335,6 +335,32 @@ static esp_err_t api_calibrate_offset(esp_foc_rotor_sensor_t *self, int samples)
     return ESP_OK;
 }
 
+static esp_err_t api_get_offset(const esp_foc_rotor_sensor_t *self, q16_t *offset_rad)
+{
+    const esp_foc_as5600_obj_t *o = obj_from_const(self);
+    if (!o->inited) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    *offset_rad = o->offset_rad;
+    return ESP_OK;
+}
+
+static esp_err_t api_set_offset(esp_foc_rotor_sensor_t *self, q16_t offset_rad)
+{
+    esp_foc_as5600_obj_t *o = obj_from(self);
+    if (!o->inited) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    o->offset_rad = q16_wrap_pi(offset_rad);
+    if (o->have_prev) {
+        o->pos_q16 = apply_offset_invert(o, raw_to_mech_rad(o->prev_raw));
+    }
+    o->vel_q16 = 0;
+    o->have_prev = false;
+    o->missed = 0;
+    return ESP_OK;
+}
+
 static uint32_t api_caps(const esp_foc_rotor_sensor_t *self)
 {
     const esp_foc_as5600_obj_t *o = obj_from_const(self);
@@ -390,6 +416,8 @@ static void bind_vtable(esp_foc_as5600_obj_t *o)
     o->iface.fetch = api_fetch;
     o->iface.fetch_start = api_fetch_start;
     o->iface.calibrate_offset = api_calibrate_offset;
+    o->iface.get_offset = api_get_offset;
+    o->iface.set_offset = api_set_offset;
     o->iface.caps = api_caps;
     o->iface.step = api_step;
     o->iface.snapshot = api_snapshot;
