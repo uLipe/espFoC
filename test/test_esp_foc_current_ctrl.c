@@ -230,6 +230,53 @@ TEST_CASE("current_ctrl both controllers track iq and hold id at zero", "[espFoC
     }
 }
 
+TEST_CASE("current_ctrl PI at fs/20 settles with two periods of delay", "[espFoC][current_ctrl]")
+{
+    /* Bench winding, sample + PWM-update delay of 2 Ts: ~51 deg of phase
+     * margin, so ~18 % overshoot, then a clean settle with no hunt. */
+    const float rs = 3.8f, ls = 464e-6f, iqr = 0.5f;
+    esp_foc_current_pi_t pi;
+    esp_foc_current_ctrl_t *c = esp_foc_current_pi_bind(&pi);
+    esp_foc_current_ctrl_design_t d = design_default();
+    d.rs_ohm = rs;
+    d.ls_h = ls;
+    d.bw_hz = FS / 20.0f;
+    d.gain_scale = 1.0f;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_current_ctrl_design(c, &d));
+
+    const float a = expf(-rs / ls * TS);
+    const float b_u = (1.0f - a) / rs * VDC;
+    float iq = 0.0f, id = 0.0f, uq1 = 0.0f, uq2 = 0.0f, ud1 = 0.0f, ud2 = 0.0f;
+    float peak = 0.0f, worst_tail = 0.0f, worst_id = 0.0f;
+    int k90 = -1;
+    for (int k = 0; k < 2000; k++) {
+        q16_t vd, vq;
+        esp_foc_current_ctrl_update(c, 0, q16_from_float(iqr), q16_from_float(id),
+                                    q16_from_float(iq), &vd, &vq);
+        clamp_circle(&vd, &vq);
+        esp_foc_current_ctrl_set_applied(c, vd, vq);
+        iq = a * iq + b_u * uq2;
+        id = a * id + b_u * ud2;
+        uq2 = uq1;
+        ud2 = ud1;
+        uq1 = q16_to_float(vq);
+        ud1 = q16_to_float(vd);
+        peak = fmaxf(peak, iq);
+        worst_id = fmaxf(worst_id, fabsf(id));
+        if (k90 < 0 && iq >= 0.9f * iqr) {
+            k90 = k;
+        }
+        if (k >= 1500) {
+            worst_tail = fmaxf(worst_tail, fabsf(iq - iqr));
+        }
+    }
+    TEST_ASSERT_TRUE(k90 >= 0 && k90 < 20);
+    TEST_ASSERT_TRUE(peak < 1.25f * iqr);
+    TEST_ASSERT_FLOAT_WITHIN(0.003f, iqr, iq);
+    TEST_ASSERT_TRUE(worst_tail < 0.003f);
+    TEST_ASSERT_TRUE(worst_id < 0.003f);
+}
+
 TEST_CASE("current_ctrl ADRC with an exact feedforward adds nothing", "[espFoC][current_ctrl]")
 {
     esp_foc_current_adrc_t ad;

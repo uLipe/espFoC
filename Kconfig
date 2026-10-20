@@ -404,11 +404,19 @@ menu "espFoC Settings"
             config ESP_FOC_SD_I_BW_HZ
                 int "Current loop bandwidth [Hz]"
                 range 50 5000
+                default 1000 if ESP_FOC_SD_CURRENT_CTRL_PI
                 default 200
+                help
+                    PI default is PWM / 20 at 20 kHz. With the 2 Ts from
+                    the current sample to the duty acting on the winding
+                    that leaves ~51 deg of phase margin (~18 % step
+                    overshoot). Scale it with the PWM rate; PWM / 25 gives
+                    ~58 deg.
 
             config ESP_FOC_SD_I_BACKOFF_PERMIL
                 int "Current loop backoff [permil]"
                 range 100 1000
+                default 1000 if ESP_FOC_SD_CURRENT_CTRL_PI
                 default 500
                 help
                     PI: scales the IMC-zoh gains. ADRC: scales the loop
