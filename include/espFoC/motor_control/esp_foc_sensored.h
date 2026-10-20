@@ -6,6 +6,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "sdkconfig.h"
@@ -365,6 +366,27 @@ esp_err_t esp_foc_sensored_cogging_learn(uint8_t axis, uint32_t timeout_ms,
                                          esp_foc_sensored_cogging_info_t *info);
 esp_err_t esp_foc_sensored_cogging_enable(uint8_t axis, bool on);
 void esp_foc_sensored_get_cogging_info(uint8_t axis, esp_foc_sensored_cogging_info_t *info);
+
+/**
+ * Copies the table out: iq [A, Q16] per mechanical bin, bin 0 at the rotor
+ * sensor zero, n == CONFIG_ESP_FOC_SD_COG_BINS. The table is only meaningful
+ * on the same sensor zero and direction it was learned on.
+ *
+ * @return ESP_OK, ESP_ERR_INVALID_ARG on a size mismatch, or
+ *         ESP_ERR_INVALID_STATE when nothing was learned or loaded.
+ */
+esp_err_t esp_foc_sensored_cogging_get_table(uint8_t axis, q16_t *bins, size_t n);
+
+/**
+ * Installs a table from esp_foc_sensored_cogging_get_table and enables it,
+ * in any state but LEARNING. info, optional, is what get_cogging_info
+ * reports afterwards; NULL reports the loaded table with passes = 0.
+ *
+ * @return ESP_OK, ESP_ERR_INVALID_STATE, or ESP_ERR_INVALID_ARG on a size
+ *         mismatch or an entry beyond ±i_max_a.
+ */
+esp_err_t esp_foc_sensored_cogging_load(uint8_t axis, const q16_t *bins, size_t n,
+                                        const esp_foc_sensored_cogging_info_t *info);
 
 esp_foc_sensored_state_t esp_foc_sensored_get_state(uint8_t axis);
 void esp_foc_sensored_get_status(uint8_t axis, esp_foc_sensored_status_t *st);
