@@ -471,6 +471,16 @@ move the ceiling without moving the gains.
   off, so `coast_ms` is the only wait for it to stop. A launch into a shaft that
   still turns aligns and calibrates the current zero against its back EMF.
   Increase `coast_ms` for loads that spin down slowly.
+- **The first launch after reset needs a prior bridge session.** On the first
+  inverter session after a reset the observer locks 45–60° off during the I-f
+  spin-up and the launch fails in the handoff settle (`WE_DROP`); any later
+  session locks within about 30°. The cause in the inverter is not identified
+  yet. Phase discovery and identification are such a session, so a board
+  commissioned at every boot never sees it. An application that launches
+  straight from saved parameters runs one `enable()` / `disable()` of the
+  inverter at 50 % duty first, as
+  [`foc_sensorless_gui`](../../examples/foc_sensorless_gui/README.md) does after
+  `setup_inverter()`.
 - **Identified parameters matter.** The current PI, the observer, the plateau, the
   lock proof and the guards all come from `rs_ohm`, `ls_h` and `psi_wb`. An
   under-identified `psi_wb` raises the derived plateau, which is backwards from
