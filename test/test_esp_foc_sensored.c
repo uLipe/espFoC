@@ -683,7 +683,94 @@ TEST_CASE("sensored cogging learn converges and flattens the speed error",
     TEST_ASSERT_LESS_THAN_FLOAT(0.5f * rms_raw, rms_cog);
     TEST_ASSERT_LESS_THAN_FLOAT(0.5f * rms_off, rms_cog);
     TEST_ASSERT_EQUAL(0, s_ev_n[ESP_FOC_SD_EV_ABORT]);
+
+    /* A fresh init on the same absolute encoder, as after a reboot: the
+     * exported table has to flatten the error as well as the learned one. */
+    static q16_t table[CONFIG_ESP_FOC_SD_COG_BINS];
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_cogging_get_table(0, table,
+                                                                 CONFIG_ESP_FOC_SD_COG_BINS));
+    plant_up(&p);
+    bench_up_cfg(&c);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,
+                      esp_foc_sensored_cogging_get_table(0, table, CONFIG_ESP_FOC_SD_COG_BINS));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_cogging_load(0, table, CONFIG_ESP_FOC_SD_COG_BINS,
+                                                            &info));
+    esp_foc_sensored_cogging_info_t back;
+    esp_foc_sensored_get_cogging_info(0, &back);
+    TEST_ASSERT_EQUAL_UINT32(info.passes, back.passes);
+    TEST_ASSERT_EQUAL_FLOAT(info.p2p_a, back.p2p_a);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_set_mode(0, ESP_FOC_SD_MODE_VELOCITY));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_set_speed_ref_hz(0, 7.0f));
+    esp_foc_sleep_ms(1500);
+    const float rms_loaded = werr_rms_hz(2000);
+    printf("sd cogging werr rms after reload: %.3f Hz\n", rms_loaded);
+    TEST_ASSERT_LESS_THAN_FLOAT(0.5f * rms_raw, rms_loaded);
+    TEST_ASSERT_LESS_THAN_FLOAT(1.5f * rms_cog, rms_loaded);
+    TEST_ASSERT_EQUAL(0, s_ev_n[ESP_FOC_SD_EV_ABORT]);
     bench_down();
+}
+
+TEST_CASE("sensored cogging table export and load round-trip and refuse bad input",
+          "[espFoC][sensored]")
+{
+    static q16_t table[CONFIG_ESP_FOC_SD_COG_BINS];
+    static q16_t back[CONFIG_ESP_FOC_SD_COG_BINS];
+    const size_t n = CONFIG_ESP_FOC_SD_COG_BINS;
+    esp_foc_sensored_config_t c;
+
+    plant_up(&k_plant);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, esp_foc_sensored_cogging_get_table(0, back, n));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, esp_foc_sensored_cogging_load(0, table, n, NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      esp_foc_sensored_cogging_load(CONFIG_ESP_FOC_SD_MAX_AXES, table, n, NULL));
+
+    cfg_mock(&c, ESP_FOC_SD_CONTROL_TORQUE);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_init(&s_m.base, &s_r.base, &c));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, esp_foc_sensored_cogging_get_table(0, back, n));
+
+    const q16_t i_max = q16_from_float(c.i_max_a);
+    for (size_t i = 0; i < n; i++) {
+        /* Both ceilings and a sign change on every bin. */
+        table[i] = (i == 0u) ? i_max : (i == 1u) ? -i_max : (q16_t)((i & 1u) ? -(int32_t)i : (int32_t)i);
+    }
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_foc_sensored_cogging_load(0, NULL, n, NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_foc_sensored_cogging_load(0, table, n - 1u, NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_foc_sensored_cogging_load(0, table, n + 1u, NULL));
+    table[n - 1u] = i_max + 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_foc_sensored_cogging_load(0, table, n, NULL));
+    table[n - 1u] = -i_max - 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_foc_sensored_cogging_load(0, table, n, NULL));
+    /* A refused table installs nothing. */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, esp_foc_sensored_cogging_get_table(0, back, n));
+    esp_foc_sensored_status_t st;
+    esp_foc_sensored_get_status(0, &st);
+    TEST_ASSERT_FALSE(st.cogging_on);
+
+    table[n - 1u] = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_cogging_load(0, table, n, NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_foc_sensored_cogging_get_table(0, back, n - 1u));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_foc_sensored_cogging_get_table(0, NULL, n));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_cogging_get_table(0, back, n));
+    TEST_ASSERT_EQUAL_INT32_ARRAY(table, back, n);
+    esp_foc_sensored_get_status(0, &st);
+    TEST_ASSERT_TRUE(st.cogging_on);
+    esp_foc_sensored_cogging_info_t info;
+    esp_foc_sensored_get_cogging_info(0, &info);
+    TEST_ASSERT_EQUAL_UINT32(0u, info.passes);
+    TEST_ASSERT_EQUAL_UINT32(n, info.bins);
+    TEST_ASSERT_EQUAL_UINT32(n, info.bins_mapped);
+    TEST_ASSERT_FLOAT_WITHIN(1.0e-4f, 2.0f * c.i_max_a, info.p2p_a);
+
+    /* Off and on again keeps the table; a new init clears it. */
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_cogging_enable(0, false));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_cogging_enable(0, true));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_cogging_get_table(0, back, n));
+    TEST_ASSERT_EQUAL_INT32_ARRAY(table, back, n);
+    esp_foc_sensored_deinit(0);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_init(&s_m.base, &s_r.base, &c));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, esp_foc_sensored_cogging_get_table(0, back, n));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, esp_foc_sensored_cogging_enable(0, true));
+    bench_reset();
 }
 
 #if CONFIG_ESP_FOC_SD_MAX_AXES >= 2

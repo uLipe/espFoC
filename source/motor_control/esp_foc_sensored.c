@@ -1983,6 +1983,65 @@ void esp_foc_sensored_get_cogging_info(uint8_t axis, esp_foc_sensored_cogging_in
     *info = sd->cog_info;
 }
 
+esp_err_t esp_foc_sensored_cogging_get_table(uint8_t axis, q16_t *bins, size_t n)
+{
+    esp_err_t err;
+    sd_t *sd = sd_ready(axis, &err);
+    if (sd == NULL) {
+        return err;
+    }
+    if ((bins == NULL) || (n != SD_BINS)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!sd->cog_valid || (sd->state == ESP_FOC_SD_STATE_LEARNING)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    memcpy(bins, sd->cog, sizeof(q16_t) * SD_BINS);
+    return ESP_OK;
+}
+
+esp_err_t esp_foc_sensored_cogging_load(uint8_t axis, const q16_t *bins, size_t n,
+                                        const esp_foc_sensored_cogging_info_t *info)
+{
+    esp_err_t err;
+    sd_t *sd = sd_ready(axis, &err);
+    if (sd == NULL) {
+        return err;
+    }
+    if ((bins == NULL) || (n != SD_BINS)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (sd->state == ESP_FOC_SD_STATE_LEARNING) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    q16_t lo = 0;
+    q16_t hi = 0;
+    for (uint32_t i = 0; i < SD_BINS; i++) {
+        if ((bins[i] > sd->i_max) || (bins[i] < -sd->i_max)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        lo = q16_min(lo, bins[i]);
+        hi = q16_max(hi, bins[i]);
+    }
+    /* The slot reads the table while cog_on; off first so it never mixes
+     * the old table with the new one. */
+    sd->cog_on = false;
+    for (uint32_t i = 0; i < SD_BINS; i++) {
+        sd->cog[i] = bins[i];
+    }
+    if (info != NULL) {
+        sd->cog_info = *info;
+    } else {
+        memset(&sd->cog_info, 0, sizeof(sd->cog_info));
+        sd->cog_info.p2p_a = q16_to_float(q16_sub(hi, lo));
+        sd->cog_info.bins_mapped = SD_BINS;
+    }
+    sd->cog_info.bins = SD_BINS;
+    sd->cog_valid = true;
+    sd->cog_on = true;
+    return ESP_OK;
+}
+
 esp_foc_sensored_state_t esp_foc_sensored_get_state(uint8_t axis)
 {
     sd_t *sd = sd_axis(axis);
