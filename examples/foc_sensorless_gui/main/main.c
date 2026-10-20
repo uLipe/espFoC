@@ -46,6 +46,7 @@
 #include "espFoC/motor_control/esp_foc_phase_discover.h"
 #include "espFoC/motor_control/esp_foc_sensorless.h"
 #include "espFoC/osal/esp_foc_osal.h"
+#include "commissioning_store.h"
 
 #define MOTOR_AXIS 0u
 
@@ -120,6 +121,7 @@
 typedef enum {
     STEP_MAP = 0,
     STEP_IDENT,
+    STEP_COUNT,
 } step_t;
 
 typedef enum {
@@ -140,8 +142,14 @@ static const char *TAG = "gui";
 
 static esp_foc_inverter_t *inverter;
 
-static esp_foc_phase_discover_result_t phase_map;
-static esp_foc_motor_id_result_t plant;
+/* What commissioning measured, one member per step: enough to rebuild the
+ * controller without running a step again. */
+typedef struct {
+    esp_foc_phase_discover_result_t phase_map;
+    esp_foc_motor_id_result_t plant;
+} commissioning_t;
+
+static commissioning_t record;
 static esp_foc_sensorless_config_t controller_config;
 
 static volatile uint8_t steps_done;
@@ -378,6 +386,95 @@ static esp_err_t setup_inverter(void)
 }
 
 /* ---------------------------------------------------------------------------
+ * Commissioning results in NVS (CONFIG_EXAMPLE_GUI_PERSIST)
+ *
+ * One blob per step. Running a step discards it and the step after it,
+ * which was measured on top of it. Saves and erases happen with the bridge
+ * off: the controller is torn down or only armed.
+ * ------------------------------------------------------------------------- */
+/* Steps running on restored results; reported again on PING. */
+static volatile uint8_t steps_restored;
+
+#if CONFIG_EXAMPLE_GUI_PERSIST
+static const char *const step_keys[STEP_COUNT] = {"map", "ident"};
+static const char *const step_names[STEP_COUNT] = {"phase map", "identification"};
+
+static void *step_data(step_t step, size_t *size)
+{
+    if (step == STEP_MAP) {
+        *size = sizeof(record.phase_map);
+        return &record.phase_map;
+    }
+    *size = sizeof(record.plant);
+    return &record.plant;
+}
+
+/* Everything a stored result depends on besides the motor itself. */
+static uint32_t board_hash(void)
+{
+    const int32_t board[] = {
+        POLE_PAIRS, CONFIG_EXAMPLE_DC_LINK_MILLIVOLT, CONFIG_ESP_FOC_PWM_RATE_HZ,
+        CONFIG_EXAMPLE_PWM_DEAD_TIME_NS, CONFIG_EXAMPLE_SHUNT_MILLIOHM,
+        CONFIG_EXAMPLE_CURRENT_AMP_GAIN, CONFIG_EXAMPLE_PWM_U_HIGH_GPIO,
+        CONFIG_EXAMPLE_PWM_U_LOW_GPIO, CONFIG_EXAMPLE_PWM_V_HIGH_GPIO,
+        CONFIG_EXAMPLE_PWM_V_LOW_GPIO, CONFIG_EXAMPLE_PWM_W_HIGH_GPIO,
+        CONFIG_EXAMPLE_PWM_W_LOW_GPIO, CONFIG_EXAMPLE_CURRENT_U_GPIO,
+        CONFIG_EXAMPLE_CURRENT_V_GPIO, CONFIG_EXAMPLE_CURRENT_W_GPIO,
+    };
+    return commissioning_store_crc(0, board, sizeof(board));
+}
+
+static void save_step(step_t step)
+{
+    size_t size;
+    const void *data = step_data(step, &size);
+    const esp_err_t err = commissioning_store_save(step_keys[step], data, size);
+    if (err == ESP_OK) {
+        log_line("nvs: %s saved", step_names[step]);
+    } else {
+        log_line("nvs: %s not saved (%s)", step_names[step], esp_err_to_name(err));
+    }
+}
+
+static void erase_steps_from(step_t first)
+{
+    for (unsigned s = first; s < STEP_COUNT; s++) {
+        const esp_err_t err = commissioning_store_erase(step_keys[s]);
+        if (err != ESP_OK) {
+            log_line("nvs: %s not erased (%s)", step_names[s], esp_err_to_name(err));
+        }
+    }
+}
+#else
+static void save_step(step_t step)
+{
+    (void)step;
+}
+
+static void erase_steps_from(step_t first)
+{
+    (void)first;
+}
+#endif
+
+static void forget_steps_from(step_t first)
+{
+    const uint8_t keep = (uint8_t)((1u << first) - 1u);
+    steps_done &= keep;
+    steps_restored &= keep;
+}
+
+static void report_restored(void)
+{
+    const uint8_t mask = steps_restored;
+    if (mask == 0u) {
+        return;
+    }
+    log_line("nvs: running on saved commissioning:%s%s; any step can run again",
+             (mask & (1u << STEP_MAP)) ? " map" : "", (mask & (1u << STEP_IDENT)) ? " ident" : "");
+}
+
+/* ---------------------------------------------------------------------------
  * Commissioning step 1: phase discovery, currents only
  * ------------------------------------------------------------------------- */
 static void on_discover_event(void *context, const esp_foc_phase_discover_event_t *event)
@@ -402,9 +499,25 @@ static void on_discover_event(void *context, const esp_foc_phase_discover_event_
     }
 }
 
-static esp_err_t discover_phases(void)
+/* Puts the inverter where phase discovery left it. */
+static esp_err_t apply_phase_map(void)
 {
     static const char letters[] = "UVW";
+    const esp_foc_phase_map_t *map = &record.phase_map.map;
+
+    esp_err_t err = inverter->set_phase_map(inverter, map);
+    if (err != ESP_OK) {
+        log_line("map: not applied (%s)", esp_err_to_name(err));
+        return err;
+    }
+    log_line("map: U->%c(%+d) V->%c(%+d) W->%c(%+d)", letters[map->pwm_to_hw[0] % 3u],
+             map->i_sign[0], letters[map->pwm_to_hw[1] % 3u], map->i_sign[1],
+             letters[map->pwm_to_hw[2] % 3u], map->i_sign[2]);
+    return ESP_OK;
+}
+
+static esp_err_t discover_phases(void)
+{
     esp_foc_phase_discover_t discovery;
     esp_foc_phase_discover_config_t discovery_config;
 
@@ -413,21 +526,17 @@ static esp_err_t discover_phases(void)
     memset(&discovery, 0, sizeof(discovery));
     esp_foc_phase_discover_default_config(&discovery_config);
     discovery_config.on_event = on_discover_event;
-    memset(&phase_map, 0, sizeof(phase_map));
+    memset(&record.phase_map, 0, sizeof(record.phase_map));
     esp_err_t err = esp_foc_phase_discover_init(&discovery, inverter, NULL, &discovery_config);
     if (err == ESP_OK) {
-        err = esp_foc_phase_discover_run(&discovery, &phase_map);
+        err = esp_foc_phase_discover_run(&discovery, &record.phase_map);
     }
     esp_foc_phase_discover_cleanup(&discovery);
     if (err != ESP_OK) {
         log_line("map: failed (%s)", esp_err_to_name(err));
         return err;
     }
-    log_line("map: U->%c(%+d) V->%c(%+d) W->%c(%+d)",
-             letters[phase_map.map.pwm_to_hw[0] % 3u], phase_map.map.i_sign[0],
-             letters[phase_map.map.pwm_to_hw[1] % 3u], phase_map.map.i_sign[1],
-             letters[phase_map.map.pwm_to_hw[2] % 3u], phase_map.map.i_sign[2]);
-    return ESP_OK;
+    return apply_phase_map();
 }
 
 /* ---------------------------------------------------------------------------
@@ -509,8 +618,8 @@ static esp_err_t build_controller(void)
     controller_config.axis = MOTOR_AXIS;
     controller_config.pole_pairs = POLE_PAIRS;
     controller_config.fe_rated_hz = RATED_ELECTRICAL_HZ;
-    esp_foc_sensorless_config_from_motor_id(&controller_config, &plant);
-    esp_foc_sensorless_config_from_phase_map(&controller_config, &phase_map);
+    esp_foc_sensorless_config_from_motor_id(&controller_config, &record.plant);
+    esp_foc_sensorless_config_from_phase_map(&controller_config, &record.phase_map);
     controller_config.speed_loop = (active_mode == MODE_SPEED);
     /* Up to 10 Hz electrical the spin-up drives voltage (V/f) rather than
      * current, which breaks a cogging rotor loose. */
@@ -532,10 +641,35 @@ static esp_err_t build_controller(void)
     return err;
 }
 
+/* Builds and arms the controller from the identified plant. */
+static esp_err_t apply_plant(void)
+{
+    esp_err_t err = build_controller();
+    if (err == ESP_OK) {
+        log_line("ident: Rs %.3f ohm, Ls %.0f uH, psi %.0f uWb", (double)controller_config.rs_ohm,
+                 (double)(controller_config.ls_h * 1.0e6f),
+                 (double)(controller_config.psi_wb * 1.0e6f));
+    }
+    return err;
+}
+
 static void teardown_controller(void)
 {
     controller_ready = false;
     esp_foc_sensorless_deinit(MOTOR_AXIS);
+}
+
+/* Bridge off and controller gone, from any state: a step that runs again
+ * owns the inverter next. */
+static void drop_controller(void)
+{
+    if (!controller_ready) {
+        return;
+    }
+    launch_enabled = false;
+    reference = 0.0f;
+    esp_foc_sensorless_stop(MOTOR_AXIS);
+    teardown_controller();
 }
 
 /* ---------------------------------------------------------------------------
@@ -574,23 +708,62 @@ static esp_err_t identify_motor(void)
     id_config.vdc = DC_LINK_VOLTS;
     id_config.on_event = on_motor_id_event;
     /* No rotor sensor: identification runs on the currents and voltages. */
-    esp_err_t err = esp_foc_motor_id_run(inverter, NULL, &id_config, &plant);
+    esp_err_t err = esp_foc_motor_id_run(inverter, NULL, &id_config, &record.plant);
     if (err != ESP_OK) {
-        log_line("ident: failed at '%s' (%s)", esp_foc_motor_id_phase_name(plant.failed_at),
-                 esp_err_to_name(err));
+        log_line("ident: failed at '%s' (%s)",
+                 esp_foc_motor_id_phase_name(record.plant.failed_at), esp_err_to_name(err));
         return err;
     }
     send_progress(STEP_IDENT, 100);
 
-    err = build_controller();
+    err = apply_plant();
     if (err == ESP_OK) {
-        log_line("ident: Rs %.3f ohm, Ls %.0f uH, psi %.0f uWb", (double)controller_config.rs_ohm,
-                 (double)(controller_config.ls_h * 1.0e6f),
-                 (double)(controller_config.psi_wb * 1.0e6f));
+        save_step(STEP_IDENT);
         log_line("controller: armed, press Start");
     }
     return err;
 }
+
+/* ---------------------------------------------------------------------------
+ * Restore on boot: each saved step is applied in order, through the same
+ * apply_* calls the steps end with. The first step missing or refused ends
+ * the restore and discards the step after it. The controller ends armed,
+ * bridge off, as after identification.
+ * ------------------------------------------------------------------------- */
+#if CONFIG_EXAMPLE_GUI_PERSIST
+static void restore_commissioning(void)
+{
+    esp_err_t err = commissioning_store_init(board_hash());
+    if (err != ESP_OK) {
+        log_line("nvs: not available (%s), commissioning will not be kept",
+                 esp_err_to_name(err));
+        return;
+    }
+
+    for (unsigned s = STEP_MAP; s < STEP_COUNT; s++) {
+        size_t size;
+        void *data = step_data((step_t)s, &size);
+        err = commissioning_store_load(step_keys[s], data, size);
+        if ((s == STEP_MAP) && (err == ESP_OK)) {
+            log_line("nvs: saved commissioning found, restoring");
+        }
+        if (err == ESP_OK) {
+            err = (s == STEP_MAP) ? apply_phase_map() : apply_plant();
+        }
+        if (err != ESP_OK) {
+            if (err != ESP_ERR_NOT_FOUND) {
+                log_line("nvs: %s discarded (%s)", step_names[s], commissioning_store_reason(err));
+            }
+            memset(data, 0, size);
+            erase_steps_from((step_t)s);
+            break;
+        }
+        log_line("nvs: %s restored", step_names[s]);
+        steps_done |= 1u << s;
+        steps_restored |= 1u << s;
+    }
+}
+#endif
 
 /* ---------------------------------------------------------------------------
  * Worker: one blocking job at a time, off the RX loop so STOP is always heard
@@ -601,11 +774,18 @@ static void worker_task(void *arg)
     esp_err_t err;
 
     if (command == CMD_MAP) {
+        drop_controller();
+        forget_steps_from(STEP_MAP);
+        erase_steps_from(STEP_MAP);
         err = discover_phases();
         if (err == ESP_OK) {
             steps_done |= 1u << STEP_MAP;
+            save_step(STEP_MAP);
         }
     } else {
+        drop_controller();
+        forget_steps_from(STEP_IDENT);
+        erase_steps_from(STEP_IDENT);
         err = identify_motor();
         if (err == ESP_OK) {
             steps_done |= 1u << STEP_IDENT;
@@ -718,19 +898,21 @@ static void handle_command(uint8_t type, const uint8_t *payload, uint8_t len)
     switch (type) {
     case CMD_PING:
         send_info();
+        report_restored();
         return;
     case CMD_STOP:
         stop();
         break;
+    /* A step runs again whenever the step before it is done; the worker
+     * discards it and the step after it first. */
     case CMD_MAP:
-        err = ((busy != BUSY_NONE) || (steps_done != 0u)) ? ESP_ERR_INVALID_STATE
-                                                           : start_job(CMD_MAP, BUSY_MAP);
+        err = (busy != BUSY_NONE) ? ESP_ERR_INVALID_STATE : start_job(CMD_MAP, BUSY_MAP);
         if (err == ESP_OK) {
             return; /* the worker acknowledges when the step ends */
         }
         break;
     case CMD_IDENT:
-        err = ((busy != BUSY_NONE) || (steps_done != (1u << STEP_MAP)))
+        err = ((busy != BUSY_NONE) || ((steps_done & (1u << STEP_MAP)) == 0u))
                   ? ESP_ERR_INVALID_STATE
                   : start_job(CMD_IDENT, BUSY_IDENT);
         if (err == ESP_OK) {
@@ -870,7 +1052,16 @@ void app_main(void)
     }
 
     send_info();
-    log_line("board ready: press 1. Phase map");
+#if CONFIG_EXAMPLE_GUI_PERSIST
+    restore_commissioning();
+#endif
+    if (steps_done == COMMISSIONED) {
+        log_line("board ready: armed, set a reference and press Start, or run any step again");
+    } else if (steps_done != 0u) {
+        log_line("board ready: continue with the next step, or run any step again");
+    } else {
+        log_line("board ready: press 1. Phase map");
+    }
     if (esp_foc_task_spawn(telemetry_task, NULL, "gui_tel", 3072, TELEMETRY_PRIORITY, NULL) != 0) {
         ESP_LOGE(TAG, "telemetry task not started");
     }
