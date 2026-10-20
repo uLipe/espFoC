@@ -234,7 +234,8 @@ esp_foc_pid_set_applied(&pi_q, vq);                /* anti-windup */
   plant (gain `k_plant`, time constant `tau_s`) at `bw_hz < fs_hz/2`. The
   stacks use it for the current loops with `k_plant = Vdc/Rs`, `tau_s = Ls/Rs`;
   the sensored stack then scales the gains by
-  `CONFIG_ESP_FOC_SD_I_BACKOFF_PERMIL` (default 500).
+  `CONFIG_ESP_FOC_SD_I_BACKOFF_PERMIL` (default 1000 with the PI, 500 with
+  the ADRC).
 - `esp_foc_pid_design_integrator` designs a type-2 PI for an integrating plant
   `K/s` (speed loop, PLL), prewarped so the bandwidth lands at `bw_hz`. `zeta`
   must be in (0.4, 1.2); gains that do not fit Q16 (`kp >= 32000`,

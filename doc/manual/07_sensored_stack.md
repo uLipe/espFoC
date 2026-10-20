@@ -113,15 +113,19 @@ controllers can close it, chosen at build time with
 
 - **PI** (default). An internal-model (IMC) design for that plant sampled at
   the PWM rate: the PI cancels the winding's time constant and leaves a
-  first-order closed loop with bandwidth `i_bw_hz` (default 200 Hz). Both
-  gains are then scaled by `i_tune_backoff` (default 0.5) for margin. The d
+  first-order closed loop with bandwidth `i_bw_hz`. The default, 1 kHz, is
+  PWM/20: the bandwidth is set by the 2 Ts from the current sample to the
+  duty acting on the winding, not by the identified plant; that leaves ~51°
+  of phase margin (~18 % step overshoot). Both gains are
+  then scaled by `i_tune_backoff` (default 1.0, no backoff). The d
   and q PIs share the same gains, in per-unit of `Vdc` per amp. A non-zero
   `kp_i` or `ki_i` skips the design.
 - **ADRC** (active disturbance rejection control). An extended state observer
   (ESO) per axis estimates the current and everything the R-L model does not
   explain (back-EMF, d/q cross-coupling, dead time, parameter error); a
   proportional law then places the closed loop at
-  `wc = i_bw_hz · i_tune_backoff` (100 Hz with the defaults). The model uses
+  `wc = i_bw_hz · i_tune_backoff` (ADRC keeps its own defaults, 200 Hz × 0.5
+  = 100 Hz). The model uses
   `b0 = Vdc/L` and the winding pole `R/L`. The observer bandwidth is
   `wo = max(i_wo_ratio · wc, min(0.8 · R/(2π·L), PWM/16))`: never slower than
   the winding itself, so the ESO keeps up with the plant, and capped so
@@ -462,7 +466,7 @@ change them per axis in the struct.
 | `CONFIG_ESP_FOC_SD_PLL_BW_HZ` / `_PLL_ZETA_PERMIL` | 180 / 1000 | PLL bandwidth (Hz) and damping (1.0) |
 | `CONFIG_ESP_FOC_SD_PWM_DELAY_PERMIL` | 1500 | inverse-Park lead, 1.5 PWM periods |
 | `CONFIG_ESP_FOC_SD_I_MAX_MA` | 700 | `i_max_a`, 0.7 A |
-| `CONFIG_ESP_FOC_SD_I_BW_HZ` / `_I_BACKOFF_PERMIL` | 200 / 500 | current loop bandwidth (Hz); PI gains × 0.5, or ADRC `wc` = bandwidth × 0.5 |
+| `CONFIG_ESP_FOC_SD_I_BW_HZ` / `_I_BACKOFF_PERMIL` | PI 1000 / 1000, ADRC 200 / 500 | current loop bandwidth (Hz) and gain scale; PI at PWM/20, ADRC `wc` = bandwidth × backoff |
 | `CONFIG_ESP_FOC_SD_CURRENT_CTRL_PI` / `_ADRC` | PI | current controller |
 | `CONFIG_ESP_FOC_SD_ADRC_WO_RATIO` | 5 | ADRC: lower bound of the observer bandwidth, × `wc` (`i_wo_ratio`) |
 | `CONFIG_ESP_FOC_SD_ADRC_DELAY_TS` | 2 | ADRC: PWM periods from current sample to duty acting (`i_delay_ts`) |
