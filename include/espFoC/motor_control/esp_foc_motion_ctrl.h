@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "espFoC/utils/esp_foc_pi_q32.h"
 #include "espFoC/utils/esp_foc_q16.h"
 
 #ifdef __cplusplus
@@ -118,10 +119,7 @@ static inline q16_t esp_foc_motion_ctrl_update(esp_foc_motion_ctrl_t *c,
  * not push the output further into the clamp. */
 typedef struct {
     esp_foc_motion_ctrl_t iface;
-    int64_t kp_w_q32;
-    int64_t ki_ts_q32;
-    int64_t wi_q32;
-    int64_t wi_lim_q32;
+    esp_foc_pi_q32_t w;
     q16_t kp_pos;
     q16_t corr_max;
     q16_t wm_max;

@@ -10,7 +10,7 @@
 #include <math.h>
 #include <stddef.h>
 
-#define TRAJ_Q32 4294967296.0
+#include "espFoC/utils/esp_foc_design.h"
 
 esp_err_t esp_foc_traj_set_limits(esp_foc_traj_t *t, float a_max, float v_max)
 {
@@ -18,10 +18,10 @@ esp_err_t esp_foc_traj_set_limits(esp_foc_traj_t *t, float a_max, float v_max)
         return ESP_ERR_INVALID_ARG;
     }
     const double ts = 1.0 / (double)t->fs_hz;
-    const double a = (double)a_max * ts * ts * TRAJ_Q32;
-    const double v = (double)v_max * ts * TRAJ_Q32;
+    const double a = (double)a_max * ts * ts * ESP_FOC_Q32_ONE;
+    const double v = (double)v_max * ts * ESP_FOC_Q32_ONE;
     /* v^2 must fit int64 with headroom: under half a rad per sample. */
-    if (!(a >= 1.0) || !(v >= 1.0) || (v >= 0.5 * TRAJ_Q32)) {
+    if (!(a >= 1.0) || !(v >= 1.0) || (v >= 0.5 * ESP_FOC_Q32_ONE)) {
         return ESP_ERR_INVALID_ARG;
     }
     t->a_max = (int64_t)a;
