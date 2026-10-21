@@ -11,9 +11,8 @@
 #include "espFoC/osal/esp_foc_osal.h"
 #include "espFoC/utils/esp_foc_angle.h"
 #include "espFoC/utils/esp_foc_clarke.h"
-#include "espFoC/utils/esp_foc_park.h"
-#include "espFoC/utils/esp_foc_svm.h"
 #include "espFoC/utils/esp_foc_vlim.h"
+#include "esp_foc_modulate.h"
 
 #define PD_CANDIDATES      12
 #define PD_MIN_SAMPLES     3
@@ -42,11 +41,6 @@ static const uint8_t k_perms[6][3] = {
     {0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0},
 };
 
-static inline q16_t pd_abs(q16_t x)
-{
-    return (x < 0) ? q16_neg(x) : x;
-}
-
 static void pd_tez(void *arg)
 {
     esp_foc_phase_discover_t *pd = (esp_foc_phase_discover_t *)arg;
@@ -65,7 +59,7 @@ static void pd_tez(void *arg)
         return;
     }
     if (inv->is_faulted(inv)) {
-        inv->set_duties(inv, Q16_HALF, Q16_HALF, Q16_HALF);
+        esp_foc_bridge_neutral(inv);
         return;
     }
     if (dth != 0) {
@@ -73,16 +67,9 @@ static void pd_tez(void *arg)
     }
     q16_t s;
     q16_t c;
-    q16_t a;
-    q16_t b;
-    q16_t du;
-    q16_t dv;
-    q16_t dw;
     esp_foc_vlim_dq_mag(&d, &q, esp_foc_trigo_hw_magnitude(d, q), Q16_INV_SQRT3);
     esp_foc_trigo_hw_sincos(th, &s, &c);
-    esp_foc_inv_park(s, c, d, q, &a, &b);
-    esp_foc_svm(a, b, &du, &dv, &dw);
-    inv->set_duties(inv, du, dv, dw);
+    esp_foc_modulate(inv, s, c, d, q);
     if (dth != 0) {
         pd->theta = th;
     }
@@ -152,7 +139,7 @@ static void pd_park_idle(esp_foc_phase_discover_t *pd)
     if (!pd->bridge_on) {
         return;
     }
-    inv->set_duties(inv, Q16_HALF, Q16_HALF, Q16_HALF);
+    esp_foc_bridge_neutral(inv);
     inv->disable(inv);
     pd->bridge_on = false;
 }
@@ -173,11 +160,11 @@ static esp_err_t pd_apply_idle(esp_foc_phase_discover_t *pd, const esp_foc_phase
     if (err != ESP_OK) {
         return err;
     }
-    inv->set_duties(inv, Q16_HALF, Q16_HALF, Q16_HALF);
+    esp_foc_bridge_neutral(inv);
     /* Before the settle: calibrate holds i_limit off while the first frames
      * after re-arm can still carry the previous candidate's pulse. */
     inv->calibrate_currents(inv, pd->cfg.cal_rounds);
-    inv->set_duties(inv, Q16_HALF, Q16_HALF, Q16_HALF);
+    esp_foc_bridge_neutral(inv);
     esp_foc_sleep_ms(PD_ARM_SETTLE_MS);
     if (inv->is_faulted(inv)) {
         pd_park_idle(pd);
@@ -346,8 +333,8 @@ static esp_err_t pd_stage_a(esp_foc_phase_discover_t *pd, uint8_t attempt,
          * on the median of the measured population (split/id 0.643 against a
          * 0.600 gate) and refused whole sweeps.
          */
-        const int64_t score = (int64_t)o.d - 2 * (int64_t)pd_abs(o.q) -
-                              2 * (int64_t)pd_abs(q16_sub(o.v, o.w));
+        const int64_t score = (int64_t)o.d - 2 * (int64_t)q16_abs(o.q) -
+                              2 * (int64_t)q16_abs(q16_sub(o.v, o.w));
         const bool good = ok && !tripped && (o.d > pd->id_min);
         esp_foc_phase_discover_event_t e;
         pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_CANDIDATE, (int8_t)cand, attempt, &map, &o);
@@ -386,7 +373,7 @@ static esp_err_t pd_stage_c(esp_foc_phase_discover_t *pd, uint8_t attempt,
         if (err != ESP_OK) {
             return err;
         }
-        const bool good = ok && !tripped && (pd_abs(o.q) > pd->id_min);
+        const bool good = ok && !tripped && (q16_abs(o.q) > pd->id_min);
         esp_foc_phase_discover_event_t e;
         pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_HANDED, (int8_t)k, attempt, &cand[k], &o);
         e.good = good;
@@ -420,9 +407,9 @@ static esp_err_t pd_verify(esp_foc_phase_discover_t *pd, uint8_t attempt,
         if (err != ESP_OK) {
             return err;
         }
-        const int64_t k_sum = pd_abs((q16_t)((int64_t)o.u + o.v + o.w));
-        const int64_t k_mag = (int64_t)pd_abs(o.u) + pd_abs(o.v) + pd_abs(o.w);
-        const bool ok_dq = ok && !tripped && (o.d > pd->id_min) && (pd_abs(o.q) < pd_abs(o.d));
+        const int64_t k_sum = q16_abs((q16_t)((int64_t)o.u + o.v + o.w));
+        const int64_t k_mag = (int64_t)q16_abs(o.u) + q16_abs(o.v) + q16_abs(o.w);
+        const bool ok_dq = ok && !tripped && (o.d > pd->id_min) && (q16_abs(o.q) < q16_abs(o.d));
         const bool ok_k = (k_mag >= 3 * (int64_t)pd->id_min) && (5 * k_sum <= k_mag);
         esp_foc_phase_discover_event_t e;
         pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_VERIFY, (int8_t)k, attempt, &rank[k].map, &o);
@@ -484,7 +471,7 @@ static void pd_nudge(esp_foc_phase_discover_t *pd, uint8_t attempt)
     if (inv->is_faulted(inv)) {
         (void)inv->clear_fault(inv);
     }
-    inv->set_duties(inv, Q16_HALF, Q16_HALF, Q16_HALF);
+    esp_foc_bridge_neutral(inv);
     if (pd_bridge_enable(pd) == ESP_OK) {
         const q16_t th = q16_wrap_pi((q16_t)(((int64_t)Q16_TWO_PI * step) / 3));
         pd_set_vector(pd, pd->vd_pu, 0, th, 0);
@@ -539,7 +526,7 @@ static esp_err_t pd_wait_still(esp_foc_phase_discover_t *pd, uint32_t *ms_out)
         if (err != ESP_OK) {
             return err;
         }
-        if (pd_abs(q16_angle_delta(ref, th)) > pd->still_tol) {
+        if (q16_abs(q16_angle_delta(ref, th)) > pd->still_tol) {
             ref = th;
             calm = 0;
         } else {
@@ -573,7 +560,7 @@ static esp_err_t pd_sensor_stage(esp_foc_phase_discover_t *pd,
     if (inv->is_faulted(inv)) {
         (void)inv->clear_fault(inv);
     }
-    inv->set_duties(inv, Q16_HALF, Q16_HALF, Q16_HALF);
+    esp_foc_bridge_neutral(inv);
     esp_err_t err = pd_bridge_enable(pd);
     if (err != ESP_OK) {
         return err;
@@ -634,7 +621,7 @@ static esp_err_t pd_sensor_stage(esp_foc_phase_discover_t *pd,
     e.value = dth;
     e.reversed = out->sensor_reversed;
     e.tripped = pd_tripped(pd);
-    e.good = !e.tripped && (pd_abs(dth) >= pd->dir_min);
+    e.good = !e.tripped && (q16_abs(dth) >= pd->dir_min);
     pd_emit(pd, &e);
     if (e.tripped) {
         return ESP_FAIL;
@@ -784,7 +771,7 @@ esp_err_t esp_foc_phase_discover_init(esp_foc_phase_discover_t *pd,
         pd->dir_min = q16_from_float(c.sensor.dir_min_rad);
         pd->still_tol = q16_from_float(c.sensor.still_tol_rad);
         pd->i_well = q16_from_float(c.sensor.i_well_a);
-        pd->sweep_step = q16_from_float(6.28318531f / ticks);
+        pd->sweep_step = q16_from_float(ESP_FOC_TWO_PI_F / ticks);
     }
     pd->fault_reason = ESP_FOC_FAULT_NONE;
     pd->inited = true;
