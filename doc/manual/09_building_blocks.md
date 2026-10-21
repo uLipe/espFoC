@@ -379,6 +379,88 @@ anti-windup; for the ADRC it also means an exact feedforward leaves the ESO
 nothing to estimate, instead of being counted twice. The hot-path helpers
 do not check for `NULL`.
 
+### Discrete LQR design
+
+Design time only, in `double`, from a task. API in
+[`esp_foc_lqr.h`](../../include/espFoC/utils/esp_foc_lqr.h):
+
+```c
+esp_err_t esp_foc_lqr_servo_model(const esp_foc_lqr_servo_t *p, esp_foc_lqr_model_t *m);
+esp_err_t esp_foc_lqr_dare(const esp_foc_lqr_model_t *m, const double *q, double r, double *k);
+double esp_foc_lqr_cl_decay(const esp_foc_lqr_model_t *m, const double *k);
+```
+
+- `servo_model` builds the exact zero-order-hold discretisation of the servo
+  plant at `ts_s`: speed (electrical, gain `k_rads2_a` per amp), the current
+  loop as a first-order lag `tau_i_s`, one sample of command delay, and
+  optionally the mechanical position (`position`, needs `pole_pairs`) and an
+  integral of the position or speed error (`integral`). Up to
+  `ESP_FOC_LQR_N_MAX` = 5 states, single input.
+- `dare` solves the discrete algebraic Riccati equation for diagonal state
+  weights `q` and input weight `r` by structured doubling (quadratic
+  convergence, tens of iterations) and returns the gain row `k` of
+  `u = −k·x`. It checks the closed loop with `cl_decay` (the norm of
+  `(A − B·k)^16384`) and refuses a plant it can not stabilise with
+  `ESP_ERR_INVALID_STATE`. No heap; about 1.2 KB of stack, 2.2 KB with a
+  caller like the motion law's design.
+
+### Trapezoidal trajectory
+
+API in [`esp_foc_traj.h`](../../include/espFoC/motor_control/esp_foc_traj.h).
+Position, speed and acceleration are held in Q32 per sample, so a
+multi-turn move stays exact and a slow acceleration still has resolution.
+
+```c
+esp_err_t esp_foc_traj_init(esp_foc_traj_t *t, uint32_t fs_hz, float a_max_rads2, float v_max_rads);
+esp_err_t esp_foc_traj_set_limits(esp_foc_traj_t *t, float a_max_rads2, float v_max_rads);
+void esp_foc_traj_seed(esp_foc_traj_t *t, int64_t th_q16, q16_t w_q16);
+void esp_foc_traj_set_target(esp_foc_traj_t *t, int64_t tgt_q16);
+void esp_foc_traj_stop(esp_foc_traj_t *t);
+void esp_foc_traj_step(esp_foc_traj_t *t);   /* once per sample, O(1) */
+```
+
+The profile is not planned ahead: each `step` decides from the current
+position, speed and distance to go whether to accelerate, cruise or brake,
+braking one step early with the exact deceleration `v²/(2d)` so it lands on
+the target. A new target, a redirect mid-move or lower limits therefore act
+from wherever the profile is. `seed` starts it from a measured position and
+speed. Limits above 0.5 rad per sample, or an acceleration below one LSB,
+are refused.
+
+### Motion law interface
+
+The sensored stack turns position and speed references into `iq*` through
+one interface, chosen by `CONFIG_ESP_FOC_SD_MOTION_CTRL`. API in
+[`esp_foc_motion_ctrl.h`](../../include/espFoC/motor_control/esp_foc_motion_ctrl.h):
+
+```c
+esp_foc_motion_ctrl_t *esp_foc_motion_pi_bind(esp_foc_motion_pi_t *pi);
+esp_foc_motion_ctrl_t *esp_foc_motion_lqr_bind(esp_foc_motion_lqr_t *lqr, bool integral);
+
+esp_err_t esp_foc_motion_ctrl_design(esp_foc_motion_ctrl_t *c,
+                                     const esp_foc_motion_ctrl_design_t *d);
+void esp_foc_motion_ctrl_reset(esp_foc_motion_ctrl_t *c, esp_foc_motion_mode_t mode, q16_t held);
+q16_t esp_foc_motion_ctrl_update(esp_foc_motion_ctrl_t *c, esp_foc_motion_mode_t mode,
+                                 const esp_foc_motion_in_t *in, q16_t *w_ref);
+```
+
+- **Cascade PI** (`pi_bind`): position P clamped to `corr_max_rads` over a
+  speed PI with clamping anti-windup, the stack's default law.
+- **LQR** (`lqr_bind`): state feedback designed with the blocks above at
+  `wn_hz` (Bryson weights, optional noise descent; see
+  [the sensored stack](07_sensored_stack.md#motion-law-cascade-pi-or-lqr)).
+  The speed law always carries ∫ω; `integral` adds ∫θ to the position law.
+  Gains are Q32, the lag and delay states are predicted from the law's own
+  output, and the integral freezes while the output is clamped.
+
+`update` takes the position error (`e_th`, Q16 mechanical rad in an
+`int64_t`), the speed feedforward (`w_ff_m` mechanical) or reference
+(`w_ref_e` electrical), the measured electrical speed and the current
+feedforward, and returns `iq*` clamped to `i_max_a`. `reset` is bumpless:
+`held` is the current already commanded beyond the feedforward, and the
+next output starts from it. After `design`, `c->tune` holds the PI gains or
+the LQR `wn_hz` and gain rows.
+
 ### Voltage limit and SVM
 
 The inverter can only produce a voltage vector of limited length.
@@ -787,8 +869,8 @@ API unchanged for a future chip that has such a unit. Design functions
 
 The common layer has Unity suites in `test/`, one per block
 (`test_esp_foc_angle.c`, `_clarke`, `_park`, `_pid`, `_vlim`, `_svm`, `_iir`,
-`_trig`, `_adrc`, `_current_ctrl`, `_rotor_pll`, `_rotor_est`, `_observer`,
-`_observer_flux`, `_if`,
+`_trig`, `_adrc`, `_current_ctrl`, `_lqr`, `_traj`, `_motion_ctrl`,
+`_rotor_pll`, `_rotor_est`, `_observer`, `_observer_flux`, `_if`,
 `_ident`, plus the identification suites). They cover the happy path, edge
 cases, accuracy against `float` and closed-loop final values.
 
