@@ -7,10 +7,10 @@
 #include <string.h>
 
 #include "esp_foc_motor_id_seq.h"
+#include "espFoC/utils/esp_foc_angle.h"
 #include "espFoC/utils/esp_foc_pid.h"
 
 /* 2*pi in q16 radians. */
-#define MOTOR_ID_TWO_PI_Q16 411775LL
 /* Below this the demodulated response is not worth designing a loop against. */
 #define MOTOR_ID_MIN_PROBE_MA 40
 /* Fewer samples per period than this and the probe cannot demodulate. */
@@ -676,7 +676,7 @@ static esp_err_t run_lagcal(esp_foc_motor_id_seq_t *s, int32_t r_ref_mohm,
             const float dphi = dr / tan_phi;
             /* A residual larger than a sample means the integer pick was wrong,
              * not that there is a fraction to trim. */
-            const float span = 2.0f * (float)M_PI * (float)f_hi /
+            const float span = ESP_FOC_TWO_PI_F * (float)f_hi /
                                (float)s->cfg.pwm_hz;
             const int32_t trim =
                 (int32_t)(dphi * 180.0f / (float)M_PI * 100.0f);
@@ -1060,7 +1060,7 @@ static esp_err_t run_flux(esp_foc_motor_id_seq_t *s)
     q16_t iq = 0;
     s->ops.fetch_dq(s->ops.ctx, &vd, &vq, &id, &iq);
 
-    int32_t w = (int32_t)((MOTOR_ID_TWO_PI_Q16 * c->flux_hz) >> 16);
+    int32_t w = (int32_t)(((int64_t)Q16_TWO_PI * c->flux_hz) >> 16);
     if (s->ops.fetch_rotor != NULL) {
         q16_t th_m = 0;
         q16_t w_m = 0;
@@ -1071,7 +1071,7 @@ static esp_err_t run_flux(esp_foc_motor_id_seq_t *s)
         if (wm < 0.0f) {
             wm = -wm;
         }
-        const float fm = wm / 6.283185f;
+        const float fm = wm / ESP_FOC_TWO_PI_F;
         if (fm < 1.0f) {
             return bail(s, ESP_ERR_INVALID_RESPONSE);
         }

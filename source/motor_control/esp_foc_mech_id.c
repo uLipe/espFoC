@@ -7,8 +7,8 @@
 #include <string.h>
 
 #include "esp_foc_mech_id.h"
+#include "espFoC/utils/esp_foc_angle.h"
 
-#define MECH_ID_TWO_PI     6.28318530718f
 #define MECH_ID_CAP_FRAC   0.90f
 #define MECH_ID_MIN_DIQ    1.0e-4f
 #define MECH_ID_MIN_PTS    8u
@@ -104,8 +104,8 @@ esp_err_t esp_foc_mech_id_run(const esp_foc_mech_id_ops_t *ops,
     }
 
     float we0 = q16_to_float(ops->get_omega_e(ops->ctx));
-    float we_min = cfg->we_entry_min_hz * MECH_ID_TWO_PI;
-    float we_max = cfg->we_max_hz * MECH_ID_TWO_PI;
+    float we_min = cfg->we_entry_min_hz * ESP_FOC_TWO_PI_F;
+    float we_max = cfg->we_max_hz * ESP_FOC_TWO_PI_F;
     if (!(fabsf(we0) >= we_min) || fabsf(we0) >= we_max) {
         return bail(ops, id_ent, iq_ent, out, ESP_ERR_INVALID_STATE);
     }

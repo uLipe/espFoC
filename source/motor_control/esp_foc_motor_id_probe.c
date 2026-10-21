@@ -9,8 +9,8 @@
 #include "espFoC/utils/esp_foc_angle.h"
 #include "espFoC/utils/esp_foc_clarke.h"
 #include "espFoC/utils/esp_foc_park.h"
-#include "espFoC/utils/esp_foc_svm.h"
 #include "espFoC/utils/esp_foc_trig.h"
+#include "esp_foc_modulate.h"
 
 /* Long enough for the slowest window the sequencer asks for, short enough that
  * a disabled bridge reports instead of hanging the run. */
@@ -46,7 +46,7 @@
 static void park_idle(esp_foc_motor_id_probe_t *p)
 {
     p->mode = ESP_FOC_MOTOR_ID_PROBE_OFF;
-    p->inv->set_duties(p->inv, Q16_HALF, Q16_HALF, Q16_HALF);
+    esp_foc_bridge_neutral(p->inv);
 }
 
 static void finish(esp_foc_motor_id_probe_t *p, esp_foc_motor_id_probe_abort_t why)
@@ -78,15 +78,7 @@ static q16_t ramped(const esp_foc_motor_id_probe_t *p, q16_t v)
 static void drive_dq(esp_foc_motor_id_probe_t *p, q16_t vd_pu)
 {
     q16_t d = q16_clamp(vd_pu, -p->v_max_pu, p->v_max_pu);
-    q16_t q = 0;
-    q16_t a;
-    q16_t b;
-    q16_t du;
-    q16_t dv;
-    q16_t dw;
-    esp_foc_inv_park(p->sin_th, p->cos_th, d, q, &a, &b);
-    esp_foc_svm(a, b, &du, &dv, &dw);
-    p->inv->set_duties(p->inv, du, dv, dw);
+    esp_foc_modulate(p->inv, p->sin_th, p->cos_th, d, 0);
 }
 
 static void drive_terminal(esp_foc_motor_id_probe_t *p)

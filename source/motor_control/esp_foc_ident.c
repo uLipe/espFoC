@@ -7,10 +7,11 @@
 
 #include "espFoC/motor_control/esp_foc_ident.h"
 #include "espFoC/drivers/esp_foc_trigo_hw.h"
+#include "espFoC/utils/esp_foc_angle.h"
 #include "espFoC/utils/esp_foc_trig.h"
 
 /* 2*pi in q16 radians. */
-#define IDENT_TWO_PI_Q16 411775LL
+#define IDENT_TWO_PI_Q16 ((int64_t)Q16_TWO_PI)
 /* Centi-degrees per radian, scaled by 100 to keep the divide exact. */
 #define IDENT_CDEG_PER_RAD 572958LL
 /* Below this the correlated response is indistinguishable from sense noise. */
@@ -268,7 +269,7 @@ int32_t esp_foc_ident_step_lag(const q16_t *i, uint32_t n, uint32_t n_pre,
     q16_t spread = 0;
     for (uint32_t k = 0; k < n_pre; k++) {
         const q16_t d = i[k] - base;
-        const q16_t mag = (d < 0) ? -d : d;
+        const q16_t mag = q16_abs(d);
         if (mag > spread) {
             spread = mag;
         }
@@ -286,7 +287,7 @@ int32_t esp_foc_ident_step_lag(const q16_t *i, uint32_t n, uint32_t n_pre,
      */
     for (uint32_t k = n_pre; k < n; k++) {
         const q16_t d = i[k] - base;
-        const q16_t mag = (d < 0) ? -d : d;
+        const q16_t mag = q16_abs(d);
         if (mag >= thresh) {
             return (int32_t)(k - n_pre);
         }

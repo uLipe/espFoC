@@ -13,16 +13,18 @@
 #include "espFoC/osal/esp_foc_osal.h"
 #include "espFoC/utils/esp_foc_angle.h"
 #include "espFoC/utils/esp_foc_clarke.h"
+#include "espFoC/utils/esp_foc_design.h"
 #include "espFoC/utils/esp_foc_park.h"
+#include "espFoC/utils/esp_foc_pi_q32.h"
 #include "espFoC/utils/esp_foc_pid.h"
 #include "espFoC/utils/esp_foc_q16.h"
-#include "espFoC/utils/esp_foc_svm.h"
+#include "espFoC/utils/esp_foc_ripple.h"
 #include "espFoC/utils/esp_foc_vlim.h"
 #include "esp_foc_mech_id.h"
+#include "esp_foc_modulate.h"
 #include "esp_foc_motor_id_probe.h"
 #include "esp_foc_motor_id_seq.h"
 
-#define MID_TWO_PI 6.28318531f
 #define MID_DT_MS 20u
 #define MID_ARM_SETTLE_MS 50u
 #define MID_ROTOR_STACK 4096
@@ -43,23 +45,15 @@
  * shifted down before squaring: a window drifting to a stop at ~300 Hz elec
  * otherwise wraps int64 and reads back as a residual of exactly zero.
  */
-#define MID_RIP_SHIFT 8
 #define MID_RIP_MIN_N 64u
 /* Placeholder until TUNE_I applies the designed gains; no current loop runs
  * before that. */
 #define MID_PI_SEED_KP 0.1f
 #define MID_PI_SEED_KI 100.0f
 
-/*
- * Positional speed PI, gains in Q32. P never enters the state and I only
- * integrates when it does not push further into saturation, so Kp·noise at
- * the clamp is not integrated into a drift.
- */
+/* Speed hold for the mechanical stages: positional PI, clamp ±u_lim. */
 typedef struct {
-    int64_t kp_q32;
-    int64_t ki_ts_q32;
-    int64_t i_q32;
-    int64_t i_lim_q32;
+    esp_foc_pi_q32_t pi;
     q16_t u_lim;
 } mid_hold_t;
 
@@ -112,12 +106,7 @@ typedef struct {
     volatile int64_t acc_iq;
     volatile int64_t acc_w;
 
-    volatile uint32_t rip_n;
-    volatile uint32_t rip_budget;
-    q16_t rip_seed;
-    int64_t rip_sum;
-    int64_t rip_sq;
-    int64_t rip_ix;
+    esp_foc_ripple_t rip;
 
     esp_foc_motor_id_config_t cfg;
     esp_foc_motor_id_seq_t seq;
@@ -161,33 +150,7 @@ static void go(mid_t *m, esp_foc_motor_id_phase_t ph)
 
 static q16_t hold_step(mid_t *m)
 {
-    const q16_t e = q16_sub(m->w_ref, m->w_e);
-    const int64_t kp = m->hold.kp_q32;
-    const int64_t ki_ts = m->hold.ki_ts_q32;
-    const int64_t i_old = m->hold.i_q32;
-    const int64_t i_lim = m->hold.i_lim_q32;
-    const q16_t u_lim = m->hold.u_lim;
-
-    const int64_t inc = (ki_ts * (int64_t)e) >> 16;
-    int64_t i_new = i_old + inc;
-    if (i_new > i_lim) {
-        i_new = i_lim;
-    } else if (i_new < -i_lim) {
-        i_new = -i_lim;
-    }
-    int64_t u = ((kp * (int64_t)e) >> 32) + (i_new >> 16);
-    bool push_out = false;
-    if (u > u_lim) {
-        u = u_lim;
-        push_out = (inc > 0);
-    } else if (u < -u_lim) {
-        u = -u_lim;
-        push_out = (inc < 0);
-    }
-    if (!push_out) {
-        m->hold.i_q32 = i_new;
-    }
-    return (q16_t)u;
+    return esp_foc_pi_q32_update(&m->hold.pi, q16_sub(m->w_ref, m->w_e), 0, m->hold.u_lim);
 }
 
 /* A probe in flight owns the duties and must also see a fault, or its window
@@ -277,14 +240,7 @@ static void mid_tez(void *arg)
         s = q16_add(q16_mul(s0, cd), q16_mul(c, sd));
         c = q16_sub(q16_mul(c, cd), q16_mul(s0, sd));
     }
-    q16_t a;
-    q16_t b;
-    q16_t du;
-    q16_t dv;
-    q16_t dw;
-    esp_foc_inv_park(s, c, vd, vq, &a, &b);
-    esp_foc_svm(a, b, &du, &dv, &dw);
-    inv->set_duties(inv, du, dv, dw);
+    esp_foc_modulate(inv, s, c, vd, vq);
 
     if (m->acc_on) {
         m->acc_vd += vd;
@@ -316,17 +272,7 @@ static void rotor_sample(mid_t *m)
     esp_foc_rotor_pll_update(&m->pll, m->rotor);
     const q16_t w = esp_foc_rotor_pll_get_omega(&m->pll);
 
-    const uint32_t rn = m->rip_n;
-    if (rn < m->rip_budget) {
-        if (rn == 0u) {
-            m->rip_seed = w;
-        }
-        const int64_t x = (int64_t)q16_sub(w, m->rip_seed) >> MID_RIP_SHIFT;
-        m->rip_sum += x;
-        m->rip_sq += x * x;
-        m->rip_ix += (int64_t)rn * x;
-        m->rip_n = rn + 1u;
-    }
+    esp_foc_ripple_add(&m->rip, w);
 
     esp_foc_rotor_state_t st;
     esp_foc_rotor_sensor_snapshot(m->rotor, &st);
@@ -340,8 +286,7 @@ static void rotor_sample(mid_t *m)
     }
     m->th_have = true;
 
-    const q16_t wabs = (w < 0) ? q16_neg(w) : w;
-    if (wabs > m->w_overspeed) {
+    if (q16_abs(w) > m->w_overspeed) {
         m->overspeed = true;
     }
     m->w_e = w;
@@ -375,7 +320,7 @@ static void drive_idle(mid_t *m)
     m->id_ref = 0;
     m->iq_ref = 0;
     m->dth = 0;
-    m->inv->set_duties(m->inv, Q16_HALF, Q16_HALF, Q16_HALF);
+    esp_foc_bridge_neutral(m->inv);
 }
 
 /* Only undoes our own enable: disable() on an idle inverter reruns the whole
@@ -415,10 +360,10 @@ static esp_err_t bridge_arm(mid_t *m)
         return err;
     }
     m->bridge_on = true;
-    inv->set_duties(inv, Q16_HALF, Q16_HALF, Q16_HALF);
+    esp_foc_bridge_neutral(inv);
     /* Re-zeroed per attempt so retries are independent. */
     inv->calibrate_currents(inv, m->cfg.cal_rounds);
-    inv->set_duties(inv, Q16_HALF, Q16_HALF, Q16_HALF);
+    esp_foc_bridge_neutral(inv);
     esp_foc_sleep_ms(MID_ARM_SETTLE_MS);
     m->fault_seen = false;
     m->overspeed = false;
@@ -465,8 +410,7 @@ static void op_set_idq(void *ctx, q16_t id, q16_t iq)
 static void op_set_fe(void *ctx, q16_t fe_hz)
 {
     (void)ctx;
-    s_mid.dth = (q16_t)(((int64_t)fe_hz * (int64_t)Q16_TWO_PI) /
-                        ((int64_t)s_mid.pwm_hz << 16));
+    s_mid.dth = q16_angle_step_hz(fe_hz, s_mid.pwm_hz);
 }
 
 static void op_fetch_dq(void *ctx, q16_t *vd, q16_t *vq, q16_t *id, q16_t *iq)
@@ -481,10 +425,8 @@ static void op_fetch_dq(void *ctx, q16_t *vd, q16_t *vq, q16_t *id, q16_t *iq)
 static void set_gains(mid_t *m, float kp, float ki)
 {
     esp_foc_critical_enter();
-    (void)esp_foc_pid_set_kp(&m->pi_d, kp);
-    (void)esp_foc_pid_set_ki(&m->pi_d, ki);
-    (void)esp_foc_pid_set_kp(&m->pi_q, kp);
-    (void)esp_foc_pid_set_ki(&m->pi_q, ki);
+    (void)esp_foc_pid_set_pi(&m->pi_d, kp, ki);
+    (void)esp_foc_pid_set_pi(&m->pi_q, kp, ki);
     esp_foc_critical_leave();
 }
 
@@ -586,7 +528,7 @@ void esp_foc_motor_id_default_config(esp_foc_motor_id_config_t *cfg)
     cfg->sensored.probe_step_ms = 10u;
     cfg->sensored.probe_settle_ms = 1200u;
     cfg->sensored.probe_avg_ms = 500u;
-    cfg->sensored.d0_max_rad = 60.0f * MID_TWO_PI / 360.0f;
+    cfg->sensored.d0_max_rad = 60.0f * ESP_FOC_TWO_PI_F / 360.0f;
     cfg->sensored.tau_max_s = 2e-3f;
     cfg->sensored.pwm_delay_ts = 1.5f;
     cfg->sensored.overspeed_hz = (float)CONFIG_ESP_FOC_MOTOR_ID_OVERSPEED_HZ;
@@ -747,7 +689,7 @@ static esp_err_t run_elec(mid_t *m, esp_foc_motor_id_result_t *out)
 
 static float we_hz(const mid_t *m)
 {
-    return q16_to_float(m->w_e) / MID_TWO_PI;
+    return q16_to_float(m->w_e) / ESP_FOC_TWO_PI_F;
 }
 
 static bool ramp_iq(mid_t *m, float from_a, float to_a, uint32_t ms)
@@ -769,7 +711,7 @@ static float meas_fm_hz(mid_t *m, uint32_t ms)
     m->meas_on = true;
     esp_foc_sleep_ms(ms);
     m->meas_on = false;
-    return q16_to_float(m->th_m_acc) / (MID_TWO_PI * (float)ms * 1e-3f);
+    return q16_to_float(m->th_m_acc) / (ESP_FOC_TWO_PI_F * (float)ms * 1e-3f);
 }
 
 static bool bring_band(mid_t *m)
@@ -906,30 +848,10 @@ static esp_err_t mech_stage(mid_t *m, uint8_t pass, esp_foc_motor_id_result_t *o
 static float measure_ripple(mid_t *m)
 {
     const uint32_t fs = m->cfg.sensored.fetch_hz;
-    m->rip_sum = 0;
-    m->rip_sq = 0;
-    m->rip_ix = 0;
-    m->rip_n = 0u;
-    m->rip_budget = (m->cfg.sensored.ripple_ms * fs) / 1000u;
+    esp_foc_ripple_arm(&m->rip, (m->cfg.sensored.ripple_ms * fs) / 1000u);
     esp_foc_sleep_ms(m->cfg.sensored.ripple_ms + 40u);
-    const uint32_t n = m->rip_n;
-    const double sx = (double)m->rip_sum;
-    const double sxx = (double)m->rip_sq;
-    const double six = (double)m->rip_ix;
-    m->rip_budget = 0u;
-    if (n < MID_RIP_MIN_N) {
-        return 0.0f;
-    }
-    const double dn = (double)n;
-    const double sxx_c = sxx - sx * sx / dn;
-    const double sii_c = dn * (dn * dn - 1.0) / 12.0;
-    const double sxi_c = six - 0.5 * (dn - 1.0) * sx;
-    double rss = sxx_c - ((sii_c > 0.0) ? (sxi_c * sxi_c / sii_c) : 0.0);
-    if (rss < 0.0) {
-        rss = 0.0;
-    }
-    const double q16_per_lsb = (double)(1u << MID_RIP_SHIFT) / 65536.0;
-    return (float)(sqrt(rss / (dn - 2.0)) * q16_per_lsb);
+    esp_foc_ripple_stop(&m->rip);
+    return esp_foc_ripple_sigma(&m->rip, MID_RIP_MIN_N);
 }
 
 /*
@@ -941,16 +863,15 @@ static float measure_ripple(mid_t *m)
 static esp_err_t hold_design(mid_t *m, float k, float psi_wb, float ripple)
 {
     const esp_foc_motor_id_sensored_config_t *sc = &m->cfg.sensored;
-    const float two_z = 2.0f * sc->hold_zeta;
     float bw = sc->hold_bw_min_hz;
     if (psi_wb > 1e-6f) {
-        const float f_base = (m->cfg.vdc / sqrtf(3.0f)) / (MID_TWO_PI * psi_wb);
+        const float f_base = esp_foc_base_speed_hz(m->cfg.vdc, psi_wb);
         bw = fminf(fmaxf(sc->hold_bw_frac * f_base, sc->hold_bw_min_hz), sc->hold_bw_max_hz);
     }
     if (ripple > 0.0f) {
-        bw = fminf(bw, (sc->fb_iq_budget_a / ripple) * k / (two_z * MID_TWO_PI));
+        bw = fminf(bw, esp_foc_speed_bw_noise_hz(sc->fb_iq_budget_a, ripple, k, sc->hold_zeta));
     }
-    bw = fminf(bw, 0.5f * sc->pll_bw_hz / sc->pll_sep_min / two_z);
+    bw = fminf(bw, esp_foc_speed_bw_phase_hz(sc->pll_bw_hz, sc->pll_sep_min, sc->hold_zeta));
 
     const float fs = (float)sc->fetch_hz;
     float kp = 0.0f;
@@ -960,12 +881,18 @@ static esp_err_t hold_design(mid_t *m, float k, float psi_wb, float ripple)
     if (err != ESP_OK) {
         return err;
     }
+    esp_foc_pi_q32_t pi = m->hold.pi;
+    const esp_err_t gerr = esp_foc_pi_q32_set_gains(&pi, kp, ki, fs);
+    if (gerr != ESP_OK) {
+        return gerr;
+    }
     const q16_t u_lim = q16_from_float(sc->i_max_a);
+    esp_foc_pi_q32_set_limit(&pi, u_lim);
     esp_foc_critical_enter();
-    m->hold.kp_q32 = (int64_t)((double)kp * 4294967296.0 + 0.5);
-    m->hold.ki_ts_q32 = (int64_t)((double)ki / (double)fs * 4294967296.0 + 0.5);
+    m->hold.pi.kp_q32 = pi.kp_q32;
+    m->hold.pi.ki_ts_q32 = pi.ki_ts_q32;
+    m->hold.pi.i_lim_q32 = pi.i_lim_q32;
     m->hold.u_lim = u_lim;
-    m->hold.i_lim_q32 = (int64_t)u_lim << 16;
     esp_foc_critical_leave();
     return ESP_OK;
 }
@@ -973,7 +900,7 @@ static esp_err_t hold_design(mid_t *m, float k, float psi_wb, float ripple)
 static void hold_arm(mid_t *m)
 {
     esp_foc_critical_enter();
-    m->hold.i_q32 = (int64_t)m->iq_ref << 16;
+    esp_foc_pi_q32_reset(&m->hold.pi, m->iq_ref);
     m->fresh = false;
     m->hold_on = true;
     esp_foc_critical_leave();
@@ -984,7 +911,7 @@ static bool ramp_wref(mid_t *m, int f0, int f1)
     const int df = (f1 >= f0) ? 1 : -1;
     for (int f = f0; f != f1;) {
         f += df;
-        m->w_ref = q16_from_float(MID_TWO_PI * (float)f);
+        m->w_ref = q16_from_float(ESP_FOC_TWO_PI_F * (float)f);
         esp_foc_sleep_ms(m->cfg.sensored.probe_step_ms);
         if (aborted(m)) {
             return false;
@@ -1072,7 +999,7 @@ static bool angle_pass(mid_t *m, uint8_t pass, const esp_foc_motor_id_result_t *
         w[i] = d.w;
         e[i] = d.park_err;
         psi_sum += d.psi;
-        emit(m, ESP_FOC_MOTOR_ID_EV_ANGLE_POINT, pass, 0, ESP_OK, d.w / MID_TWO_PI,
+        emit(m, ESP_FOC_MOTOR_ID_EV_ANGLE_POINT, pass, 0, ESP_OK, d.w / ESP_FOC_TWO_PI_F,
              d.park_err, d.psi, d.iq, NULL);
     }
     if (!ramp_wref(m, f_now, 0)) {
@@ -1129,7 +1056,7 @@ static esp_err_t angle_compensate(mid_t *m, esp_foc_motor_id_result_t *out, floa
         }
         esp_foc_critical_enter();
         m->th_off = q16_from_float(d0_tot);
-        m->tau_q32 = (int32_t)lrintf(tau_tot * 4294967296.0f);
+        m->tau_q32 = (int32_t)lrintf(tau_tot * (float)ESP_FOC_Q32_ONE);
         esp_foc_critical_leave();
         out->park_offset_rad = d0_tot;
         out->park_lead_s = tau_tot;
@@ -1278,8 +1205,8 @@ static esp_err_t install(mid_t *m)
         }
         m->slow_div = m->pwm_hz / sc->fetch_hz;
         m->fetch_hz_q = q16_from_float((float)sc->fetch_hz);
-        m->w_overspeed = q16_from_float(MID_TWO_PI * sc->overspeed_hz);
-        m->vlead_q32 = (int32_t)lrintf(sc->pwm_delay_ts / (float)m->pwm_hz * 4294967296.0f);
+        m->w_overspeed = q16_from_float(ESP_FOC_TWO_PI_F * sc->overspeed_hz);
+        m->vlead_q32 = (int32_t)lrintf(sc->pwm_delay_ts / (float)m->pwm_hz * (float)ESP_FOC_Q32_ONE);
         m->rotor_alive = true;
         if (esp_foc_task_spawn_stack(mid_rotor_task, m, "foc_id_rotor", MID_ROTOR_STACK,
                                      esp_foc_task_max_priority(), NULL) != 0) {
@@ -1291,7 +1218,7 @@ static esp_err_t install(mid_t *m)
         }
     }
 
-    inv->set_duties(inv, Q16_HALF, Q16_HALF, Q16_HALF);
+    esp_foc_bridge_neutral(inv);
     esp_foc_critical_enter();
     inv->set_dma_callback(inv, NULL, NULL);
     inv->set_fault_callback(inv, mid_fault, m);
