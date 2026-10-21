@@ -8,6 +8,7 @@
 
 #include "espFoC/motor_control/esp_foc_rotor_pll.h"
 #include "espFoC/utils/esp_foc_angle.h"
+#include "espFoC/utils/esp_foc_design.h"
 
 /*
  * Discretisation ceilings, one per path, both expressed as the size of the
@@ -30,11 +31,6 @@
 /**
  * ω [Q16.16 rad/s] × t [Q32 s] → angle [Q16.16 rad].
  */
-static inline q16_t travel(q16_t omega, uint32_t t_q32)
-{
-    return (q16_t)(((int64_t)omega * (int64_t)t_q32) >> 32);
-}
-
 void esp_foc_rotor_pll_config_default(esp_foc_rotor_pll_config_t *cfg,
                                       uint32_t step_hz,
                                       float bw_hz,
@@ -51,11 +47,11 @@ void esp_foc_rotor_pll_config_default(esp_foc_rotor_pll_config_t *cfg,
     }
 
     const float ts = 1.0f / (float)step_hz;
-    const float wn = 2.0f * (float)M_PI * bw_hz;
+    const float wn = ESP_FOC_TWO_PI_F * bw_hz;
 
     cfg->kp = q16_from_float(2.0f * zeta * wn);
     cfg->ki_ts = q16_from_float(wn * wn * ts);
-    cfg->dt_q32 = (uint32_t)((4294967296.0 / (double)step_hz) + 0.5);
+    cfg->dt_q32 = (uint32_t)((ESP_FOC_Q32_ONE / (double)step_hz) + 0.5);
     cfg->omega_max = q16_from_float(omega_max_rads);
     cfg->domain = ESP_FOC_ROTOR_PLL_MECH;
 }
@@ -154,7 +150,7 @@ void esp_foc_rotor_pll_step(esp_foc_rotor_pll_t *p, q16_t theta_meas, bool fresh
         }
     }
     theta = q16_wrap_pi(
-        q16_add(theta, travel(q16_add(omega, q16_mul(kp, err)), dt_q32)));
+        q16_add(theta, q16_angle_travel(q16_add(omega, q16_mul(kp, err)), dt_q32)));
 
     /* Store. */
     p->theta_hat = theta;

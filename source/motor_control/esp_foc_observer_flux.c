@@ -24,6 +24,7 @@
 #include "espFoC/motor_control/esp_foc_observer_flux.h"
 #include "espFoC/drivers/esp_foc_trigo_hw.h"
 #include "espFoC/utils/esp_foc_angle.h"
+#include "espFoC/utils/esp_foc_iir.h"
 #include "espFoC/utils/esp_foc_pid.h"
 
 /* ψ is stored in mWb so Q16.16 has LSBs at this magnet flux (~2.5 mWb). */
@@ -42,14 +43,6 @@ static const esp_foc_observer_flux_t *flux_of_c(const esp_foc_observer_t *self)
 {
     return (const esp_foc_observer_flux_t *)((const char *)self -
                                              offsetof(esp_foc_observer_flux_t, iface));
-}
-
-static q16_t lpf1(q16_t *w, q16_t x, q16_t b0)
-{
-    q16_t y = *w;
-    y = q16_add(y, q16_mul(b0, q16_sub(x, y)));
-    *w = y;
-    return y;
 }
 
 static q16_t flux_dpsi_mwb(q16_t v, q16_t inv_ts)
@@ -205,8 +198,8 @@ static void flux_update(esp_foc_observer_t *self,
      * integrator state is corrected too, otherwise ψ̂_s keeps climbing and the
      * ceiling only hides it. */
     {
-        const q16_t ra = (psi_r_raw_a < 0) ? q16_neg(psi_r_raw_a) : psi_r_raw_a;
-        const q16_t rb = (psi_r_raw_b < 0) ? q16_neg(psi_r_raw_b) : psi_r_raw_b;
+        const q16_t ra = q16_abs(psi_r_raw_a);
+        const q16_t rb = q16_abs(psi_r_raw_b);
         const q16_t hi = (ra > rb) ? ra : rb;
         const q16_t lo = (ra > rb) ? rb : ra;
         const q16_t mag = q16_add(hi, q16_mul(FLUX_BETA_MIN, lo));
@@ -223,8 +216,12 @@ static void flux_update(esp_foc_observer_t *self,
         }
     }
 
-    o->psi_r_a = lpf1(&o->psi_f_a, psi_r_raw_a, o->lpf_b0);
-    o->psi_r_b = lpf1(&o->psi_f_b, psi_r_raw_b, o->lpf_b0);
+    const q16_t psi_f_a = esp_foc_lpf1(o->psi_f_a, psi_r_raw_a, o->lpf_b0);
+    const q16_t psi_f_b = esp_foc_lpf1(o->psi_f_b, psi_r_raw_b, o->lpf_b0);
+    o->psi_f_a = psi_f_a;
+    o->psi_f_b = psi_f_b;
+    o->psi_r_a = psi_f_a;
+    o->psi_r_b = psi_f_b;
 
     if (o->extract == ESP_FOC_ANGLE_ATAN2) {
         q16_t th_psi = esp_foc_trigo_hw_atan2(o->psi_r_b, o->psi_r_a);
@@ -236,7 +233,7 @@ static void flux_update(esp_foc_observer_t *self,
         o->theta_psi = th_psi;
         q16_t w_psi = q16_mul(dth_psi, inv_ts);
         w_psi = q16_clamp(w_psi, q16_neg(o->w_max), o->w_max);
-        o->w_atan_f = lpf1(&o->w_atan_f, w_psi, o->w_lpf_b0);
+        o->w_atan_f = esp_foc_lpf1(o->w_atan_f, w_psi, o->w_lpf_b0);
         o->theta = th_psi;
         o->omega = o->w_atan_f;
         o->phase_err = 0;
@@ -245,8 +242,8 @@ static void flux_update(esp_foc_observer_t *self,
         q16_t c;
         esp_foc_trigo_hw_sincos(o->theta, &s, &c);
 
-        q16_t pa_abs = (o->psi_r_a < 0) ? q16_neg(o->psi_r_a) : o->psi_r_a;
-        q16_t pb_abs = (o->psi_r_b < 0) ? q16_neg(o->psi_r_b) : o->psi_r_b;
+        q16_t pa_abs = q16_abs(o->psi_r_a);
+        q16_t pb_abs = q16_abs(o->psi_r_b);
         q16_t psi_scale = q16_add(pa_abs, pb_abs);
         if (psi_scale < o->psi_lock_min) {
             psi_scale = o->psi_lock_min;
@@ -409,7 +406,7 @@ esp_err_t esp_foc_observer_flux_init(esp_foc_observer_flux_t *o,
         esp_foc_pid_design_integrator(1.0f, 1.0f / ts, track_bw, tr_z, &pll_kp, &pll_ki),
         "foc_flux", "pll");
 
-    float b0 = 1.0f - expf(-2.0f * (float)M_PI * obs_bw * ts);
+    float b0 = esp_foc_lpf1_coef(obs_bw, ts);
     if (b0 < 0.001f) {
         b0 = 0.001f;
     }
@@ -430,13 +427,13 @@ esp_err_t esp_foc_observer_flux_init(esp_foc_observer_flux_t *o,
     o->ls_mh = q16_from_float(cfg->ls_h * 1000.0f);
     o->psi_f_mwb = q16_from_float(cfg->psi_f_wb * 1000.0f);
     o->inv_ts = q16_from_float(1.0f / ts);
-    o->lambda_ts = q16_from_float(2.0f * (float)M_PI * blend_hz * ts);
+    o->lambda_ts = q16_from_float(ESP_FOC_TWO_PI_F * blend_hz * ts);
     o->lpf_b0 = q16_from_float(b0);
     ESP_RETURN_ON_ERROR(esp_foc_pid_init(&o->pll_pi, pll_kp, pll_ki, 0.0f, 0.0f, ts),
                         "foc_flux", "pll_init");
     o->w_max = q16_from_float(cfg->w_max_rads > 0.0f
                                   ? cfg->w_max_rads
-                                  : 2.0f * (float)M_PI * 1000.0f);
+                                  : ESP_FOC_TWO_PI_F * 1000.0f);
     o->psi_lock_min = q16_from_float(frac * cfg->psi_f_wb * 1000.0f);
     {
         const float psi_max_frac = (cfg->psi_max_frac == 0.0f)
@@ -469,7 +466,7 @@ esp_err_t esp_foc_observer_flux_init(esp_foc_observer_flux_t *o,
         o->pll_settle_left = 0;
     }
     {
-        float wb0 = 1.0f - expf(-2.0f * (float)M_PI * 80.0f * ts);
+        float wb0 = esp_foc_lpf1_coef(80.0f, ts);
         if (wb0 < 0.001f) {
             wb0 = 0.001f;
         }
@@ -507,10 +504,9 @@ esp_err_t esp_foc_observer_flux_set_bw(esp_foc_observer_flux_t *o,
     ESP_RETURN_ON_ERROR(
         esp_foc_pid_design_integrator(1.0f, inv_ts_f, track_bw_hz, track_zeta, &kp_f, &ki_f),
         "foc_flux", "pll");
-    ESP_RETURN_ON_ERROR(esp_foc_pid_set_kp(&o->pll_pi, kp_f), "foc_flux", "pll_kp");
-    ESP_RETURN_ON_ERROR(esp_foc_pid_set_ki(&o->pll_pi, ki_f), "foc_flux", "pll_ki");
+    ESP_RETURN_ON_ERROR(esp_foc_pid_set_pi(&o->pll_pi, kp_f, ki_f), "foc_flux", "pll_gains");
 
-    float b0 = 1.0f - expf(-2.0f * (float)M_PI * obs_bw_hz * ts);
+    float b0 = esp_foc_lpf1_coef(obs_bw_hz, ts);
     if (b0 < 0.001f) {
         b0 = 0.001f;
     }
