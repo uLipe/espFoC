@@ -18,14 +18,14 @@
 #include "espFoC/osal/esp_foc_osal.h"
 #include "espFoC/utils/esp_foc_angle.h"
 #include "espFoC/utils/esp_foc_clarke.h"
+#include "espFoC/utils/esp_foc_design.h"
+#include "espFoC/utils/esp_foc_iir.h"
 #include "espFoC/utils/esp_foc_park.h"
 #include "espFoC/utils/esp_foc_pid.h"
-#include "espFoC/utils/esp_foc_svm.h"
 #include "espFoC/utils/esp_foc_trig.h"
 #include "espFoC/utils/esp_foc_vlim.h"
+#include "esp_foc_modulate.h"
 
-#define SL_TWO_PI          6.28318530718f
-#define SL_INV_SQRT3       0.57735026919f
 #define SL_SLOW_DIV        ((uint32_t)CONFIG_ESP_FOC_SL_SLOW_DIV)
 #define SL_POLL_MS         20u
 #define SL_REQ_TIMEOUT_MS  5000u
@@ -204,26 +204,6 @@ static inline sl_t *sl_axis(uint8_t axis)
     return (axis < CONFIG_ESP_FOC_SL_MAX_AXES) ? &s_sl[axis] : NULL;
 }
 
-static inline q16_t sl_abs(q16_t x)
-{
-    return (x < 0) ? q16_neg(x) : x;
-}
-
-static inline q16_t sl_slew(q16_t x, q16_t target, q16_t step)
-{
-    if (step == 0) {
-        return target;
-    }
-    const q16_t d = q16_sub(target, x);
-    if (d > step) {
-        return q16_add(x, step);
-    }
-    if (d < q16_neg(step)) {
-        return q16_sub(x, step);
-    }
-    return target;
-}
-
 /* ------------------------------------------------------------------------ */
 /* Fast path                                                                 */
 /* ------------------------------------------------------------------------ */
@@ -254,7 +234,7 @@ static uint8_t sl_guards(sl_t *sl, q16_t w_obs, q16_t id, q16_t iq, bool lock)
     uint8_t why = ESP_FOC_SL_ABORT_NONE;
 
     if (sl->obs_run) {
-        const q16_t w_pl = sl_abs((sl->theta_src == SL_SRC_OBS) ? w_obs : sl->w_cmd);
+        const q16_t w_pl = q16_abs((sl->theta_src == SL_SRC_OBS) ? w_obs : sl->w_cmd);
         if (w_pl >= sl->g_w_fmin) {
             const esp_foc_observer_t *o = &sl->obs.iface;
             const q16_t ea = o->get_e_alpha(o);
@@ -281,8 +261,8 @@ static uint8_t sl_guards(sl_t *sl, q16_t w_obs, q16_t id, q16_t iq, bool lock)
         why = ESP_FOC_SL_ABORT_LOCK_LOSS;
     }
 
-    if ((sl_abs(sl->iq_ref) > sl->g_iq_col_ref) && (sl_abs(id) < sl->g_i_col) &&
-        (sl_abs(iq) < sl->g_i_col)) {
+    if ((q16_abs(sl->iq_ref) > sl->g_iq_col_ref) && (q16_abs(id) < sl->g_i_col) &&
+        (q16_abs(iq) < sl->g_i_col)) {
         if (++sl->g_col_n >= sl->g_col_need) {
             why = ESP_FOC_SL_ABORT_COLLAPSE;
         }
@@ -290,7 +270,7 @@ static uint8_t sl_guards(sl_t *sl, q16_t w_obs, q16_t id, q16_t iq, bool lock)
         sl->g_col_n = 0;
     }
 
-    if (sl_abs(w_obs) > sl->g_w_trip) {
+    if (q16_abs(w_obs) > sl->g_w_trip) {
         if (++sl->g_ov_n >= sl->g_ov_need) {
             why = ESP_FOC_SL_ABORT_OVERSPEED;
         }
@@ -303,15 +283,14 @@ static uint8_t sl_guards(sl_t *sl, q16_t w_obs, q16_t id, q16_t iq, bool lock)
 static void sl_slot(sl_t *sl, q16_t w_obs)
 {
     if (sl->obs_run) {
-        const q16_t w_ctrl = sl->w_ctrl;
-        sl->w_ctrl = q16_add(w_ctrl, q16_mul(sl->w_filt_b0, q16_sub(w_obs, w_ctrl)));
+        sl->w_ctrl = esp_foc_lpf1(sl->w_ctrl, w_obs, sl->w_filt_b0);
     }
     if (!sl->slew_on) {
         return;
     }
-    sl->id_ref = sl_slew(sl->id_ref, sl->id_target, sl->id_step);
+    sl->id_ref = q16_slew(sl->id_ref, sl->id_target, sl->id_step);
     if (sl->speed_on) {
-        const q16_t w_ref = sl_slew(sl->w_ref, sl->w_target, sl->w_step);
+        const q16_t w_ref = q16_slew(sl->w_ref, sl->w_target, sl->w_step);
         const q16_t iq_user = sl->iq_user;
         const q16_t lo = sl->iq_lo;
         const q16_t hi = sl->iq_hi;
@@ -321,7 +300,7 @@ static void sl_slot(sl_t *sl, q16_t w_obs)
         sl->w_ref = w_ref;
         sl->iq_ref = u;
     } else {
-        sl->iq_ref = sl_slew(sl->iq_ref, sl->iq_target, sl->iq_step);
+        sl->iq_ref = q16_slew(sl->iq_ref, sl->iq_target, sl->iq_step);
     }
 }
 
@@ -403,12 +382,8 @@ static void sl_tez(void *arg)
 
     q16_t a;
     q16_t b;
-    q16_t du;
-    q16_t dv;
-    q16_t dw;
     esp_foc_inv_park(s, c, vd, vq, &a, &b);
-    esp_foc_svm(a, b, &du, &dv, &dw);
-    inv->set_duties(inv, du, dv, dw);
+    esp_foc_modulate_ab(inv, a, b);
 
     sl->theta_ol = th_ol;
     sl->theta = th;
@@ -431,7 +406,7 @@ static void sl_tez(void *arg)
     if (why != ESP_FOC_SL_ABORT_NONE) {
         sl->abort = why;
         sl->run = false;
-        inv->set_duties(inv, Q16_HALF, Q16_HALF, Q16_HALF);
+        esp_foc_bridge_neutral(inv);
         /* Only a trip wakes the supervisor. A post per slot is a context
          * switch per slot on a core the fast path already nearly fills, and
          * it starved IDLE into the task watchdog. */
@@ -480,7 +455,7 @@ static int8_t sl_ref_dir(sl_t *sl)
 {
     const q16_t ref = sl->cfg.speed_loop ? sl->w_user : sl->iq_user;
     const q16_t cut = sl->cfg.speed_loop ? sl->w_cut : sl->iq_cut;
-    if (sl_abs(ref) < cut) {
+    if (q16_abs(ref) < cut) {
         return 0;
     }
     return (ref < 0) ? -1 : 1;
@@ -551,8 +526,7 @@ static void sl_set_fe(sl_t *sl, q16_t fe_hz)
 {
     sl->fe_ol = fe_hz;
     sl->w_cmd = q16_mul(fe_hz, Q16_TWO_PI);
-    sl->dth = (q16_t)(((int64_t)fe_hz * (int64_t)Q16_TWO_PI) /
-                       ((int64_t)sl->pwm_hz << 16));
+    sl->dth = q16_angle_step_hz(fe_hz, sl->pwm_hz);
 }
 
 static void sl_iq_band(sl_t *sl, int8_t dir, q16_t floor_q)
@@ -599,7 +573,7 @@ static void sl_cut(sl_t *sl)
 
     if (sl->bridge_on) {
         inv->set_sense_watchdog(inv, false);
-        inv->set_duties(inv, Q16_HALF, Q16_HALF, Q16_HALF);
+        esp_foc_bridge_neutral(inv);
         inv->disable(inv);
         sl->bridge_on = false;
         sl->coast_until_us = esp_foc_now_us() + (uint64_t)sl->cfg.coast_ms * 1000u;
@@ -702,7 +676,7 @@ static bool sl_if_lock_ok(void *ctx)
     esp_foc_critical_leave();
 
     const uint32_t step = sl->cfg.startup.step_ms;
-    const q16_t w_abs = sl_abs(sl->w_cmd);
+    const q16_t w_abs = q16_abs(sl->w_cmd);
     if (w_abs < sl->g_w_fmin) {
         sl->follow_ms = 0;
         return false;
@@ -740,7 +714,7 @@ static bool sl_if_ramp_ok(void *ctx)
     if (sl->if_out != SL_OK) {
         return false;
     }
-    if (sl_abs(q16_sub(sl->id_ref, sl->id)) <= sl->ramp_id_err) {
+    if (q16_abs(q16_sub(sl->id_ref, sl->id)) <= sl->ramp_id_err) {
         sl->id_err_ms = 0;
         return true;
     }
@@ -789,8 +763,8 @@ static bool sl_acquire(sl_t *sl)
 
     for (;;) {
         const q16_t we = sl->w_obs;
-        const q16_t err = sl_abs(q16_sub(we, w_if));
-        const q16_t dw = have ? sl_abs(q16_sub(we, prev)) : 0;
+        const q16_t err = q16_abs(q16_sub(we, w_if));
+        const q16_t dw = have ? q16_abs(q16_sub(we, prev)) : 0;
         prev = we;
         have = true;
         hold = ((err <= sl->acq_band) && (dw <= sl->acq_hunt)) ? hold + SL_POLL_MS : 0u;
@@ -927,7 +901,7 @@ static sl_out_t sl_launch(sl_t *sl, int8_t dir)
     sl->state = ESP_FOC_SL_STATE_ALIGN;
     sl_emit_simple(sl, ESP_FOC_SL_EV_STARTUP);
 
-    inv->set_duties(inv, Q16_HALF, Q16_HALF, Q16_HALF);
+    esp_foc_bridge_neutral(inv);
     if (inv->enable(inv) != ESP_OK) {
         sl->fail = ESP_FOC_SL_FAIL_ENABLE;
         return SL_FAILED;
@@ -938,7 +912,7 @@ static sl_out_t sl_launch(sl_t *sl, int8_t dir)
     inv->set_dma_callback(inv, NULL, NULL);
     inv->calibrate_currents(inv, sl->cfg.startup.cal_rounds);
     inv->set_dma_callback(inv, sl_dma, sl);
-    inv->set_duties(inv, Q16_HALF, Q16_HALF, Q16_HALF);
+    esp_foc_bridge_neutral(inv);
     sl_out_t out = sl_wait(sl, sl->cfg.startup.arm_ms, SL_M_ALL);
     if (out != SL_OK) {
         return out;
@@ -993,7 +967,7 @@ static sl_out_t sl_wait_until(sl_t *sl, volatile q16_t *x, volatile q16_t *targe
 static sl_out_t sl_catch_speed(sl_t *sl)
 {
     const int8_t dir = sl->dir;
-    q16_t w0 = q16_clamp(sl_abs(sl->w_obs), sl->w_plateau, sl->w_hold_max);
+    q16_t w0 = q16_clamp(q16_abs(sl->w_obs), sl->w_plateau, sl->w_hold_max);
     if (dir < 0) {
         w0 = q16_neg(w0);
     }
@@ -1036,8 +1010,8 @@ static sl_out_t sl_catch_speed(sl_t *sl)
 
     for (uint32_t t = 0; t < sl->cfg.catch_up.close_timeout_ms; t += SL_POLL_MS) {
         const q16_t w_ref = sl->w_ref;
-        const q16_t band = q16_max(q16_mul(sl->close_frac, sl_abs(w_ref)), sl->close_min);
-        if (sl_abs(q16_sub(sl->w_ctrl, w_ref)) <= band) {
+        const q16_t band = q16_max(q16_mul(sl->close_frac, q16_abs(w_ref)), sl->close_min);
+        if (q16_abs(q16_sub(sl->w_ctrl, w_ref)) <= band) {
             break;
         }
         out = sl_wait(sl, SL_POLL_MS, SL_M_ALL);
@@ -1115,7 +1089,7 @@ static sl_out_t sl_reverse(sl_t *sl)
         target = &sl->iq_target;
         rate = sl->rev_iq_step;
     }
-    span = sl_abs(q16_sub(*target, *x));
+    span = q16_abs(q16_sub(*target, *x));
     esp_foc_critical_leave();
 
     /* Slot ticks the ramp needs, as wall time, plus margin for a slow
@@ -1318,12 +1292,6 @@ static esp_err_t sl_request(sl_t *sl, uint32_t bit)
 /* Design                                                                    */
 /* ------------------------------------------------------------------------ */
 
-static q16_t sl_step_q16(float per_s, float slot_hz)
-{
-    const q16_t step = q16_from_float(per_s / slot_hz);
-    return (step > 0) ? step : 1;
-}
-
 static uint32_t sl_slot_ticks(sl_t *sl, uint32_t ms)
 {
     const uint32_t n = (uint32_t)((float)ms * sl->slot_hz * 0.001f + 0.5f);
@@ -1366,14 +1334,14 @@ static bool sl_cfg_ok(const esp_foc_sensorless_config_t *c)
     const bool guard = (c->guard.bemf_frac >= 0.0f) && (c->guard.bemf_fmin_hz > 0.0f) &&
                        (c->guard.overspeed_frac > 0.0f) && (c->guard.collapse_a > 0.0f) &&
                        (c->observer.w_max_frac > c->guard.overspeed_frac) &&
-                       (c->observer.w_max_frac * c->fe_rated_hz * SL_TWO_PI < 30000.0f);
+                       (c->observer.w_max_frac * c->fe_rated_hz * ESP_FOC_TWO_PI_F < 30000.0f);
     return plant && limits && trig && speed && start && hand && catch_ok && guard;
 }
 
 static esp_err_t sl_speed_design(sl_t *sl, float bw_hz, float *kp, float *ki)
 {
     const float zeta = sl->cfg.speed_zeta;
-    const float k_w = 2.0f * zeta * SL_TWO_PI * bw_hz / sl->kp_lim;
+    const float k_w = 2.0f * zeta * ESP_FOC_TWO_PI_F * bw_hz / sl->kp_lim;
     return esp_foc_pid_design_integrator(k_w, sl->slot_hz, bw_hz, zeta, kp, ki);
 }
 
@@ -1417,7 +1385,7 @@ static esp_err_t sl_design(sl_t *sl)
 
     /* SVM phase-peak ceiling Vdc/sqrt(3) over psi_f: the speed the BEMF alone
      * fills the linear range. */
-    sl->f_base_hz = vdc * SL_INV_SQRT3 / (SL_TWO_PI * c->psi_wb);
+    sl->f_base_hz = esp_foc_base_speed_hz(vdc, c->psi_wb);
     int plateau = (int)(c->startup.plateau_hz + 0.5f);
     if (plateau <= 0) {
         plateau = (int)(sl->f_base_hz * c->startup.plateau_fbase_frac + 0.5f);
@@ -1453,7 +1421,7 @@ static esp_err_t sl_design(sl_t *sl)
         .track_zeta = c->observer.track_zeta,
         .blend_hz = blend,
         .psi_lock_frac = c->observer.psi_lock_frac,
-        .w_max_rads = SL_TWO_PI * fe_r * c->observer.w_max_frac,
+        .w_max_rads = ESP_FOC_TWO_PI_F * fe_r * c->observer.w_max_frac,
         .lock_count = c->observer.lock_count,
         .unlock_count = (uint16_t)((unlock > 0u) ? unlock : 1u),
     };
@@ -1464,7 +1432,7 @@ static esp_err_t sl_design(sl_t *sl)
 
     /* Kp from the limits: the speed error that saturates iq. The integrator
      * plant gain is then whatever puts that Kp at the requested bandwidth. */
-    sl->kp_lim = c->i_max_a / (SL_TWO_PI * c->speed_err_sat_frac * fe_r);
+    sl->kp_lim = c->i_max_a / (ESP_FOC_TWO_PI_F * c->speed_err_sat_frac * fe_r);
     const float filt = speed_bw * c->speed_filt_frac;
     if (c->speed_loop && ((speed_bw >= track) || (filt > 0.25f * sl->slot_hz))) {
         return ESP_ERR_INVALID_ARG;
@@ -1481,7 +1449,7 @@ static esp_err_t sl_design(sl_t *sl)
     if (err != ESP_OK) {
         return err;
     }
-    sl->w_filt_b0 = q16_from_float(1.0f - expf(-SL_TWO_PI * filt / sl->slot_hz));
+    sl->w_filt_b0 = q16_from_float(esp_foc_lpf1_coef(filt, 1.0f / sl->slot_hz));
 
     sl->tune.kp_i = kp_i;
     sl->tune.ki_i = ki_i;
@@ -1499,31 +1467,31 @@ static esp_err_t sl_design(sl_t *sl)
     sl->psi = q16_from_float(c->psi_wb);
     sl->follow_k2 = q16_from_float(c->startup.follow_frac * c->startup.follow_frac);
     sl->ramp_id_err = q16_from_float(c->startup.ramp_id_err_a);
-    sl->acq_band = q16_from_float(SL_TWO_PI * c->handoff.band_hz);
-    sl->acq_hunt = q16_from_float(SL_TWO_PI * c->handoff.hunt_hz);
+    sl->acq_band = q16_from_float(ESP_FOC_TWO_PI_F * c->handoff.band_hz);
+    sl->acq_hunt = q16_from_float(ESP_FOC_TWO_PI_F * c->handoff.hunt_hz);
     sl->iq_start = q16_from_float(c->handoff.iq_start_a);
-    sl->w_plateau = q16_from_float(SL_TWO_PI * (float)plateau);
-    sl->we_min = q16_from_float(SL_TWO_PI * sl->we_min_hz);
-    sl->w_hold_max = q16_max(q16_from_float(SL_TWO_PI * c->catch_up.hold_fbase_frac *
+    sl->w_plateau = q16_from_float(ESP_FOC_TWO_PI_F * (float)plateau);
+    sl->we_min = q16_from_float(ESP_FOC_TWO_PI_F * sl->we_min_hz);
+    sl->w_hold_max = q16_max(q16_from_float(ESP_FOC_TWO_PI_F * c->catch_up.hold_fbase_frac *
                                              sl->f_base_hz),
                               sl->w_plateau);
     sl->catch_floor = q16_from_float(c->catch_up.floor_a);
     sl->brake = q16_from_float(c->catch_up.brake_a);
     sl->i_max = q16_from_float(c->i_max_a);
     sl->close_frac = q16_from_float(c->catch_up.close_frac);
-    sl->close_min = q16_from_float(SL_TWO_PI * c->catch_up.close_min_hz);
-    sl->w_cut = q16_from_float(SL_TWO_PI * c->w_min_hz);
+    sl->close_min = q16_from_float(ESP_FOC_TWO_PI_F * c->catch_up.close_min_hz);
+    sl->w_cut = q16_from_float(ESP_FOC_TWO_PI_F * c->w_min_hz);
     sl->iq_cut = q16_from_float(c->iq_min_a);
-    sl->rev_w_step = sl_step_q16(SL_TWO_PI * c->rev_decel_hz_s, sl->slot_hz);
-    sl->rev_iq_step = sl_step_q16(c->rev_decel_a_s, sl->slot_hz);
-    sl->catch_step = sl_step_q16(c->catch_up.slew_a_s, sl->slot_hz);
-    sl->w_slew_user = sl_step_q16(SL_TWO_PI * c->wref_slew_hz_s, sl->slot_hz);
+    sl->rev_w_step = esp_foc_step_q16(ESP_FOC_TWO_PI_F * c->rev_decel_hz_s, sl->slot_hz);
+    sl->rev_iq_step = esp_foc_step_q16(c->rev_decel_a_s, sl->slot_hz);
+    sl->catch_step = esp_foc_step_q16(c->catch_up.slew_a_s, sl->slot_hz);
+    sl->w_slew_user = esp_foc_step_q16(ESP_FOC_TWO_PI_F * c->wref_slew_hz_s, sl->slot_hz);
     sl->blend_du = q16_from_float(1.0f / (pwm * 0.001f * (float)c->handoff.blend_ms));
     sl->id_user = q16_from_float(c->id_run_a);
 
     sl->g_bemf_k = q16_from_float(c->guard.bemf_frac * c->psi_wb);
-    sl->g_w_fmin = q16_from_float(SL_TWO_PI * c->guard.bemf_fmin_hz);
-    sl->g_w_trip = q16_from_float(SL_TWO_PI * fe_r * c->guard.overspeed_frac);
+    sl->g_w_fmin = q16_from_float(ESP_FOC_TWO_PI_F * c->guard.bemf_fmin_hz);
+    sl->g_w_trip = q16_from_float(ESP_FOC_TWO_PI_F * fe_r * c->guard.overspeed_frac);
     sl->g_i_col = q16_from_float(c->guard.collapse_a);
     sl->g_iq_col_ref = q16_from_float(SL_COLLAPSE_IQREF_A);
     sl->g_bemf_need = sl_slot_ticks(sl, c->guard.bemf_hold_ms);
@@ -1548,7 +1516,7 @@ static esp_err_t sl_design(sl_t *sl)
     /* What it takes to put i_align through the winding after the bridge has
      * eaten its dead zone; the slope is the BEMF a following rotor makes. */
     ic->vf_boost = (c->v_deadzone_v + c->rs_ohm * c->i_align_a + c->startup.vf_margin_v) / vdc;
-    ic->vf_per_hz = SL_TWO_PI * c->psi_wb / vdc;
+    ic->vf_per_hz = ESP_FOC_TWO_PI_F * c->psi_wb / vdc;
 
     esp_foc_if_ops_t *op = &sl->ifs.ops;
     op->ctx = sl;
@@ -1825,7 +1793,7 @@ esp_err_t esp_foc_sensorless_set_speed_ref_hz(uint8_t axis, float fe_hz)
     if (!(fabsf(fe_hz) <= sl->cfg.fe_rated_hz * sl->cfg.guard.overspeed_frac)) {
         return ESP_ERR_INVALID_ARG;
     }
-    sl->w_user = q16_from_float(SL_TWO_PI * fe_hz);
+    sl->w_user = q16_from_float(ESP_FOC_TWO_PI_F * fe_hz);
     esp_foc_event_post(sl->sup);
     return ESP_OK;
 }
@@ -1839,10 +1807,10 @@ esp_err_t esp_foc_sensorless_set_speed_slew(uint8_t axis, float hz_per_s)
     if (!sl->inited) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (!(hz_per_s > 0.0f) || (SL_TWO_PI * hz_per_s / sl->slot_hz > 30000.0f)) {
+    if (!(hz_per_s > 0.0f) || (ESP_FOC_TWO_PI_F * hz_per_s / sl->slot_hz > 30000.0f)) {
         return ESP_ERR_INVALID_ARG;
     }
-    sl->w_slew_user = sl_step_q16(SL_TWO_PI * hz_per_s, sl->slot_hz);
+    sl->w_slew_user = esp_foc_step_q16(ESP_FOC_TWO_PI_F * hz_per_s, sl->slot_hz);
     return ESP_OK;
 }
 
@@ -1888,7 +1856,7 @@ esp_err_t esp_foc_sensorless_set_vdq_ff(uint8_t axis, float vd_v, float vq_v)
     if (!sl->inited) {
         return ESP_ERR_INVALID_STATE;
     }
-    const float v_max = sl->vdc_v * SL_INV_SQRT3;
+    const float v_max = sl->vdc_v * ESP_FOC_INV_SQRT3_F;
     if (!(fabsf(vd_v) <= v_max) || !(fabsf(vq_v) <= v_max)) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -1901,33 +1869,19 @@ esp_err_t esp_foc_sensorless_set_vdq_ff(uint8_t axis, float vd_v, float vq_v)
     return ESP_OK;
 }
 
-static void sl_pid_take(esp_foc_pid_t *dst, const esp_foc_pid_t *src)
-{
-    dst->b0 = src->b0;
-    dst->b1 = src->b1;
-    dst->b2 = src->b2;
-    dst->a1 = src->a1;
-    dst->a2 = src->a2;
-    dst->kp = src->kp;
-    dst->ki = src->ki;
-}
-
 /* Coefficients are redesigned on a copy so the ISR never runs a half-written
  * set; the swap itself is five words under the critical section. */
 static esp_err_t sl_pid_retune(esp_foc_pid_t *p, esp_foc_pid_t *p2, float kp, float ki)
 {
     esp_foc_pid_t tmp = *p;
-    esp_err_t err = esp_foc_pid_set_kp(&tmp, kp);
-    if (err == ESP_OK) {
-        err = esp_foc_pid_set_ki(&tmp, ki);
-    }
+    const esp_err_t err = esp_foc_pid_set_pi(&tmp, kp, ki);
     if (err != ESP_OK) {
         return err;
     }
     esp_foc_critical_enter();
-    sl_pid_take(p, &tmp);
+    esp_foc_pid_take_gains(p, &tmp);
     if (p2 != NULL) {
-        sl_pid_take(p2, &tmp);
+        esp_foc_pid_take_gains(p2, &tmp);
     }
     esp_foc_critical_leave();
     return ESP_OK;
@@ -1992,7 +1946,7 @@ esp_err_t esp_foc_sensorless_set_speed_bw(uint8_t axis, float hz)
     if (err != ESP_OK) {
         return err;
     }
-    const q16_t b0 = q16_from_float(1.0f - expf(-SL_TWO_PI * filt / sl->slot_hz));
+    const q16_t b0 = q16_from_float(esp_foc_lpf1_coef(filt, 1.0f / sl->slot_hz));
     err = sl_pid_retune(&sl->pi_w, NULL, kp, ki);
     if (err != ESP_OK) {
         return err;
