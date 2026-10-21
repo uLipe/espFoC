@@ -43,7 +43,7 @@ The work is split over three contexts, each running only what fits its rate:
 | Context | Rate | What runs there |
 |---|---|---|
 | TEZ interrupt | every PWM period | sensor angle step, Park angle, Clarke, Park, current controller d/q (PI or ADRC) plus the voltage feedforward, voltage limit, inverse Park, SVM, duty update |
-| Slot | inside the TEZ, once per fresh encoder sample | position P, speed PI, cogging feedforward, overspeed and stale-sensor guards |
+| Slot | inside the TEZ, once per fresh encoder sample | motion law (position P + speed PI, or LQR), LQR position profile, feedforwards, cogging feedforward, overspeed and stale-sensor guards |
 | Supervisor task | woken every `PWM rate / fetch_hz` periods | encoder read, PLL update, unwrapped position, in-position flag, state machine, run/stop/learn requests, every event callback |
 
 TEZ is the interrupt raised when the PWM counter is at zero; the ADC samples
@@ -74,6 +74,11 @@ feedforward and clamps the sum to `±wm_max_hz`. Multiplied by the pole pairs,
 it becomes the electrical speed reference of the speed PI.
 
 ![Sensored servo control loop](../examples/diagram/ctrl_sensored_servo.png)
+
+That is the default motion law, the cascade PI. With an LQR law
+(`CONFIG_ESP_FOC_SD_MOTION_CTRL`, see [Motion law](#motion-law-cascade-pi-or-lqr))
+one state feedback replaces both the position P and the speed PI, and a
+position step rides a trapezoidal profile instead of the `corr_max_hz` clamp.
 
 The speed loop reads the PLL speed directly; there is no separate speed
 filter, and `pll_bw_hz` sets how much encoder noise reaches the speed PI.
@@ -164,6 +169,69 @@ servo examples print.
 config: the position loop crosses over `pos_sep` (default 4) times below the
 speed loop.
 
+### Motion law: cascade PI or LQR
+
+`CONFIG_ESP_FOC_SD_MOTION_CTRL` picks what turns the speed and position
+references into `iq*`, at build time:
+
+| Choice | Speed law | Position law | Position step |
+|---|---|---|---|
+| `_PI` (default) | speed PI | position P over the speed PI | reference steps, correction clamped to `corr_max_hz` |
+| `_LQR` | LQR with ∫ω | LQR, no integral | trapezoidal profile |
+| `_LQR_I` | LQR with ∫ω | LQR with ∫θ | trapezoidal profile |
+
+**Model.** The LQR is designed during `run()`, in place of the speed PI
+design, on the plant the stack actually drives at `fetch_hz`: the double
+integrator from `iq` to position (gain `K/pp` mechanical), the current
+loop as a first-order lag at `i_bw_hz`, and one sample from the command to
+the current loop. The states are position error (position law only), speed
+error, the lagged current, the delayed command and the integral. The lag
+and delay states are not measured: the law predicts them from its own
+output. `esp_foc_lqr_dare()` solves the discrete Riccati equation in double
+precision (structured doubling, no heap, about 2.2 KB of stack); the slot
+runs the gains in fixed point.
+
+**Weights.** Bryson's rule, at a natural frequency `wn`: the state error
+that `i_max_a` should correct is the weight's inverse square.
+
+- `wn` is the tightest of `pll_bw_hz/2`, the current loop
+  (`i_bw_hz · i_tune_backoff`) and the slot, each over `pll_sep_min`, and of
+  `speed_bw_hz` when set (18 Hz with the defaults).
+- position error worth `i_max_a`: `(K/pp) · i_max_a / wn²`, or
+  `lqr_theta_max_rad`;
+- speed error worth `i_max_a`: `K · i_max_a / wn`, or `lqr_w_max_hz`;
+- integral action time `3/wn`, or `lqr_ti_s`.
+
+As for the PI, the measured noise bounds the speed gain: unless
+`lqr_w_max_hz` is set, `wn` is lowered by 0.8× steps until one noise sigma
+commands at most `fb_iq_budget_a`.
+
+**Integral.** The speed law always integrates the speed error; without it
+any drag would be a standing speed error. The position law integrates only
+under `_LQR_I`. The plain LQR therefore parks wherever its proportional
+share stays under the static friction, a band of about
+`friction · (1 + k_i + k_u) / k_θ` (0.26° on the test bench, 0.076 rad on the
+unit-test mock's 0.15 A of Coulomb friction). The integral stops while the
+output is pushed into `±i_max_a`, and it is clamped so it alone can not
+command more than `i_max_a`.
+
+**Profile and feedforward.** Under the LQR, `set_position_ref_rad()` sets the
+target of a trapezoidal profile computed online each encoder sample from
+where the profile is, so a new target, a redirect mid-move or new limits
+take effect from the current state. Its acceleration is `traj_a_frac ·
+(K/pp) · i_max_a` (half the current with the default 500 permil, the rest is
+the feedback's margin), its cruise speed `wm_max_hz`;
+`set_motion_limits()` lowers them at run time. The profile's acceleration
+is fed forward as `a·pp/K`, and along the speed reference `drag_a` (copied
+from identification by `config_from_motor_id()`) plus `visc_a_per_hz` per
+electrical Hz. In velocity mode the slewed reference's change is fed
+forward the same way. `set_joint()` bypasses the profile: the joint stream
+is the trajectory.
+
+On the test bench a 360° step settles in about 0.12 s under either LQR law
+against 1.3 s under the cascade, whose correction is clamped at 0.8 Hz
+mechanical (`knowledge/HIL/test_results/foc_sensored_position.md`).
+
 `esp_foc_sensored_get_tuning()` returns every intermediate value, from
 `f_base_hz` and `ripple_rads` to the three bandwidth candidates and the final
 gains.
@@ -230,7 +298,8 @@ cfg.ctx = NULL;
   derive" gains at 0. Its default `control` is `ESP_FOC_SD_CONTROL_POSITION`.
 - `config_from_motor_id()` copies only what the result's `valid_mask` marks
   valid: the loop resistance first (the plain phase resistance otherwise),
-  inductance, flux linkage, pole pairs, `K`, inertia, Park offset and lead.
+  inductance, flux linkage, pole pairs, `K` with the drag current, inertia,
+  Park offset and lead. The drag is fed forward only under an LQR law.
 - `config_from_phase_map()` copies the map and sets `map_valid` only if the
   discovered map is valid.
 - `i_max_a` (default 0.7 A) is the `|iq|` ceiling of the speed loop and of
@@ -292,7 +361,8 @@ esp_foc_sensored_set_position_ref_rad(0, 1.57f);
 ```
 
 `set_position_ref_rad()` steps the reference and zeroes the joint speed
-feedforward. For smooth moves, stream joint samples instead:
+feedforward; under an LQR law it sets the target of the stack's
+trapezoidal profile instead. For your own trajectory, stream joint samples:
 `set_joint(axis, theta_rad, w_ff_rads, iq_ff_a)` sets the position, the
 mechanical speed feedforward and the current feedforward together, applied on
 the next encoder sample. The servo example samples a minimum-jerk profile
@@ -350,12 +420,19 @@ previous call, and resets them: use one reader only.
 | Call | Effect | Allowed when |
 |---|---|---|
 | `set_current_pi(axis, kp, ki)` | both current PIs, per-unit of Vdc per A; `ESP_ERR_NOT_SUPPORTED` under ADRC | any level |
-| `set_speed_pi(axis, kp, ki)` | speed PI, A per electrical rad/s | `cfg.control` ≥ velocity |
-| `set_speed_bw(axis, hz)` | redesigns the speed PI on `K` at `hz`, ceilings not applied, `hz < fetch_hz/4` | `cfg.control` ≥ velocity |
-| `set_position_kp(axis, kp)` | position gain, 1/s | `cfg.control` = position |
+| `set_speed_pi(axis, kp, ki)` | speed PI, A per electrical rad/s; `ESP_ERR_NOT_SUPPORTED` under the LQR | `cfg.control` ≥ velocity |
+| `set_speed_bw(axis, hz)` | redesigns the speed PI on `K` at `hz`, or the LQR at `wn = hz`; ceilings and noise descent not applied, `hz < fetch_hz/4` | `cfg.control` ≥ velocity |
+| `set_position_kp(axis, kp)` | position gain, 1/s; `ESP_ERR_NOT_SUPPORTED` under the LQR | `cfg.control` = position |
+| `set_lqr_weights(axis, theta_max_rad, w_max_hz, ti_s)` | Bryson weights, 0 = derive; once running, redesigns at the settled `wn`; `ESP_ERR_NOT_SUPPORTED` under the PI | `cfg.control` ≥ velocity |
+| `set_motion_limits(axis, a_max_rads2, v_max_hz)` | profile acceleration (mechanical rad/s²) and cruise speed (mechanical Hz, ≤ `wm_max_hz`); `ESP_ERR_NOT_SUPPORTED` under the PI | `cfg.control` = position |
 
-The config fields `kp_i`/`ki_i` (PI only), `kp_w`/`ki_w` and `kp_pos` do the
-same at init/run time: any non-zero value skips the corresponding design.
+Under the LQR, `set_speed_bw()` and `set_lqr_weights()` solve the Riccati
+equation on the caller's stack (about 2.5 KB deep) and swap the gains in
+under a critical section; the integral state is kept.
+
+The config fields `kp_i`/`ki_i` (PI only), `kp_w`/`ki_w` and `kp_pos` (cascade
+PI only) do the same at init/run time: any non-zero value skips the
+corresponding design.
 Under ADRC the current loop is set through `i_bw_hz`, `i_tune_backoff`,
 `i_wo_ratio` and `i_delay_ts` before `init()`.
 
@@ -432,7 +509,7 @@ again):
 |---|---|---|
 | `ESP_FOC_SD_FAIL_ENABLE` | the inverter refused `enable()` | check the inverter state and fault latch |
 | `ESP_FOC_SD_FAIL_NOT_STILL` | the speed never stayed under `still_hz` | keep the shaft still and unloaded during `run()`, or raise `still_hz`/`still_timeout_ms` |
-| `ESP_FOC_SD_FAIL_DESIGN` | the speed PI design refused the plant | check `k_rads2_a` and the speed bandwidth fields, or set `kp_w`/`ki_w` |
+| `ESP_FOC_SD_FAIL_DESIGN` | the speed PI or LQR design refused the plant | check `k_rads2_a`, `i_bw_hz` and the speed bandwidth fields, or set `kp_w`/`ki_w` (PI) or the LQR weights |
 
 **Aborts** (`esp_foc_sensored_abort_t`, latched; the stack sets 50 % duties
 at once, then the supervisor cuts the bridge):
@@ -461,7 +538,7 @@ change them per axis in the struct.
 | Symbol | Default | Meaning |
 |---|---|---|
 | `CONFIG_ESP_FOC_SD_MAX_AXES` | 1 | static axis instances (1..4) |
-| `CONFIG_ESP_FOC_SD_TASK_PRIO_BELOW_MAX` / `_TASK_STACK` | 0 / 4096 | supervisor priority (levels below the highest) and stack bytes |
+| `CONFIG_ESP_FOC_SD_TASK_PRIO_BELOW_MAX` / `_TASK_STACK` | 0 / 4096 (6144 under the LQR) | supervisor priority (levels below the highest) and stack bytes |
 | `CONFIG_ESP_FOC_SD_FETCH_HZ` | 2500 | encoder rate; speed PI, position P and PLL run at it; must divide the PWM rate |
 | `CONFIG_ESP_FOC_SD_PLL_BW_HZ` / `_PLL_ZETA_PERMIL` | 180 / 1000 | PLL bandwidth (Hz) and damping (1.0) |
 | `CONFIG_ESP_FOC_SD_PWM_DELAY_PERMIL` | 1500 | inverse-Park lead, 1.5 PWM periods |
@@ -483,6 +560,9 @@ change them per axis in the struct.
 | `CONFIG_ESP_FOC_SD_CORR_MAX_MHZ` | 800 | position correction ceiling, 0.8 Hz mechanical |
 | `CONFIG_ESP_FOC_SD_WM_MAX_HZ` | 18 | speed reference ceiling, Hz mechanical |
 | `CONFIG_ESP_FOC_SD_INPOS_MDEG` / `_INPOS_W_HZ` / `_INPOS_MS` | 1000 / 6 / 100 | in-position band (1°), speed (electrical Hz), hold |
+| `CONFIG_ESP_FOC_SD_MOTION_CTRL_PI` / `_LQR` / `_LQR_I` | PI | motion law |
+| `CONFIG_ESP_FOC_SD_LQR_THETA_MAX_MDEG` / `_W_MAX_HZ` / `_TI_US` | 0 / 0 / 0 | LQR Bryson weights, 0 = derive from `wn` (`lqr_theta_max_rad`, `lqr_w_max_hz` electrical, `lqr_ti_s`) |
+| `CONFIG_ESP_FOC_SD_TRAJ_A_PERMIL` | 500 | LQR profile acceleration, permil of `(K/pp) · i_max_a` |
 | `CONFIG_ESP_FOC_SD_OVERSPEED_HZ` / `_HOLD_MS` | 600 / 2 | overspeed trip (electrical Hz) and hold |
 | `CONFIG_ESP_FOC_SD_STALE_SLOTS` / `_FAIL_MAX` | 125 / 50 | encoder stale and read-error limits |
 | `CONFIG_ESP_FOC_SD_COG_BINS` | 1440 | cogging bins per revolution |
@@ -544,9 +624,16 @@ change them per axis in the struct.
   from the callback, the first three only queue the request and return
   `ESP_OK` without waiting, and `cogging_learn()` refuses with
   `ESP_ERR_INVALID_STATE`.
-- **Position steps are rate-limited, not shaped.** A step through
-  `set_position_ref_rad()` moves at up to `corr_max_hz` (0.8 rev/s with the
-  defaults). Use `set_joint()` with a profile for smooth moves.
+- **Cascade position steps are rate-limited, not shaped.** Under the PI a
+  step through `set_position_ref_rad()` moves at up to `corr_max_hz`
+  (0.8 rev/s with the defaults). Use `set_joint()` with a profile, or an LQR
+  law, whose steps ride the stack's trapezoid.
+- **The LQR profile is fast by default.** Half of `i_max_a` goes to
+  acceleration: about 2 krad/s² on the test bench, a 90° move in ~60 ms. Lower
+  `traj_a_frac` or call `set_motion_limits()` for a gentler mechanism.
+- **The plain LQR does not land exactly.** Without a position integral it
+  stops inside the static-friction band; use `_LQR_I` when the target
+  matters more than the last degree of overshoot.
 - **Bandwidth limits.** The PLL refuses a bandwidth near or above
   `fetch_hz/12` at damping 1, which makes `init()` fail. `set_speed_bw()`
   accepts only `hz < fetch_hz/4`. Raising `fetch_hz` raises both limits but
