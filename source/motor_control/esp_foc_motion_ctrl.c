@@ -11,24 +11,13 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "espFoC/utils/esp_foc_angle.h"
+#include "espFoC/utils/esp_foc_design.h"
 #include "espFoC/utils/esp_foc_lqr.h"
 #include "espFoC/utils/esp_foc_pid.h"
 
-#define MC_TWO_PI    6.28318530718
-#define MC_Q32       4294967296.0
 #define MC_DESCENT   0.8
 #define MC_DESCENT_N 24
-
-static inline q16_t mc_sat64(int64_t x)
-{
-    if (x > (int64_t)INT32_MAX) {
-        return INT32_MAX;
-    }
-    if (x < -(int64_t)INT32_MAX) {
-        return -INT32_MAX;
-    }
-    return (q16_t)x;
-}
 
 /* ------------------------------------------------------------------------ */
 /* Cascade PI                                                                */
@@ -36,11 +25,9 @@ static inline q16_t mc_sat64(int64_t x)
 
 esp_err_t esp_foc_motion_pi_set_speed_gains(esp_foc_motion_pi_t *pi, float kp, float ki)
 {
-    if ((pi == NULL) || !(pi->fs_hz > 0.0f) || !(kp >= 0.0f) || !(ki >= 0.0f)) {
+    if ((pi == NULL) || (esp_foc_pi_q32_set_gains(&pi->w, kp, ki, pi->fs_hz) != ESP_OK)) {
         return ESP_ERR_INVALID_ARG;
     }
-    pi->kp_w_q32 = (int64_t)((double)kp * MC_Q32 + 0.5);
-    pi->ki_ts_q32 = (int64_t)((double)ki / (double)pi->fs_hz * MC_Q32 + 0.5);
     pi->iface.tune.kp_w = kp;
     pi->iface.tune.ki_w = ki;
     return ESP_OK;
@@ -75,13 +62,13 @@ static esp_err_t pi_design(esp_foc_motion_ctrl_t *self, const esp_foc_motion_ctr
     pi->fs_hz = d->fs_hz;
     (void)esp_foc_motion_pi_set_speed_gains(pi, kp, ki);
     pi->i_max = q16_from_float(d->i_max_a);
-    pi->wi_lim_q32 = (int64_t)pi->i_max << 16;
+    esp_foc_pi_q32_set_limit(&pi->w, pi->i_max);
     pi->corr_max = q16_from_float(d->corr_max_rads);
     pi->wm_max = q16_from_float(d->wm_max_rads);
     pi->pp = (int32_t)d->pole_pairs;
     const float fc = 2.0f * d->zeta * d->bw_hz;
     (void)esp_foc_motion_pi_set_position_kp(
-        pi, (d->kp_pos > 0.0f) ? d->kp_pos : (float)MC_TWO_PI * fc / d->pos_sep);
+        pi, (d->kp_pos > 0.0f) ? d->kp_pos : ESP_FOC_TWO_PI_F * fc / d->pos_sep);
     return ESP_OK;
 }
 
@@ -89,19 +76,14 @@ static void pi_reset(esp_foc_motion_ctrl_t *self, esp_foc_motion_mode_t mode, q1
 {
     (void)mode;
     esp_foc_motion_pi_t *pi = (esp_foc_motion_pi_t *)self;
-    pi->wi_q32 = (int64_t)held << 16;
+    esp_foc_pi_q32_reset(&pi->w, held);
 }
 
-/* Integral gain in Q32: Ki·Ts of a speed loop is under one Q16 LSB. */
 static q16_t pi_update(esp_foc_motion_ctrl_t *self, esp_foc_motion_mode_t mode,
                        const esp_foc_motion_in_t *in, q16_t *w_ref_out)
 {
     esp_foc_motion_pi_t *pi = (esp_foc_motion_pi_t *)self;
-    const int64_t kp = pi->kp_w_q32;
-    const int64_t ki = pi->ki_ts_q32;
-    const int64_t i_old = pi->wi_q32;
-    const int64_t i_lim = pi->wi_lim_q32;
-    const int64_t lim = (int64_t)pi->i_max;
+    const q16_t lim = pi->i_max;
     const q16_t ff = in->iq_ff;
     const q16_t w = in->w;
 
@@ -110,35 +92,14 @@ static q16_t pi_update(esp_foc_motion_ctrl_t *self, esp_foc_motion_mode_t mode,
         const q16_t cmax = pi->corr_max;
         const q16_t wmax = pi->wm_max;
         const q16_t corr =
-            q16_clamp(q16_mul(pi->kp_pos, mc_sat64(in->e_th)), q16_neg(cmax), cmax);
+            q16_clamp(q16_mul(pi->kp_pos, q16_sat64(in->e_th)), q16_neg(cmax), cmax);
         const q16_t wm = q16_clamp(q16_add(in->w_ff_m, corr), q16_neg(wmax), wmax);
         w_ref = (q16_t)(wm * pi->pp);
     } else {
         w_ref = in->w_ref_e;
     }
-    const q16_t e = q16_sub(w_ref, w);
-
-    const int64_t inc = (ki * (int64_t)e) >> 16;
-    int64_t i_new = i_old + inc;
-    if (i_new > i_lim) {
-        i_new = i_lim;
-    } else if (i_new < -i_lim) {
-        i_new = -i_lim;
-    }
-    int64_t u = ((kp * (int64_t)e) >> 32) + (i_new >> 16) + (int64_t)ff;
-    bool hold = false;
-    if (u > lim) {
-        u = lim;
-        hold = (inc > 0);
-    } else if (u < -lim) {
-        u = -lim;
-        hold = (inc < 0);
-    }
-    if (!hold) {
-        pi->wi_q32 = i_new;
-    }
     *w_ref_out = w_ref;
-    return (q16_t)u;
+    return esp_foc_pi_q32_update(&pi->w, q16_sub(w_ref, w), ff, lim);
 }
 
 esp_foc_motion_ctrl_t *esp_foc_motion_pi_bind(esp_foc_motion_pi_t *pi)
@@ -169,7 +130,7 @@ static esp_err_t lqr_design_mode(bool integral, const esp_foc_motion_ctrl_design
         .k_rads2_a = d->k_rads2_a,
         .pole_pairs = d->pole_pairs,
         .ts_s = 1.0 / (double)d->fs_hz,
-        .tau_i_s = 1.0 / (MC_TWO_PI * (double)d->i_bw_hz),
+        .tau_i_s = 1.0 / (ESP_FOC_TWO_PI * (double)d->i_bw_hz),
         .position = position,
         .integral = integral,
     };
@@ -199,11 +160,6 @@ static esp_err_t lqr_design_mode(bool integral, const esp_foc_motion_ctrl_design
     return err;
 }
 
-static int64_t lqr_q32(double k)
-{
-    return (int64_t)llround(k * MC_Q32);
-}
-
 static void lqr_take(esp_foc_motion_lqr_t *l, esp_foc_motion_mode_t mode, bool integral,
                      const double *k, double imax)
 {
@@ -211,15 +167,15 @@ static void lqr_take(esp_foc_motion_lqr_t *l, esp_foc_motion_mode_t mode, bool i
     const uint8_t iw = (mode == ESP_FOC_MOTION_POSITION) ? 1u : 0u;
     memset(g, 0, sizeof(*g));
     if (iw != 0u) {
-        g->kth = lqr_q32(k[0]);
+        g->kth = esp_foc_q32_from_double(k[0]);
         const double e = (k[0] != 0.0) ? fmin(4.0 * imax / fabs(k[0]), 32000.0) : 32000.0;
         g->e_lim = (q16_t)(e * 65536.0);
     }
-    g->kw = lqr_q32(k[iw]);
-    g->ki = lqr_q32(k[iw + 1u]);
-    g->ku = lqr_q32(k[iw + 2u]);
+    g->kw = esp_foc_q32_from_double(k[iw]);
+    g->ki = esp_foc_q32_from_double(k[iw + 1u]);
+    g->ku = esp_foc_q32_from_double(k[iw + 2u]);
     if (integral) {
-        g->kz = (int64_t)llround(k[iw + 3u] * 65536.0);
+        g->kz = esp_foc_q16_from_double(k[iw + 3u]);
         if (g->kz != 0) {
             const int64_t lim = (int64_t)l->i_max << 32;
             g->z_lim = lim / ((g->kz < 0) ? -g->kz : g->kz);
@@ -237,7 +193,7 @@ static esp_err_t lqr_design(esp_foc_motion_ctrl_t *self, const esp_foc_motion_ct
         return ESP_ERR_INVALID_ARG;
     }
     const bool descend = (d->ripple_rads > 0.0f) && !(d->w_max_rads > 0.0f);
-    double wn = MC_TWO_PI * (double)d->wn_hz;
+    double wn = ESP_FOC_TWO_PI * (double)d->wn_hz;
     double kv[ESP_FOC_LQR_N_MAX] = { 0 };
     double kp[ESP_FOC_LQR_N_MAX] = { 0 };
     uint8_t nv = 0;
@@ -264,8 +220,8 @@ static esp_err_t lqr_design(esp_foc_motion_ctrl_t *self, const esp_foc_motion_ct
     const double ts = 1.0 / (double)d->fs_hz;
     l->i_max = q16_from_float(d->i_max_a);
     l->pp = (int32_t)d->pole_pairs;
-    l->ts_q32 = lqr_q32(ts);
-    l->alpha_q32 = lqr_q32(exp(-ts * MC_TWO_PI * (double)d->i_bw_hz));
+    l->ts_q32 = esp_foc_q32_from_double(ts);
+    l->alpha_q32 = esp_foc_q32_from_double(exp(-ts * ESP_FOC_TWO_PI * (double)d->i_bw_hz));
     lqr_take(l, ESP_FOC_MOTION_VELOCITY, true, kv, d->i_max_a);
     if (d->position) {
         lqr_take(l, ESP_FOC_MOTION_POSITION, l->integral, kp, d->i_max_a);
@@ -275,7 +231,7 @@ static esp_err_t lqr_design(esp_foc_motion_ctrl_t *self, const esp_foc_motion_ct
 
     esp_foc_motion_ctrl_tune_t *t = &self->tune;
     memset(t, 0, sizeof(*t));
-    t->wn_hz = (float)(wn / MC_TWO_PI);
+    t->wn_hz = (float)(wn / ESP_FOC_TWO_PI);
     t->n_vel = nv;
     for (uint8_t i = 0; i < nv; i++) {
         t->k_vel[i] = (float)kv[i];
