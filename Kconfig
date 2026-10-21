@@ -371,7 +371,11 @@ menu "espFoC Settings"
             config ESP_FOC_SD_TASK_STACK
                 int "Supervisor stack [bytes]"
                 range 2048 16384
+                default 6144 if !ESP_FOC_SD_MOTION_CTRL_PI
                 default 4096
+                help
+                    The LQR design solves the Riccati equation on this stack
+                    when run() starts (about 2.2 KB deep).
 
             config ESP_FOC_SD_FETCH_HZ
                 int "Encoder fetch rate [Hz]"
@@ -557,6 +561,76 @@ menu "espFoC Settings"
                 int "In-position hold [ms]"
                 range 1 10000
                 default 100
+
+        endmenu
+
+        menu "Motion controller"
+
+            choice ESP_FOC_SD_MOTION_CTRL
+                prompt "Speed and position law"
+                default ESP_FOC_SD_MOTION_CTRL_PI
+                help
+                    What turns the speed and position references into
+                    the iq reference, at the encoder rate.
+
+                config ESP_FOC_SD_MOTION_CTRL_PI
+                    bool "Cascade PI (position P over speed PI)"
+
+                config ESP_FOC_SD_MOTION_CTRL_LQR
+                    bool "LQR"
+                    help
+                        State feedback on position, speed, the current
+                        loop lag and one sample of delay, gains from the
+                        discrete Riccati equation at run(). Position
+                        references move on a trapezoidal profile with
+                        its acceleration fed forward. The speed law
+                        integrates the speed error; the position law does
+                        not, so a hold parks wherever the feedback stays
+                        under the static friction.
+
+                config ESP_FOC_SD_MOTION_CTRL_LQR_I
+                    bool "LQR with integral action"
+                    help
+                        LQR plus a state on the integral of the position
+                        error: a constant load leaves no steady-state
+                        error.
+            endchoice
+
+            config ESP_FOC_SD_LQR_THETA_MAX_MDEG
+                int "Position error worth i_max [millidegrees mechanical, 0 = derive]"
+                depends on !ESP_FOC_SD_MOTION_CTRL_PI
+                range 0 3600000
+                default 0
+                help
+                    Bryson weight of the position state. 0 sizes it for
+                    the natural frequency the run settles on.
+
+            config ESP_FOC_SD_LQR_W_MAX_HZ
+                int "Speed error worth i_max [Hz electrical, 0 = derive]"
+                depends on !ESP_FOC_SD_MOTION_CTRL_PI
+                range 0 5000
+                default 0
+                help
+                    Bryson weight of the speed state. 0 sizes it for the
+                    natural frequency and lowers that frequency until
+                    the speed gain spends at most the feedback iq
+                    budget on one ripple sigma.
+
+            config ESP_FOC_SD_LQR_TI_US
+                int "Integral action time [us, 0 = 3/wn]"
+                depends on !ESP_FOC_SD_MOTION_CTRL_PI
+                range 0 10000000
+                default 0
+
+            config ESP_FOC_SD_TRAJ_A_PERMIL
+                int "Profile acceleration [permil of K x i_max]"
+                depends on !ESP_FOC_SD_MOTION_CTRL_PI
+                range 10 1000
+                default 500
+                help
+                    The rest of i_max is the feedback's margin during
+                    the move. The profile cruises at the |speed
+                    reference| ceiling.
 
         endmenu
 

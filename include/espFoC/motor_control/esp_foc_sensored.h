@@ -38,8 +38,10 @@ extern "C" {
  *    offset and lead, Clarke, Park, current PI d/q plus the user vdq
  *    feedforward, vlim, inverse Park rotated by the PWM delay, SVM. Every
  *    PWM/fetch_hz periods it wakes the supervisor for an encoder fetch.
- *  - Slot (inside the TEZ, once per fresh encoder sample): position P, speed
- *    PI, cogging feedforward by mechanical angle and the guards.
+ *  - Slot (inside the TEZ, once per fresh encoder sample): the motion law
+ *    (position P over speed PI, or LQR on a trapezoidal profile, per
+ *    CONFIG_ESP_FOC_SD_MOTION_CTRL), cogging feedforward by mechanical angle
+ *    and the guards.
  *  - Supervisor task: encoder fetch and the PLL update that consumes it, the
  *    unwrapped position, the state machine, run/stop/learn requests and every
  *    event callback. Callbacks share the thread that feeds the encoder: keep
@@ -51,7 +53,7 @@ extern "C" {
  *
  * run() enables the bridge, calibrates the current offsets and, above TORQUE,
  * waits for a still rotor, measures the speed feedback ripple and designs the
- * speed PI on it before RUNNING. ABORT and FAULT latch until clear_fault().
+ * motion law on it before RUNNING. ABORT and FAULT latch until clear_fault().
  *
  * Units: speed references are electrical Hz, positions mechanical radians
  * from the origin, joint speed mechanical rad/s.
@@ -180,6 +182,16 @@ typedef struct {
     float inpos_w_hz;             /* electrical Hz */
     uint32_t inpos_ms;
 
+    /* LQR / LQR+I (CONFIG_ESP_FOC_SD_MOTION_CTRL). wn is the tightest of
+     * pll_bw/2, the current loop and the slot, each over pll_sep_min, and
+     * of speed_bw_hz when set. Weights: 0 = derive (Bryson for wn). */
+    float lqr_theta_max_rad;      /* position error worth i_max_a, mechanical */
+    float lqr_w_max_hz;           /* speed error worth i_max_a, electrical */
+    float lqr_ti_s;               /* integral action time */
+    float traj_a_frac;            /* profile acceleration over K·i_max_a */
+    float drag_a;                 /* iq fed forward along the speed reference sign */
+    float visc_a_per_hz;          /* iq fed forward per electrical Hz of speed reference */
+
     struct {
         float overspeed_hz;       /* |ω_e| trip, electrical Hz */
         uint32_t overspeed_hold_ms;
@@ -267,6 +279,13 @@ typedef struct {
     float ki_w;
     float kp_pos;
     float slot_hz;
+    /* LQR; 0 under the PI. u = -k·x, SI: position [θ mech rad, ω_e rad/s,
+     * iq A, u_prev A, ∫θ rad·s], velocity [ω_e, iq, u_prev, ∫ω rad]. */
+    float lqr_wn_hz;
+    float lqr_k_pos[5];
+    float lqr_k_vel[4];
+    float traj_a_max_rads2;       /* mechanical */
+    float traj_v_max_rads;
 } esp_foc_sensored_tuning_t;
 
 typedef struct {
@@ -282,7 +301,7 @@ void esp_foc_sensored_default_config(esp_foc_sensored_config_t *cfg);
 
 #if CONFIG_ESP_FOC_ENABLE_MOTOR_ID
 /* Copies what valid_mask marks valid: R (loop value first), L, psi, pole
- * pairs, K, J, and the Park offset and lead. */
+ * pairs, K with the drag, J, and the Park offset and lead. */
 void esp_foc_sensored_config_from_motor_id(esp_foc_sensored_config_t *cfg,
                                            const esp_foc_motor_id_result_t *r);
 #endif
@@ -335,21 +354,35 @@ esp_err_t esp_foc_sensored_set_vdq_ff(uint8_t axis, float vd_v, float vq_v);
 esp_err_t esp_foc_sensored_set_speed_ref_hz(uint8_t axis, float fe_hz);
 esp_err_t esp_foc_sensored_set_speed_slew(uint8_t axis, float hz_per_s);
 
-/* POSITION mode. A position reference zeroes the joint speed feedforward. */
+/* POSITION mode. A position reference zeroes the joint speed feedforward.
+ * Under the LQR it is the target of the trapezoidal profile. */
 esp_err_t esp_foc_sensored_set_position_ref_rad(uint8_t axis, float theta_rad);
 /* The current position becomes 0; the reference moves with it. */
 esp_err_t esp_foc_sensored_set_origin(uint8_t axis);
 /* Joint sample: position, speed feedforward (mechanical rad/s) and iq
- * feedforward, applied together on the next encoder sample. */
+ * feedforward, applied together on the next encoder sample. Bypasses the
+ * LQR profile: the joint stream is the trajectory. */
 esp_err_t esp_foc_sensored_set_joint(uint8_t axis, float theta_rad, float w_ff_rads,
                                      float iq_ff_a);
 
 /* ESP_ERR_NOT_SUPPORTED when the current loop is the ADRC. */
 esp_err_t esp_foc_sensored_set_current_pi(uint8_t axis, float kp, float ki);
+/* Cascade PI only; ESP_ERR_NOT_SUPPORTED under the LQR. */
 esp_err_t esp_foc_sensored_set_speed_pi(uint8_t axis, float kp, float ki);
-/* Redesigns the speed PI on K at this bandwidth, ceilings not applied. */
+/* Redesigns the speed PI on K at this bandwidth, or the LQR at this natural
+ * frequency; ceilings and the noise descent not applied. */
 esp_err_t esp_foc_sensored_set_speed_bw(uint8_t axis, float hz);
 esp_err_t esp_foc_sensored_set_position_kp(uint8_t axis, float kp);
+
+/* LQR only (ESP_ERR_NOT_SUPPORTED under the PI). Bryson knobs as in the
+ * config, 0 = derive; once designed, redesigns at the settled wn. Under the
+ * LQR this and set_speed_bw solve the Riccati equation on the caller's
+ * stack, about 2.5 KB deep. */
+esp_err_t esp_foc_sensored_set_lqr_weights(uint8_t axis, float theta_max_rad, float w_max_hz,
+                                           float ti_s);
+/* LQR only. Profile acceleration (mechanical rad/s^2) and cruise speed
+ * (mechanical Hz, at most wm_max_hz), effective on the move in flight. */
+esp_err_t esp_foc_sensored_set_motion_limits(uint8_t axis, float a_max_rads2, float v_max_hz);
 
 /**
  * Learns the cogging feedforward: constant-speed sweeps at ±sweep_hz map the
