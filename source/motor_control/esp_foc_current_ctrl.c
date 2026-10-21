@@ -12,7 +12,8 @@
 #include <stddef.h>
 #include <string.h>
 
-#define ADRC_TWO_PI     6.28318530718f
+#include "espFoC/utils/esp_foc_angle.h"
+
 #define ADRC_WO_POLE_K  0.8f
 #define ADRC_WO_FS_DIV  16.0f
 
@@ -113,7 +114,7 @@ static esp_err_t adrc_design(esp_foc_current_ctrl_t *self, const esp_foc_current
     /* An ESO slower than Rs/(4π·Ls) has l1 < 0 and corrects against the
      * measurement; on silicon that is a limit cycle. Keep wo near the plant
      * pole, capped where noise and the bridge delay take over. */
-    const float wo_pole = fminf(ADRC_WO_POLE_K * pole / ADRC_TWO_PI, d->fs_hz / ADRC_WO_FS_DIV);
+    const float wo_pole = fminf(ADRC_WO_POLE_K * pole / ESP_FOC_TWO_PI_F, d->fs_hz / ADRC_WO_FS_DIV);
     const float wo = fmaxf(wc * d->wo_ratio, wo_pole);
     const float ts = 1.0f / d->fs_hz;
     esp_err_t err = esp_foc_adrc_init(&ad->d, b0, pole, wc, wo, ts, d->delay_ts);

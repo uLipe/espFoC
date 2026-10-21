@@ -12,10 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-#define ESP_FOC_IF_TWO_PI (2.0f * (float)M_PI)
+#include "espFoC/utils/esp_foc_angle.h"
 
 static void apply(esp_foc_if_t *s)
 {
@@ -65,7 +62,7 @@ esp_err_t esp_foc_if_run(esp_foc_if_t *s, int sign)
     const uint32_t dt = (c->dt_ms == 0u) ? 20u : c->dt_ms;
     const float dts = (float)dt * 0.001f;
     const float i_tgt = c->i_align_a;
-    const float w_tgt = ESP_FOC_IF_TWO_PI * (float)c->f_max_hz;
+    const float w_tgt = ESP_FOC_TWO_PI_F * (float)c->f_max_hz;
     float accel = c->accel_rads2;
     if (!(accel > 0.0f)) {
         accel = w_tgt / ((float)c->creep_ramp_ms * 0.001f);
@@ -197,7 +194,7 @@ esp_err_t esp_foc_if_run(esp_foc_if_t *s, int sign)
      * stalled one, so the current loop takes over — by then it has real BEMF and
      * real current to measure.
      */
-    const float vf_w = ESP_FOC_IF_TWO_PI * c->vf_hz;
+    const float vf_w = ESP_FOC_TWO_PI_F * c->vf_hz;
     if (vf_on) {
         const float vf_rate = vf_w / ((float)c->vf_ramp_ms * 0.001f);
 
@@ -208,7 +205,7 @@ esp_err_t esp_foc_if_run(esp_foc_if_t *s, int sign)
             }
 
             w_abs = clampf(w_abs + vf_rate * dts, 0.0f, vf_w);
-            const float fe = w_abs / ESP_FOC_IF_TWO_PI;
+            const float fe = w_abs / ESP_FOC_TWO_PI_F;
             const float v = c->vf_boost + c->vf_per_hz * fe;
 
             /*
@@ -244,7 +241,7 @@ esp_err_t esp_foc_if_run(esp_foc_if_t *s, int sign)
         w_abs = clampf(w_abs + accel * dts, 0.0f, w_tgt);
         s->id = q16_from_float(i_tgt);
         s->iq = 0;
-        s->fe_hz = q16_from_float(sgn * w_abs / ESP_FOC_IF_TWO_PI);
+        s->fe_hz = q16_from_float(sgn * w_abs / ESP_FOC_TWO_PI_F);
         s->phase = ESP_FOC_IF_PHASE_CREEP;
         apply(s);
 
