@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Felipe Neves
  *
  * Sensored FoC stack: TEZ fast path on the compensated encoder angle, the
- * per-sample slot (position P, speed PI, cogging feedforward, guards) and the
+ * per-sample slot (motion law, profile, feedforwards, guards) and the
  * supervisor that feeds the encoder to the PLL and walks the state machine.
  */
 #include "espFoC/motor_control/esp_foc_sensored.h"
@@ -16,7 +16,9 @@
 #include "espFoC/debug/esp_foc_trace.h"
 #include "espFoC/drivers/esp_foc_trigo_hw.h"
 #include "espFoC/motor_control/esp_foc_current_ctrl.h"
+#include "espFoC/motor_control/esp_foc_motion_ctrl.h"
 #include "espFoC/motor_control/esp_foc_rotor_pll.h"
+#include "espFoC/motor_control/esp_foc_traj.h"
 #include "espFoC/osal/esp_foc_osal.h"
 #include "espFoC/utils/esp_foc_angle.h"
 #include "espFoC/utils/esp_foc_clarke.h"
@@ -49,6 +51,17 @@
 #define SD_REQ_CLEAR (1u << 2)
 #define SD_REQ_EXIT  (1u << 3)
 #define SD_REQ_LEARN (1u << 4)
+
+#if CONFIG_ESP_FOC_SD_MOTION_CTRL_PI
+#define SD_LQR 0
+#else
+#define SD_LQR 1
+#endif
+#if CONFIG_ESP_FOC_SD_MOTION_CTRL_LQR_I
+#define SD_LQR_I true
+#else
+#define SD_LQR_I false
+#endif
 
 typedef enum {
     SD_OK = 0,
@@ -98,10 +111,18 @@ typedef struct {
 #endif
 
     /* --- Slot --- */
-    volatile int64_t kp_w_q32;
-    volatile int64_t ki_ts_q32;
-    int64_t wi_q32;
-    int64_t wi_lim_q32;
+    esp_foc_motion_ctrl_t *mctl;
+#if SD_LQR
+    esp_foc_motion_lqr_t mctl_obj;
+    esp_foc_traj_t traj;
+    volatile bool traj_on;        /* position reference rides the profile */
+    q16_t drag;
+    int64_t visc_q32;             /* iq per Q16 electrical rad/s, Q32 */
+    int64_t ff_acc_q16;           /* iq per profile Q32 rad/sample^2, Q16 */
+    q16_t ff_dw_q16;              /* iq per Q16 rad/s of ω* change in a sample */
+#else
+    esp_foc_motion_pi_t mctl_obj;
+#endif
     q16_t i_max;
     volatile q16_t w_target;
     volatile q16_t w_step;
@@ -110,9 +131,6 @@ typedef struct {
     volatile int64_t pos_org;
     volatile int64_t ref_abs;     /* position reference, same frame as pos_raw */
     volatile q16_t w_ff;          /* mechanical rad/s */
-    volatile q16_t kp_pos;
-    q16_t corr_max;
-    q16_t wm_max;
     int32_t pp;
     volatile q16_t th_m;          /* last encoder mechanical angle, wrapped */
     volatile q16_t learn_dth;
@@ -268,40 +286,15 @@ static void sd_fault(void *arg, esp_foc_fault_reason_t reason)
     esp_foc_event_post_auto(sd->sup);
 }
 
-/*
- * Positional PI: P never enters the state, and I only integrates when it
- * does not push the output further into the clamp. Integral gain in Q32:
- * Ki·Ts of a speed loop is under one Q16 LSB.
- */
-static inline q16_t sd_speed_pi(sd_t *sd, q16_t e, q16_t ff)
+#if SD_LQR
+/* w_ref electrical. */
+static inline q16_t sd_drag(const sd_t *sd, q16_t w_ref)
 {
-    const int64_t kp = sd->kp_w_q32;
-    const int64_t ki = sd->ki_ts_q32;
-    const int64_t i_old = sd->wi_q32;
-    const int64_t i_lim = sd->wi_lim_q32;
-    const int64_t lim = (int64_t)sd->i_max;
-
-    const int64_t inc = (ki * (int64_t)e) >> 16;
-    int64_t i_new = i_old + inc;
-    if (i_new > i_lim) {
-        i_new = i_lim;
-    } else if (i_new < -i_lim) {
-        i_new = -i_lim;
-    }
-    int64_t u = ((kp * (int64_t)e) >> 32) + (i_new >> 16) + (int64_t)ff;
-    bool hold = false;
-    if (u > lim) {
-        u = lim;
-        hold = (inc > 0);
-    } else if (u < -lim) {
-        u = -lim;
-        hold = (inc < 0);
-    }
-    if (!hold) {
-        sd->wi_q32 = i_new;
-    }
-    return (q16_t)u;
+    const q16_t d = sd->drag;
+    const q16_t v = (q16_t)(((int64_t)w_ref * sd->visc_q32) >> 32);
+    return q16_add((w_ref > 0) ? d : ((w_ref < 0) ? q16_neg(d) : 0), v);
 }
+#endif
 
 static uint8_t sd_slot(sd_t *sd, q16_t w_e)
 {
@@ -335,26 +328,48 @@ static uint8_t sd_slot(sd_t *sd, q16_t w_e)
         }
     }
 
-    q16_t w_ref;
+    esp_foc_motion_in_t in;
+    esp_foc_motion_mode_t mm;
+    in.w = w_e;
     if (mode == ESP_FOC_SD_MODE_POSITION) {
         const int64_t pos = sd->pos_raw;
         int64_t ref = sd->ref_abs;
         const q16_t dth = sd->learn_dth;
-        const q16_t w_ff = sd->w_ff;
-        const q16_t kp = sd->kp_pos;
-        const q16_t cmax = sd->corr_max;
-        const q16_t wmax = sd->wm_max;
+        q16_t w_ff = sd->w_ff;
         if (dth != 0) {
             ref += dth;
             sd->ref_abs = ref;
         }
-        const q16_t corr = q16_clamp(q16_mul(kp, sd_sat64(ref - pos)), q16_neg(cmax), cmax);
-        const q16_t wm = q16_clamp(q16_add(w_ff, corr), q16_neg(wmax), wmax);
-        w_ref = (q16_t)(wm * sd->pp);
+#if SD_LQR
+        if (sd->traj_on) {
+            esp_foc_traj_t *const tr = &sd->traj;
+            esp_foc_traj_step(tr);
+            ref = esp_foc_traj_theta_q16(tr);
+            w_ff = esp_foc_traj_w(tr);
+            ff = q16_add(ff, (q16_t)((tr->acc * sd->ff_acc_q16) >> 32));
+        }
+        ff = q16_add(ff, sd_drag(sd, (q16_t)(w_ff * sd->pp)));
+#endif
+        in.e_th = ref - pos;
+        in.w_ff_m = w_ff;
+        in.w_ref_e = 0;
+        mm = ESP_FOC_MOTION_POSITION;
     } else {
-        w_ref = sd_slew(sd->w_ref, sd->w_target, sd->w_step);
+        const q16_t w_old = sd->w_ref;
+        const q16_t w_new = sd_slew(w_old, sd->w_target, sd->w_step);
+#if SD_LQR
+        const q16_t dw = q16_sub(w_new, w_old);
+        ff = q16_add(ff, (q16_t)(((int64_t)dw * sd->ff_dw_q16) >> 16));
+        ff = q16_add(ff, sd_drag(sd, w_new));
+#endif
+        in.e_th = 0;
+        in.w_ff_m = 0;
+        in.w_ref_e = w_new;
+        mm = ESP_FOC_MOTION_VELOCITY;
     }
-    const q16_t u = sd_speed_pi(sd, q16_sub(w_ref, w_e), ff);
+    in.iq_ff = ff;
+    q16_t w_ref;
+    const q16_t u = esp_foc_motion_ctrl_update(sd->mctl, mm, &in, &w_ref);
 
     sd->w_ref = w_ref;
     sd->iq_ref = u;
@@ -780,23 +795,83 @@ static q16_t sd_step_q16(float per_s, float slot_hz)
     return (step > 0) ? step : 1;
 }
 
+#if !SD_LQR
 static void sd_speed_gains(sd_t *sd, float kp, float ki)
 {
-    const int64_t kp_q32 = (int64_t)((double)kp * SD_Q32 + 0.5);
-    const int64_t ki_q32 = (int64_t)((double)ki / (double)sd->slot_hz * SD_Q32 + 0.5);
+    esp_foc_motion_pi_t tmp = sd->mctl_obj;
+    (void)esp_foc_motion_pi_set_speed_gains(&tmp, kp, ki);
     esp_foc_critical_enter();
-    sd->kp_w_q32 = kp_q32;
-    sd->ki_ts_q32 = ki_q32;
+    sd->mctl_obj.kp_w_q32 = tmp.kp_w_q32;
+    sd->mctl_obj.ki_ts_q32 = tmp.ki_ts_q32;
     esp_foc_critical_leave();
+    sd->mctl_obj.iface.tune.kp_w = kp;
+    sd->mctl_obj.iface.tune.ki_w = ki;
     sd->tune.kp_w = kp;
     sd->tune.ki_w = ki;
 }
 
 static void sd_position_kp(sd_t *sd, float kp)
 {
-    sd->kp_pos = q16_from_float(kp);
+    (void)esp_foc_motion_pi_set_position_kp(&sd->mctl_obj, kp);
     sd->tune.kp_pos = kp;
 }
+#endif
+
+static void sd_motion_design_in(const sd_t *sd, esp_foc_motion_ctrl_design_t *d)
+{
+    const esp_foc_sensored_config_t *c = &sd->cfg;
+    memset(d, 0, sizeof(*d));
+    d->k_rads2_a = c->k_rads2_a;
+    d->pole_pairs = c->pole_pairs;
+    d->fs_hz = sd->slot_hz;
+    d->i_max_a = c->i_max_a;
+    d->position = (c->control == ESP_FOC_SD_CONTROL_POSITION);
+    d->zeta = c->speed_zeta;
+    d->kp_w = c->kp_w;
+    d->ki_w = c->ki_w;
+    d->kp_pos = c->kp_pos;
+    d->pos_sep = c->pos_sep;
+    d->corr_max_rads = SD_TWO_PI * c->corr_max_hz;
+    d->wm_max_rads = SD_TWO_PI * c->wm_max_hz;
+    d->i_bw_hz = c->i_bw_hz * c->i_tune_backoff;
+    d->fb_iq_budget_a = c->fb_iq_budget_a;
+    d->theta_max_rad = c->lqr_theta_max_rad;
+    d->w_max_rads = SD_TWO_PI * c->lqr_w_max_hz;
+    d->ti_s = c->lqr_ti_s;
+}
+
+#if SD_LQR
+static void sd_lqr_tune(sd_t *sd, const esp_foc_motion_ctrl_tune_t *mt)
+{
+    esp_foc_sensored_tuning_t *t = &sd->tune;
+    t->lqr_wn_hz = mt->wn_hz;
+    memcpy(t->lqr_k_pos, mt->k_pos, sizeof(t->lqr_k_pos));
+    memcpy(t->lqr_k_vel, mt->k_vel, sizeof(t->lqr_k_vel));
+}
+
+/* Redesign while the slot may run: gains land in one critical section, the
+ * controller state (lag, delay, integral) is left as it is. */
+static esp_err_t sd_lqr_redesign(sd_t *sd, float wn_hz)
+{
+    esp_foc_motion_ctrl_design_t d;
+    sd_motion_design_in(sd, &d);
+    d.wn_hz = wn_hz;
+    esp_foc_motion_lqr_t tmp;
+    esp_foc_motion_ctrl_t *c = esp_foc_motion_lqr_bind(&tmp, sd->mctl_obj.integral);
+    const esp_err_t err = esp_foc_motion_ctrl_design(c, &d);
+    if (err != ESP_OK) {
+        return err;
+    }
+    esp_foc_critical_enter();
+    memcpy(sd->mctl_obj.g, tmp.g, sizeof(tmp.g));
+    sd->mctl_obj.alpha_q32 = tmp.alpha_q32;
+    sd->mctl_obj.ts_q32 = tmp.ts_q32;
+    esp_foc_critical_leave();
+    sd->mctl_obj.iface.tune = tmp.iface.tune;
+    sd_lqr_tune(sd, &tmp.iface.tune);
+    return ESP_OK;
+}
+#endif
 
 /* Residual about a least-squares line, so a coast-down or a nudge during the
  * window is not counted as feedback noise. */
@@ -844,22 +919,38 @@ static esp_err_t sd_speed_design(sd_t *sd)
     const float phase = 0.5f * c->pll_bw_hz / c->pll_sep_min / two_z;
     bw = fminf(bw, phase);
 
-    float kp = c->kp_w;
-    float ki = c->ki_w;
-    if ((kp == 0.0f) && (ki == 0.0f)) {
-        const esp_err_t err =
-            esp_foc_pid_design_integrator(c->k_rads2_a, sd->slot_hz, bw, c->speed_zeta, &kp, &ki);
-        if (err != ESP_OK) {
-            return err;
-        }
+    esp_foc_motion_ctrl_design_t d;
+    sd_motion_design_in(sd, &d);
+    d.bw_hz = bw;
+#if SD_LQR
+    /* The LQR crossover sits near wn itself, not at 2·zeta·bw. The noise
+     * ceiling is the design's own descent on the speed gain it solves. */
+    float wn = 0.5f * c->pll_bw_hz;
+    wn = fminf(wn, d.i_bw_hz);
+    wn = fminf(wn, sd->slot_hz / SD_TWO_PI);
+    wn /= c->pll_sep_min;
+    if (c->speed_bw_hz > 0.0f) {
+        wn = fminf(c->speed_bw_hz, wn);
     }
-    sd_speed_gains(sd, kp, ki);
+    d.wn_hz = wn;
+    d.ripple_rads = t->ripple_rads;
+#endif
+    const esp_err_t err = esp_foc_motion_ctrl_design(sd->mctl, &d);
+    if (err != ESP_OK) {
+        return err;
+    }
+    const esp_foc_motion_ctrl_tune_t *mt = &sd->mctl->tune;
+    t->kp_w = mt->kp_w;
+    t->ki_w = mt->ki_w;
+    t->kp_pos = mt->kp_pos;
+#if SD_LQR
+    sd_lqr_tune(sd, mt);
+#endif
     t->speed_bw_want_hz = want;
     t->speed_bw_noise_hz = noise;
     t->speed_bw_phase_hz = phase;
     t->speed_bw_hz = bw;
     t->speed_fc_hz = two_z * bw;
-    sd_position_kp(sd, (c->kp_pos > 0.0f) ? c->kp_pos : SD_TWO_PI * t->speed_fc_hz / c->pos_sep);
     return ESP_OK;
 }
 
@@ -892,7 +983,12 @@ static bool sd_cfg_ok(const esp_foc_sensored_config_t *c)
                      (c->cogging.revs > 0.0f) && (c->cogging.passes_max >= 1u) &&
                      (c->cogging.conv_a > 0.0f) && ((c->cogging.smooth & 1u) == 1u) &&
                      (c->cogging.smooth < SD_BINS);
-    return plant && sense && cur && speed && pos && guard && cog;
+    const bool lqr = (c->lqr_theta_max_rad >= 0.0f) && (c->lqr_w_max_hz >= 0.0f) &&
+                     (c->lqr_ti_s >= 0.0f) && (c->drag_a >= 0.0f) &&
+                     (c->visc_a_per_hz >= 0.0f) &&
+                     (!SD_LQR || ((c->traj_a_frac > 0.0f) && (c->traj_a_frac <= 1.0f) &&
+                                  (c->drag_a < c->i_max_a) && (c->visc_a_per_hz < c->i_max_a)));
+    return plant && sense && cur && speed && pos && guard && cog && lqr;
 }
 
 static esp_err_t sd_design(sd_t *sd)
@@ -947,11 +1043,29 @@ static esp_err_t sd_design(sd_t *sd)
     sd->vlead_q32 = (int32_t)lrintf(c->pwm_delay_ts / pwm * (float)SD_Q32);
 
     sd->i_max = q16_from_float(c->i_max_a);
-    sd->wi_lim_q32 = (int64_t)sd->i_max << 16;
     sd->w_step = sd_step_q16(SD_TWO_PI * c->wref_slew_hz_s, sd->slot_hz);
-    sd->corr_max = q16_from_float(SD_TWO_PI * c->corr_max_hz);
-    sd->wm_max = q16_from_float(SD_TWO_PI * c->wm_max_hz);
     sd->pp = (int32_t)c->pole_pairs;
+#if SD_LQR
+    sd->mctl = esp_foc_motion_lqr_bind(&sd->mctl_obj, SD_LQR_I);
+    sd->drag = q16_from_float(c->drag_a);
+    sd->visc_q32 = (int64_t)llround((double)c->visc_a_per_hz / (double)SD_TWO_PI * 4294967296.0);
+    if (c->control != ESP_FOC_SD_CONTROL_TORQUE) {
+        const float km = c->k_rads2_a / (float)c->pole_pairs;
+        const float a_max = c->traj_a_frac * km * c->i_max_a;
+        err = esp_foc_traj_init(&sd->traj, c->fetch_hz, a_max, SD_TWO_PI * c->wm_max_hz);
+        if (err != ESP_OK) {
+            return err;
+        }
+        sd->ff_acc_q16 = (int64_t)llround((double)sd->slot_hz * (double)sd->slot_hz / (double)km *
+                                          65536.0);
+        sd->ff_dw_q16 = q16_from_float(sd->slot_hz / c->k_rads2_a);
+        sd->tune.traj_a_max_rads2 = a_max;
+        sd->tune.traj_v_max_rads = SD_TWO_PI * c->wm_max_hz;
+    }
+#else
+    sd->mctl = esp_foc_motion_pi_bind(&sd->mctl_obj);
+    sd->mctl_obj.fs_hz = sd->slot_hz;
+#endif
     sd->cog_k = q16_from_float((float)SD_BINS / SD_TWO_PI);
     sd->g_w_trip = q16_from_float(SD_TWO_PI * c->guard.overspeed_hz);
     sd->g_ov_need = (uint32_t)((float)c->guard.overspeed_hold_ms * sd->slot_hz * 0.001f + 0.5f);
@@ -962,9 +1076,11 @@ static esp_err_t sd_design(sd_t *sd)
     sd->inpos_band = q16_from_float(c->inpos_rad);
     sd->inpos_w = q16_from_float(SD_TWO_PI * c->inpos_w_hz);
     sd->inpos_need = (uint32_t)((float)c->inpos_ms * sd->slot_hz * 0.001f + 0.5f);
+#if !SD_LQR
     if (c->kp_pos > 0.0f) {
         sd_position_kp(sd, c->kp_pos);
     }
+#endif
     return ESP_OK;
 }
 
@@ -984,13 +1100,19 @@ static void sd_enter_mode(sd_t *sd, esp_foc_sensored_mode_t mode)
     case ESP_FOC_SD_MODE_VELOCITY:
         sd->w_ref = w;
         sd->w_target = w;
-        sd->wi_q32 = (int64_t)q16_sub(iq, sd->iq_user) << 16;
+        esp_foc_motion_ctrl_reset(sd->mctl, ESP_FOC_MOTION_VELOCITY, q16_sub(iq, sd->iq_user));
         break;
     case ESP_FOC_SD_MODE_POSITION:
         sd->ref_abs = sd->pos_raw;
         sd->w_ff = 0;
         sd->w_ref = w;
-        sd->wi_q32 = (int64_t)q16_sub(iq, sd->iq_user) << 16;
+        esp_foc_motion_ctrl_reset(sd->mctl, ESP_FOC_MOTION_POSITION, q16_sub(iq, sd->iq_user));
+#if SD_LQR
+        /* Brakes from the speed in flight back to where the switch happened. */
+        esp_foc_traj_seed(&sd->traj, sd->pos_raw, (q16_t)(w / sd->pp));
+        esp_foc_traj_set_target(&sd->traj, sd->pos_raw);
+        sd->traj_on = true;
+#endif
         break;
     default:
         break;
@@ -1063,7 +1185,7 @@ static sd_out_t sd_start(sd_t *sd)
     esp_foc_critical_enter();
     esp_foc_current_ctrl_reset(sd->ictl);
     esp_foc_rotor_pll_seed(&sd->pll, st.theta_e, 0);
-    sd->wi_q32 = 0;
+    esp_foc_motion_ctrl_reset(sd->mctl, ESP_FOC_MOTION_VELOCITY, 0);
     sd->iq_ref = 0;
     sd->w_ref = 0;
     sd->w_target = 0;
@@ -1087,11 +1209,19 @@ static sd_out_t sd_start(sd_t *sd)
         if (o != SD_OK) {
             return o;
         }
+        /* The LQR design holds this task, and so the encoder fetch, for
+         * longer than the stale window; iq* stays 0 until the slot is on. */
+        esp_foc_critical_enter();
+        sd->guards_on = false;
+        esp_foc_critical_leave();
         if (sd_speed_design(sd) != ESP_OK) {
             sd->fail = ESP_FOC_SD_FAIL_DESIGN;
             return SD_FAILED;
         }
         esp_foc_critical_enter();
+        sd->since_fresh = 0;
+        sd->fail_run = 0;
+        sd->guards_on = true;
         sd_enter_mode(sd, (esp_foc_sensored_mode_t)c->control);
         sd->slot_on = true;
         esp_foc_critical_leave();
@@ -1117,6 +1247,9 @@ static sd_out_t sd_sweep_leg(sd_t *sd, int8_t dir)
     const uint32_t ms = (uint32_t)(1000.0f * c->cogging.revs / c->cogging.sweep_hz);
 
     esp_foc_critical_enter();
+#if SD_LQR
+    sd->traj_on = false;
+#endif
     sd->ref_abs = sd->pos_raw;
     sd->w_ff = q16_from_float(w);
     sd->learn_dth = (dth != 0) ? dth : ((dir == 0) ? 1 : -1);
@@ -1255,6 +1388,11 @@ static sd_out_t sd_learn(sd_t *sd, esp_err_t *err)
     sd->cog_info = info;
     esp_foc_critical_enter();
     sd->ref_abs = sd->pos_raw;
+#if SD_LQR
+    esp_foc_traj_seed(&sd->traj, sd->pos_raw, 0);
+    esp_foc_traj_set_target(&sd->traj, sd->pos_raw);
+    sd->traj_on = true;
+#endif
     esp_foc_critical_leave();
 
     esp_foc_sensored_event_t e = sd_event(sd, ESP_FOC_SD_EV_LEARN_DONE);
@@ -1444,6 +1582,13 @@ void esp_foc_sensored_default_config(esp_foc_sensored_config_t *cfg)
     cfg->inpos_rad = (float)CONFIG_ESP_FOC_SD_INPOS_MDEG * 1.0e-3f * (SD_TWO_PI / 360.0f);
     cfg->inpos_w_hz = (float)CONFIG_ESP_FOC_SD_INPOS_W_HZ;
     cfg->inpos_ms = CONFIG_ESP_FOC_SD_INPOS_MS;
+#if SD_LQR
+    cfg->lqr_theta_max_rad =
+        (float)CONFIG_ESP_FOC_SD_LQR_THETA_MAX_MDEG * 1.0e-3f * (SD_TWO_PI / 360.0f);
+    cfg->lqr_w_max_hz = (float)CONFIG_ESP_FOC_SD_LQR_W_MAX_HZ;
+    cfg->lqr_ti_s = (float)CONFIG_ESP_FOC_SD_LQR_TI_US * 1.0e-6f;
+    cfg->traj_a_frac = (float)CONFIG_ESP_FOC_SD_TRAJ_A_PERMIL * 1.0e-3f;
+#endif
     cfg->guard.overspeed_hz = (float)CONFIG_ESP_FOC_SD_OVERSPEED_HZ;
     cfg->guard.overspeed_hold_ms = CONFIG_ESP_FOC_SD_OVERSPEED_HOLD_MS;
     cfg->guard.sensor_stale_slots = CONFIG_ESP_FOC_SD_STALE_SLOTS;
@@ -1482,6 +1627,7 @@ void esp_foc_sensored_config_from_motor_id(esp_foc_sensored_config_t *cfg,
     }
     if ((v & ESP_FOC_MOTOR_ID_VALID_K) != 0u) {
         cfg->k_rads2_a = r->k_rad_s2_per_a;
+        cfg->drag_a = fabsf(r->drag_a);
     }
     if ((v & ESP_FOC_MOTOR_ID_VALID_J) != 0u) {
         cfg->j_kgm2 = r->j_kgm2;
@@ -1786,6 +1932,14 @@ esp_err_t esp_foc_sensored_set_position_ref_rad(uint8_t axis, float theta_rad)
     esp_foc_critical_enter();
     sd->ref_abs = q + sd->pos_org;
     sd->w_ff = 0;
+#if SD_LQR
+    if (!sd->traj_on) {
+        const q16_t w = esp_foc_rotor_pll_get_omega(&sd->pll);
+        esp_foc_traj_seed(&sd->traj, sd->pos_raw, (q16_t)(w / sd->pp));
+        sd->traj_on = true;
+    }
+    esp_foc_traj_set_target(&sd->traj, sd->ref_abs);
+#endif
     esp_foc_critical_leave();
     return ESP_OK;
 }
@@ -1824,6 +1978,9 @@ esp_err_t esp_foc_sensored_set_joint(uint8_t axis, float theta_rad, float w_ff_r
     const q16_t w = q16_from_float(w_ff_rads);
     const q16_t iq = q16_from_float(iq_ff_a);
     esp_foc_critical_enter();
+#if SD_LQR
+    sd->traj_on = false;
+#endif
     sd->ref_abs = q + sd->pos_org;
     sd->w_ff = w;
     sd->iq_user = iq;
@@ -1890,8 +2047,12 @@ esp_err_t esp_foc_sensored_set_speed_pi(uint8_t axis, float kp, float ki)
     if (!(kp >= 0.0f) || !(ki >= 0.0f) || (kp >= 100.0f) || (ki / sd->slot_hz >= 100.0f)) {
         return ESP_ERR_INVALID_ARG;
     }
+#if SD_LQR
+    return ESP_ERR_NOT_SUPPORTED;
+#else
     sd_speed_gains(sd, kp, ki);
     return ESP_OK;
+#endif
 }
 
 esp_err_t esp_foc_sensored_set_speed_bw(uint8_t axis, float hz)
@@ -1907,6 +2068,9 @@ esp_err_t esp_foc_sensored_set_speed_bw(uint8_t axis, float hz)
     if (!(hz > 0.0f) || (hz >= 0.25f * sd->slot_hz)) {
         return ESP_ERR_INVALID_ARG;
     }
+#if SD_LQR
+    return sd_lqr_redesign(sd, hz);
+#else
     float kp = 0.0f;
     float ki = 0.0f;
     err = esp_foc_pid_design_integrator(sd->cfg.k_rads2_a, sd->slot_hz, hz, sd->cfg.speed_zeta,
@@ -1918,6 +2082,7 @@ esp_err_t esp_foc_sensored_set_speed_bw(uint8_t axis, float hz)
     sd->tune.speed_bw_hz = hz;
     sd->tune.speed_fc_hz = 2.0f * sd->cfg.speed_zeta * hz;
     return ESP_OK;
+#endif
 }
 
 esp_err_t esp_foc_sensored_set_position_kp(uint8_t axis, float kp)
@@ -1933,8 +2098,79 @@ esp_err_t esp_foc_sensored_set_position_kp(uint8_t axis, float kp)
     if (!(kp >= 0.0f) || (kp >= 30000.0f)) {
         return ESP_ERR_INVALID_ARG;
     }
+#if SD_LQR
+    return ESP_ERR_NOT_SUPPORTED;
+#else
     sd_position_kp(sd, kp);
     return ESP_OK;
+#endif
+}
+
+esp_err_t esp_foc_sensored_set_lqr_weights(uint8_t axis, float theta_max_rad, float w_max_hz,
+                                           float ti_s)
+{
+    esp_err_t err;
+    sd_t *sd = sd_ready(axis, &err);
+    if (sd == NULL) {
+        return err;
+    }
+    if (!(theta_max_rad >= 0.0f) || !(w_max_hz >= 0.0f) || !(ti_s >= 0.0f)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+#if SD_LQR
+    if ((int)sd->cfg.control < (int)ESP_FOC_SD_CONTROL_VELOCITY) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const float th0 = sd->cfg.lqr_theta_max_rad;
+    const float w0 = sd->cfg.lqr_w_max_hz;
+    const float ti0 = sd->cfg.lqr_ti_s;
+    sd->cfg.lqr_theta_max_rad = theta_max_rad;
+    sd->cfg.lqr_w_max_hz = w_max_hz;
+    sd->cfg.lqr_ti_s = ti_s;
+    if (sd->tune.lqr_wn_hz > 0.0f) {
+        err = sd_lqr_redesign(sd, sd->tune.lqr_wn_hz);
+        if (err != ESP_OK) {
+            sd->cfg.lqr_theta_max_rad = th0;
+            sd->cfg.lqr_w_max_hz = w0;
+            sd->cfg.lqr_ti_s = ti0;
+        }
+    }
+    return err;
+#else
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+esp_err_t esp_foc_sensored_set_motion_limits(uint8_t axis, float a_max_rads2, float v_max_hz)
+{
+    esp_err_t err;
+    sd_t *sd = sd_ready(axis, &err);
+    if (sd == NULL) {
+        return err;
+    }
+    if (!(a_max_rads2 > 0.0f) || !(v_max_hz > 0.0f) || (v_max_hz > sd->cfg.wm_max_hz)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+#if SD_LQR
+    if (sd->cfg.control != ESP_FOC_SD_CONTROL_POSITION) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_foc_traj_t tmp = sd->traj;
+    err = esp_foc_traj_set_limits(&tmp, a_max_rads2, SD_TWO_PI * v_max_hz);
+    if (err != ESP_OK) {
+        return err;
+    }
+    esp_foc_critical_enter();
+    sd->traj.a_max = tmp.a_max;
+    sd->traj.v_max = tmp.v_max;
+    sd->traj.d_cap = tmp.d_cap;
+    esp_foc_critical_leave();
+    sd->tune.traj_a_max_rads2 = a_max_rads2;
+    sd->tune.traj_v_max_rads = SD_TWO_PI * v_max_hz;
+    return ESP_OK;
+#else
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
 }
 
 esp_err_t esp_foc_sensored_cogging_learn(uint8_t axis, uint32_t timeout_ms,
