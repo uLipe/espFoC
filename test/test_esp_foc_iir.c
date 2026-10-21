@@ -91,3 +91,51 @@ TEST_CASE("iir impulse energy decays", "[espFoC][iir]")
     }
     TEST_ASSERT_TRUE(e_late < e_early);
 }
+
+TEST_CASE("lpf1 coef: 0 at DC, monotonic, below 1", "[espFoC][iir]")
+{
+    const float ts = 1.0f / 20000.0f;
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, esp_foc_lpf1_coef(0.0f, ts));
+    const float b100 = esp_foc_lpf1_coef(100.0f, ts);
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, 1.0f - expf(-2.0f * 3.14159265f * 100.0f * ts), b100);
+    TEST_ASSERT_TRUE(esp_foc_lpf1_coef(1000.0f, ts) > b100);
+    TEST_ASSERT_TRUE(esp_foc_lpf1_coef(1e6f, ts) <= 1.0f);
+}
+
+TEST_CASE("lpf1: b0 edges hold or pass through", "[espFoC][iir]")
+{
+    TEST_ASSERT_EQUAL_INT32(Q16_HALF, esp_foc_lpf1(Q16_HALF, Q16_ONE, 0));
+    TEST_ASSERT_EQUAL_INT32(Q16_MINUS_ONE, esp_foc_lpf1(Q16_HALF, Q16_MINUS_ONE, Q16_ONE));
+}
+
+TEST_CASE("lpf1: step tracks first-order curve and settles", "[espFoC][iir]")
+{
+    const float b0f = esp_foc_lpf1_coef(100.0f, 1.0f / 20000.0f);
+    const q16_t b0 = q16_from_float(b0f);
+    q16_t y = 0;
+    q16_t prev = 0;
+    for (int k = 1; k <= 200; k++) {
+        y = esp_foc_lpf1(y, Q16_ONE, b0);
+        TEST_ASSERT_TRUE(y >= prev);
+        TEST_ASSERT_TRUE(y <= Q16_ONE);
+        prev = y;
+    }
+    TEST_ASSERT_INT32_WITHIN(q16_from_float(0.01f),
+                             q16_from_float(1.0f - powf(1.0f - b0f, 200.0f)), y);
+    for (int k = 0; k < 4000; k++) {
+        y = esp_foc_lpf1(y, Q16_ONE, b0);
+    }
+    /* Truncated b0·e leaves a dead band of 1/b0 LSB. */
+    TEST_ASSERT_INT32_WITHIN(40, Q16_ONE, y);
+    const q16_t y_end = esp_foc_lpf1(y, Q16_ONE, b0);
+    TEST_ASSERT_EQUAL_INT32(y, y_end);
+}
+
+TEST_CASE("lpf1: negative full scale does not overflow", "[espFoC][iir]")
+{
+    q16_t y = q16_from_float(30000.0f);
+    for (int k = 0; k < 2000; k++) {
+        y = esp_foc_lpf1(y, q16_from_float(-30000.0f), q16_from_float(0.1f));
+    }
+    TEST_ASSERT_INT32_WITHIN(16, q16_from_float(-30000.0f), y);
+}

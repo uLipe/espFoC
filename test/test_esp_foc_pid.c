@@ -433,3 +433,45 @@ TEST_CASE("pid PMSM decoupling ff is BEMF plus weL in pu of Vdc", "[espFoC][pid]
                              (we_f * 0.0005f * 0.30f + we_f * 0.002564f) / 12.0f,
                              q16_to_float(pq.ff));
 }
+
+TEST_CASE("pid set_pi matches set_kp + set_ki", "[espFoC][pid]")
+{
+    esp_foc_pid_t a;
+    esp_foc_pid_t b;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_pid_init(&a, 1.0f, 10.0f, 0.0f, 0.0f, 1e-4f));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_pid_init(&b, 1.0f, 10.0f, 0.0f, 0.0f, 1e-4f));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_pid_set_pi(&a, 2.5f, 400.0f));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_pid_set_kp(&b, 2.5f));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_pid_set_ki(&b, 400.0f));
+    TEST_ASSERT_EQUAL_INT32(b.b0, a.b0);
+    TEST_ASSERT_EQUAL_INT32(b.b1, a.b1);
+    TEST_ASSERT_EQUAL_INT32(b.b2, a.b2);
+    TEST_ASSERT_EQUAL_INT32(b.a1, a.a1);
+    TEST_ASSERT_EQUAL_INT32(b.a2, a.a2);
+    TEST_ASSERT_EQUAL_FLOAT(2.5f, a.kp);
+    TEST_ASSERT_EQUAL_FLOAT(400.0f, a.ki);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, esp_foc_pid_set_pi(NULL, 1.0f, 1.0f));
+}
+
+TEST_CASE("pid take_gains keeps the live state", "[espFoC][pid]")
+{
+    esp_foc_pid_t live;
+    esp_foc_pid_t tuned;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_pid_init(&live, 1.0f, 10.0f, 0.0f, 0.0f, 1e-4f));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_pid_init(&tuned, 3.0f, 90.0f, 0.0f, 0.0f, 1e-4f));
+    for (int i = 0; i < 20; i++) {
+        (void)esp_foc_pid_update(&live, Q16_HALF, 0);
+    }
+    esp_foc_pid_set_ff(&live, Q16_ONE / 8);
+    const q16_t e1 = live.e1;
+    const q16_t u1 = live.u1;
+    const q16_t ff = live.ff;
+    esp_foc_pid_take_gains(&live, &tuned);
+    TEST_ASSERT_EQUAL_INT32(tuned.b0, live.b0);
+    TEST_ASSERT_EQUAL_INT32(tuned.b1, live.b1);
+    TEST_ASSERT_EQUAL_FLOAT(3.0f, live.kp);
+    TEST_ASSERT_EQUAL_FLOAT(90.0f, live.ki);
+    TEST_ASSERT_EQUAL_INT32(e1, live.e1);
+    TEST_ASSERT_EQUAL_INT32(u1, live.u1);
+    TEST_ASSERT_EQUAL_INT32(ff, live.ff);
+}

@@ -10,6 +10,8 @@
 #include <math.h>
 #include <limits.h>
 
+#include "espFoC/utils/esp_foc_angle.h"
+
 static q16_t sat_shift16(int64_t acc)
 {
     int64_t v = acc >> 16;
@@ -52,7 +54,7 @@ static esp_err_t redesign(esp_foc_pid_t *p)
         a1 = -1.0f;
         a2 = 0.0f;
     } else {
-        float n = (p->n_hz > 0.0f) ? (2.0f * (float)M_PI * p->n_hz) : (10.0f / ts);
+        float n = (p->n_hz > 0.0f) ? (ESP_FOC_TWO_PI_F * p->n_hz) : (10.0f / ts);
         float alpha = 2.0f / ts;
         float a_s = kp + kd * n;
         float b_s = kp * n + ki;

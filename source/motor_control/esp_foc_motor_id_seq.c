@@ -62,11 +62,6 @@
 #define MOTOR_ID_PROBE_BW_RATIO 2
 #define MOTOR_ID_LAGCAL_DEFAULT_PERMIL 150
 
-static int32_t q16_to_milli(q16_t v)
-{
-    return (int32_t)(((int64_t)v * 1000) >> 16);
-}
-
 static void go(esp_foc_motor_id_seq_t *s, esp_foc_motor_id_phase_t ph)
 {
     s->phase = ph;

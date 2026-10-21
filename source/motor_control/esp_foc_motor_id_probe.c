@@ -43,11 +43,6 @@
 /* How much looser the DC and terminal windows are guarded; see i_abort_dc. */
 #define PROBE_DC_ABORT_RATIO 2.0f
 
-static inline q16_t q16_abs(q16_t v)
-{
-    return (v < 0) ? -v : v;
-}
-
 static void park_idle(esp_foc_motor_id_probe_t *p)
 {
     p->mode = ESP_FOC_MOTOR_ID_PROBE_OFF;
