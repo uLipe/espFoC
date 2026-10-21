@@ -19,6 +19,7 @@ if(IDF_TARGET STREQUAL "linux")
                                "test_esp_foc_rotor_est.c"
                                "test_esp_foc_rotor_pll.c"
                                "test_esp_foc_svm.c"
+                               "test_esp_foc_traj.c"
                                "test_esp_foc_trig.c"
                                "test_esp_foc_vlim.c"
                            INCLUDE_DIRS "."
