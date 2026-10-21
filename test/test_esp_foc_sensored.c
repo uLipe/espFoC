@@ -161,6 +161,10 @@ static void cfg_mock(esp_foc_sensored_config_t *c, esp_foc_sensored_control_t co
     c->i_delay_ts = 0u;
     c->guard.overspeed_hz = 450.0f;
     c->on_event = on_ev;
+#if !CONFIG_ESP_FOC_SD_MOTION_CTRL_PI
+    c->visc_a_per_hz = k_plant.b_visc / (1.5f * (float)k_plant.pp * k_plant.psi) * TWO_PI_F /
+                       (float)k_plant.pp;
+#endif
 }
 
 /* A failed assertion longjmps out with the stack still up; every test
@@ -196,6 +200,20 @@ static void bench_up(esp_foc_sensored_control_t control)
     plant_up(&k_plant);
     cfg_mock(&c, control);
     bench_up_cfg(&c);
+}
+
+/* Where a position hold parks: anywhere the plain LQR's proportional share
+ * stays under the mock's Coulomb friction; on the target with an integrator. */
+static float hold_band(void)
+{
+#if CONFIG_ESP_FOC_SD_MOTION_CTRL_LQR
+    esp_foc_sensored_tuning_t t;
+    esp_foc_sensored_get_tuning(0, &t);
+    const float *k = t.lqr_k_pos;
+    return 0.01f + 1.3f * 0.15f * (1.0f + k[2] + k[3]) / k[0];
+#else
+    return 0.01f;
+#endif
 }
 
 static void bench_down(void)
@@ -403,7 +421,25 @@ TEST_CASE("sensored position mode reaches multi-turn targets without overshoot",
     bench_up(ESP_FOC_SD_CONTROL_POSITION);
     esp_foc_sensored_tuning_t t;
     esp_foc_sensored_get_tuning(0, &t);
+#if CONFIG_ESP_FOC_SD_MOTION_CTRL_PI
     TEST_ASSERT_FLOAT_WITHIN(0.05f, TWO_PI_F * t.speed_fc_hz / 4.0f, t.kp_pos);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, t.lqr_wn_hz);
+#else
+    printf("sd lqr: wn %.2f Hz k_pos %.4g %.4g %.4g %.4g %.4g | k_vel %.4g %.4g %.4g %.4g | "
+           "a %.0f v %.1f\n",
+           t.lqr_wn_hz, t.lqr_k_pos[0], t.lqr_k_pos[1], t.lqr_k_pos[2], t.lqr_k_pos[3],
+           t.lqr_k_pos[4], t.lqr_k_vel[0], t.lqr_k_vel[1], t.lqr_k_vel[2], t.lqr_k_vel[3],
+           t.traj_a_max_rads2, t.traj_v_max_rads);
+    /* 0.5 * 180 Hz over pll_sep 5 is the tightest ceiling on the mock. */
+    TEST_ASSERT_TRUE(t.lqr_wn_hz > 0.0f);
+    TEST_ASSERT_TRUE(t.lqr_wn_hz <= 18.0f + 1.0e-3f);
+    TEST_ASSERT_TRUE(t.lqr_k_pos[0] > 0.0f);
+    TEST_ASSERT_TRUE(t.lqr_k_vel[0] > 0.0f);
+    TEST_ASSERT_FLOAT_WITHIN(1.0f, 0.5f * K_MOCK / 7.0f * 0.7f, t.traj_a_max_rads2);
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_SUPPORTED, esp_foc_sensored_set_position_kp(0, 1.0f));
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_SUPPORTED, esp_foc_sensored_set_speed_pi(0, 0.01f, 1.0f));
+#endif
+    const float band = hold_band();
 
     TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_set_origin(0));
     esp_foc_sleep_ms(200);
@@ -428,10 +464,12 @@ TEST_CASE("sensored position mode reaches multi-turn targets without overshoot",
         const float over = dir * (peak - goal);
         printf("sd pos -> %.3f: th %.4f [%.4f..%.4f] overshoot %.4f inpos %d\n", goal, th.mean,
                th.min, th.max, over, st.inpos ? 1 : 0);
-        TEST_ASSERT_FLOAT_WITHIN(0.01f, goal, th.mean);
+        TEST_ASSERT_FLOAT_WITHIN(band, goal, th.mean);
         TEST_ASSERT_LESS_THAN_FLOAT(0.005f, th.max - th.min);
         TEST_ASSERT_LESS_THAN_FLOAT(0.02f, over);
-        TEST_ASSERT_TRUE(st.inpos);
+        if (band <= 0.01f) {
+            TEST_ASSERT_TRUE(st.inpos);
+        }
         TEST_ASSERT_FLOAT_WITHIN(1.0e-4f, goal, st.theta_ref_rad);
         from = goal;
     }
@@ -442,7 +480,62 @@ TEST_CASE("sensored position mode reaches multi-turn targets without overshoot",
     esp_foc_sleep_ms(500);
     const win_t after = sample(g_theta, 200);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, after.mean);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, -0.75f, before.mean);
+    TEST_ASSERT_FLOAT_WITHIN(band, -0.75f, before.mean);
+    TEST_ASSERT_EQUAL(0, s_ev_n[ESP_FOC_SD_EV_ABORT]);
+    bench_down();
+}
+
+/* Time to in-position on a six-turn move. The cascade crawls at corr_max;
+ * the LQR rides a trapezoid at wm_max with its acceleration fed forward. */
+TEST_CASE("sensored large position step settles fast and lands", "[espFoC][sensored]")
+{
+    bench_up(ESP_FOC_SD_CONTROL_POSITION);
+#if CONFIG_ESP_FOC_SD_MOTION_CTRL_PI
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_SUPPORTED, esp_foc_sensored_set_motion_limits(0, 100.0f, 1.0f));
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_SUPPORTED, esp_foc_sensored_set_lqr_weights(0, 0.0f, 0.0f, 0.0f));
+#else
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_foc_sensored_set_motion_limits(0, 100.0f, 1000.0f));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_foc_sensored_set_lqr_weights(0, -1.0f, 0.0f, 0.0f));
+    esp_foc_sensored_tuning_t t0;
+    esp_foc_sensored_get_tuning(0, &t0);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_set_lqr_weights(0, 0.05f, 0.0f, 0.0f));
+    esp_foc_sensored_tuning_t t1;
+    esp_foc_sensored_get_tuning(0, &t1);
+    TEST_ASSERT_FLOAT_WITHIN(1.0e-3f, t0.lqr_wn_hz, t1.lqr_wn_hz);
+    TEST_ASSERT_TRUE(fabsf(t1.lqr_k_pos[0] - t0.lqr_k_pos[0]) > 0.01f * t0.lqr_k_pos[0]);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_set_lqr_weights(0, 0.0f, 0.0f, 0.0f));
+#endif
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_set_origin(0));
+    esp_foc_sleep_ms(300);
+    const float band = hold_band();
+
+    const float goal = 6.0f * TWO_PI_F;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_sensored_set_position_ref_rad(0, goal));
+    uint32_t t_in = 0;
+    float peak = 0.0f;
+    for (uint32_t ms = 0; ms < 15000u; ms += 5u) {
+        esp_foc_sensored_status_t st;
+        esp_foc_sensored_get_status(0, &st);
+        peak = fmaxf(peak, st.theta_m_rad);
+        if ((t_in == 0u) && (fabsf(st.theta_m_rad - goal) <= band) &&
+            (fabsf(st.we_rads) < TWO_PI_F * 6.0f)) {
+            t_in = ms;
+        }
+        if ((t_in != 0u) && (ms > t_in + 500u)) {
+            break;
+        }
+        esp_foc_sleep_ms(5);
+    }
+    const win_t th = sample(g_theta, 300);
+    printf("sd big step %.2f rad: t_in %lu ms overshoot %.4f end %.4f band %.4f\n", goal,
+           (unsigned long)t_in, peak - goal, th.mean, band);
+    TEST_ASSERT_TRUE(t_in > 0u);
+    TEST_ASSERT_FLOAT_WITHIN(band, goal, th.mean);
+    TEST_ASSERT_LESS_THAN_FLOAT(0.05f, peak - goal);
+#if !CONFIG_ESP_FOC_SD_MOTION_CTRL_PI
+    /* 37.7 rad at 113 rad/s after a 1.8 krad/s^2 ramp is about 0.4 s. */
+    TEST_ASSERT_LESS_THAN_UINT32(1000u, t_in);
+#endif
     TEST_ASSERT_EQUAL(0, s_ev_n[ESP_FOC_SD_EV_ABORT]);
     bench_down();
 }
@@ -473,10 +566,11 @@ TEST_CASE("sensored joint samples track a constant-speed ramp", "[espFoC][sensor
     const win_t th = sample(g_theta, 200);
     printf("sd joint ramp %.1f rad/s: err_max %.4f rad end %.4f (ref %.4f)\n", w, err_max,
            th.mean, th_ref);
-    TEST_ASSERT_LESS_THAN_FLOAT(0.05f, err_max);
+    /* Without a position integral the Coulomb share stays as tracking lag. */
+    TEST_ASSERT_LESS_THAN_FLOAT(fmaxf(0.05f, hold_band()), err_max);
     /* A stop out of motion parks inside the Coulomb band: only the speed
      * integrator, fed by kp_pos·e, pulls the last few tens of mrad in. */
-    TEST_ASSERT_FLOAT_WITHIN(0.04f, th_ref, th.mean);
+    TEST_ASSERT_FLOAT_WITHIN(fmaxf(0.04f, hold_band()), th_ref, th.mean);
     TEST_ASSERT_EQUAL(0, s_ev_n[ESP_FOC_SD_EV_ABORT]);
     bench_down();
 }
@@ -503,7 +597,7 @@ TEST_CASE("sensored set_mode is bumpless through position, torque and velocity",
     printf("sd mode v->p: th0 %.3f ref %.3f -> %.3f we %.2f\n", s0.theta_m_rad,
            s1.theta_ref_rad, th.mean, w.mean);
     TEST_ASSERT_FLOAT_WITHIN(0.05f, s0.theta_m_rad, s1.theta_ref_rad);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, s1.theta_ref_rad, th.mean);
+    TEST_ASSERT_FLOAT_WITHIN(hold_band(), s1.theta_ref_rad, th.mean);
     TEST_ASSERT_FLOAT_WITHIN(0.5f, 0.0f, w.mean);
 
     /* Velocity -> torque keeps the iq in flight; torque -> velocity keeps
