@@ -22,6 +22,7 @@
 #include "espFoC/motor_control/esp_foc_observer_bemf.h"
 #include "espFoC/drivers/esp_foc_trigo_hw.h"
 #include "espFoC/utils/esp_foc_angle.h"
+#include "espFoC/utils/esp_foc_iir.h"
 
 static esp_foc_observer_bemf_t *bemf_of(esp_foc_observer_t *self)
 {
@@ -33,14 +34,6 @@ static const esp_foc_observer_bemf_t *bemf_of_c(const esp_foc_observer_t *self)
 {
     return (const esp_foc_observer_bemf_t *)((const char *)self -
                                              offsetof(esp_foc_observer_bemf_t, iface));
-}
-
-static q16_t lpf1(q16_t *w, q16_t x, q16_t b0)
-{
-    q16_t y = *w;
-    y = q16_add(y, q16_mul(b0, q16_sub(x, y)));
-    *w = y;
-    return y;
 }
 
 static void bemf_reset(esp_foc_observer_t *self)
@@ -141,14 +134,18 @@ static void bemf_update(esp_foc_observer_t *self,
         q16_sub(q16_sub(v_alpha, q16_mul(rs, i_alpha)), q16_mul(ls, dia));
     q16_t e_raw_b =
         q16_sub(q16_sub(v_beta, q16_mul(rs, i_beta)), q16_mul(ls, dib));
-    o->e_a = lpf1(&o->lpf_w_a, e_raw_a, o->lpf_b0);
-    o->e_b = lpf1(&o->lpf_w_b, e_raw_b, o->lpf_b0);
+    const q16_t e_a = esp_foc_lpf1(o->lpf_w_a, e_raw_a, o->lpf_b0);
+    const q16_t e_b = esp_foc_lpf1(o->lpf_w_b, e_raw_b, o->lpf_b0);
+    o->lpf_w_a = e_a;
+    o->lpf_w_b = e_b;
+    o->e_a = e_a;
+    o->e_b = e_b;
 
     /* LPF lag seen by êαβ at the current speed, from a slow ω estimate. */
     q16_t phi = 0;
-    o->w_slow = q16_add(o->w_slow, q16_mul(o->comp_b0, q16_sub(o->omega, o->w_slow)));
+    o->w_slow = esp_foc_lpf1(o->w_slow, o->omega, o->comp_b0);
     q16_t w = o->w_slow;
-    q16_t w_abs = (w < 0) ? q16_neg(w) : w;
+    q16_t w_abs = q16_abs(w);
     if (o->lpf_wc > 0) {
         phi = esp_foc_trigo_hw_atan2(w_abs, o->lpf_wc);
     }
@@ -285,7 +282,7 @@ esp_err_t esp_foc_observer_bemf_init(esp_foc_observer_bemf_t *o,
     const float ts = cfg->ts_s;
     const float current_hz =
         cfg->current_model_hz > 0.0f ? cfg->current_model_hz : 500.0f;
-    const float current_wc = 2.0f * (float)M_PI * current_hz;
+    const float current_wc = ESP_FOC_TWO_PI_F * current_hz;
     float current_gain = 2.0f * current_wc - cfg->rs_ohm / cfg->ls_h;
     if (current_gain < 0.0f) {
         current_gain = 0.0f;
@@ -306,7 +303,7 @@ esp_err_t esp_foc_observer_bemf_init(esp_foc_observer_bemf_t *o,
     float pll_ki;
     if (cfg->pll_bw_hz > 0.0f) {
         const float z = cfg->pll_zeta > 0.0f ? cfg->pll_zeta : 0.707f;
-        const float wn = 2.0f * (float)M_PI * cfg->pll_bw_hz;
+        const float wn = ESP_FOC_TWO_PI_F * cfg->pll_bw_hz;
         pll_kp = 2.0f * z * wn;
         pll_ki = wn * wn;
     } else {
@@ -329,13 +326,13 @@ esp_err_t esp_foc_observer_bemf_init(esp_foc_observer_bemf_t *o,
     o->pll_enable = true;
     o->w_max = q16_from_float(cfg->w_max_rads > 0.0f
                                   ? cfg->w_max_rads
-                                  : 2.0f * (float)M_PI * 1000.0f);
-    o->lpf_wc = q16_from_float(2.0f * (float)M_PI * cfg->emf_lpf_hz);
-    o->w_sign_hyst = q16_from_float(2.0f * (float)M_PI * 5.0f);
+                                  : ESP_FOC_TWO_PI_F * 1000.0f);
+    o->lpf_wc = q16_from_float(ESP_FOC_TWO_PI_F * cfg->emf_lpf_hz);
+    o->w_sign_hyst = q16_from_float(ESP_FOC_TWO_PI_F * 5.0f);
     /* atan2 ω is a raw per-sample difference; φ(ω) must not follow that jitter. */
-    o->comp_b0 = q16_from_float(1.0f - expf(-2.0f * (float)M_PI * 20.0f * ts));
+    o->comp_b0 = q16_from_float(esp_foc_lpf1_coef(20.0f, ts));
 
-    float b0 = 1.0f - expf(-2.0f * (float)M_PI * cfg->emf_lpf_hz * ts);
+    float b0 = esp_foc_lpf1_coef(cfg->emf_lpf_hz, ts);
     if (b0 < 0.001f) {
         b0 = 0.001f;
     }

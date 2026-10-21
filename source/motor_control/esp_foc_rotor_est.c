@@ -24,11 +24,6 @@
  * a part in 2e6, and the product stays inside int64 for any ω the Q16.16
  * range can express.
  */
-static inline q16_t travel(q16_t omega, uint32_t t_q32)
-{
-    return (q16_t)(((int64_t)omega * (int64_t)t_q32) >> 32);
-}
-
 static q16_t clamp_adv(esp_foc_rotor_est_t *e, q16_t adv)
 {
     if (adv < e->clamp_lo) {
@@ -188,7 +183,7 @@ void esp_foc_rotor_est_step(esp_foc_rotor_est_t *e)
         }
     }
 
-    adv = clamp_adv(e, q16_add(adv, travel(omega, dt_q32)));
+    adv = clamp_adv(e, q16_add(adv, q16_angle_travel(omega, dt_q32)));
 
     /* Store. */
     e->omega_hat = omega;
@@ -276,7 +271,7 @@ void esp_foc_rotor_est_on_edge(esp_foc_rotor_est_t *e,
      */
     q16_t theta_corr;
     if (have_anchor) {
-        q16_t comp = travel(omega_prev, e->half_dt_q32);
+        q16_t comp = q16_angle_travel(omega_prev, e->half_dt_q32);
         q16_t err = q16_angle_delta(theta_hat, q16_sub(theta_meas, comp));
         theta_corr = q16_wrap_pi(q16_add(theta_hat,
                                          q16_mul(e->cfg.lambda_theta, err)));
