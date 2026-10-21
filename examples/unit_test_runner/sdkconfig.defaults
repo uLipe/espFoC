@@ -8,3 +8,5 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_FOC_STACK_SENSORLESS=y
 # Two instances so the per-axis isolation test runs.
 CONFIG_ESP_FOC_SL_MAX_AXES=2
+# The LQR tests solve the Riccati equation on the test task.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
