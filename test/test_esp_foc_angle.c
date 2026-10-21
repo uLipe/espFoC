@@ -72,3 +72,23 @@ TEST_CASE("velocity from delta * inv_dt is stable", "[espFoC][angle]")
     TEST_ASSERT_FLOAT_WITHIN(0.05f, 10.0f, w);
     (void)dt;
 }
+
+TEST_CASE("q16_angle_travel: omega times t, signed", "[espFoC][angle]")
+{
+    const uint32_t t10ms = 42949673u;
+    TEST_ASSERT_INT32_WITHIN(2, Q16_ONE, q16_angle_travel(q16_from_float(100.0f), t10ms));
+    TEST_ASSERT_INT32_WITHIN(2, Q16_MINUS_ONE, q16_angle_travel(q16_from_float(-100.0f), t10ms));
+    TEST_ASSERT_EQUAL_INT32(0, q16_angle_travel(q16_from_float(100.0f), 0));
+    TEST_ASSERT_INT32_WITHIN(2, q16_from_float(30000.0f),
+                             q16_angle_travel(q16_from_float(30000.0f), UINT32_MAX));
+}
+
+TEST_CASE("q16_angle_step_hz: 2*pi*fe/fpwm per period", "[espFoC][angle]")
+{
+    TEST_ASSERT_INT32_WITHIN(2, q16_from_float(6.2831853f * 1000.0f / 20000.0f),
+                             q16_angle_step_hz(q16_from_float(1000.0f), 20000u));
+    TEST_ASSERT_INT32_WITHIN(2, q16_from_float(-6.2831853f * 1000.0f / 20000.0f),
+                             q16_angle_step_hz(q16_from_float(-1000.0f), 20000u));
+    TEST_ASSERT_EQUAL_INT32(0, q16_angle_step_hz(0, 20000u));
+    TEST_ASSERT_INT32_WITHIN(2, Q16_TWO_PI, q16_angle_step_hz(q16_from_float(20000.0f), 20000u));
+}

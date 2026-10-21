@@ -22,6 +22,11 @@ extern "C" {
 /* 1/√3 ≈ 0.5773503 — linear SVPWM |Vdq| max in pu of Vdc */
 #define Q16_INV_SQRT3 ((q16_t)37837)
 
+/* Design-time (float / double) counterparts. */
+#define ESP_FOC_TWO_PI_F     6.28318530718f
+#define ESP_FOC_TWO_PI       6.283185307179586
+#define ESP_FOC_INV_SQRT3_F  0.57735026919f
+
 /** Wrap angle into (−π, +π]. */
 static inline q16_t q16_wrap_pi(q16_t x)
 {
@@ -38,6 +43,18 @@ static inline q16_t q16_wrap_pi(q16_t x)
 static inline q16_t q16_angle_delta(q16_t prev, q16_t now)
 {
     return q16_wrap_pi(q16_sub(now, prev));
+}
+
+/** Angle covered at omega [rad/s, Q16] over t seconds given in Q0.32. */
+static inline q16_t q16_angle_travel(q16_t omega, uint32_t t_q32)
+{
+    return (q16_t)(((int64_t)omega * (int64_t)t_q32) >> 32);
+}
+
+/** Electrical angle step per PWM period for fe_hz (Q16) at pwm_hz. */
+static inline q16_t q16_angle_step_hz(q16_t fe_hz, uint32_t pwm_hz)
+{
+    return (q16_t)(((int64_t)fe_hz * (int64_t)Q16_TWO_PI) / ((int64_t)pwm_hz << 16));
 }
 
 #ifdef __cplusplus

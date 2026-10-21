@@ -36,6 +36,15 @@ void esp_foc_iir_set_coeffs(esp_foc_iir_t *f, q16_t b0, q16_t b1, q16_t b2, q16_
 /** Butterworth LPF, bilinear + prewarp. Resets delays. fc must be in (0, fs/2). */
 esp_err_t esp_foc_iir_design_lpf(esp_foc_iir_t *f, float fs_hz, float fc_hz);
 
+/** One-pole low-pass step: returns the next state y + b0·(x − y). */
+static inline q16_t esp_foc_lpf1(q16_t y, q16_t x, q16_t b0)
+{
+    return q16_add(y, q16_mul(b0, q16_sub(x, y)));
+}
+
+/** b0 of the one-pole low-pass from its corner: 1 − exp(−2π·fc·ts). */
+float esp_foc_lpf1_coef(float fc_hz, float ts_s);
+
 #ifdef __cplusplus
 }
 #endif

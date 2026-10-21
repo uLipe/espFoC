@@ -10,7 +10,9 @@
 #include <math.h>
 #include <string.h>
 
-#define ADRC_TWO_PI   6.28318530718f
+#include "espFoC/utils/esp_foc_angle.h"
+#include "espFoC/utils/esp_foc_iir.h"
+
 /* g and 1/g both have to be representable with some resolution left. */
 #define ADRC_G_MIN    (1.0f / 256.0f)
 #define ADRC_G_MAX    256.0f
@@ -32,13 +34,13 @@ esp_err_t esp_foc_adrc_init(esp_foc_adrc_t *a, float b0, float a_pole, float wc_
     if ((g < ADRC_G_MIN) || (g > ADRC_G_MAX)) {
         return ESP_ERR_INVALID_ARG;
     }
-    const float beta = expf(-ADRC_TWO_PI * wo_hz * ts);
+    const float beta = expf(-ESP_FOC_TWO_PI_F * wo_hz * ts);
 
     memset(a, 0, sizeof(*a));
     /* Both ESO error poles at beta: det = (1 - l1)·alpha, trace = det + 1 - l2. */
     a->l1 = q16_from_float(1.0f - beta * beta / alpha);
     a->l2 = q16_from_float((1.0f - beta) * (1.0f - beta));
-    a->kp = q16_from_float(1.0f - expf(-ADRC_TWO_PI * wc_hz * ts));
+    a->kp = q16_from_float(esp_foc_lpf1_coef(wc_hz, ts));
     a->alpha = q16_from_float(alpha);
     /* Complement of the quantised alpha, so y = r is the exact fixed point. */
     a->one_m_alpha = Q16_ONE - a->alpha;

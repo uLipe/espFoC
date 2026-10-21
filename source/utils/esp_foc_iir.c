@@ -7,9 +7,11 @@
  */
 #include "espFoC/utils/esp_foc_iir.h"
 
+#include <math.h>
 #include <stdbool.h>
 
 #include "sdkconfig.h"
+#include "espFoC/utils/esp_foc_angle.h"
 #include "esp_foc_iir_soft.h"
 
 #if CONFIG_ESP_FOC_USE_HW_ACCEL_IIR
@@ -40,4 +42,9 @@ void esp_foc_iir_set_coeffs(esp_foc_iir_t *f, q16_t b0, q16_t b1, q16_t b2, q16_
 esp_err_t esp_foc_iir_design_lpf(esp_foc_iir_t *f, float fs_hz, float fc_hz)
 {
     return esp_foc_iir_soft_design_lpf(f, fs_hz, fc_hz);
+}
+
+float esp_foc_lpf1_coef(float fc_hz, float ts_s)
+{
+    return 1.0f - expf(-ESP_FOC_TWO_PI_F * fc_hz * ts_s);
 }

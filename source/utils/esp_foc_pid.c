@@ -11,6 +11,7 @@
 #include <stdbool.h>
 
 #include "sdkconfig.h"
+#include "espFoC/utils/esp_foc_angle.h"
 #include "esp_foc_pid_soft.h"
 
 #if CONFIG_ESP_FOC_USE_HW_ACCEL_PID
@@ -36,7 +37,7 @@ esp_err_t esp_foc_pid_design_imc_zoh(float k_plant, float tau_s, float fs_hz,
 
     float ts = 1.0f / fs_hz;
     float a = expf(-ts / tau_s);
-    float p = expf(-2.0f * (float)M_PI * bw_hz * ts);
+    float p = expf(-ESP_FOC_TWO_PI_F * bw_hz * ts);
     float one_m_a = 1.0f - a;
     if (one_m_a < 1.0e-8f) {
         return ESP_ERR_INVALID_ARG;
@@ -60,7 +61,7 @@ esp_err_t esp_foc_pid_design_integrator(float k_plant, float fs_hz, float bw_hz,
     }
 
     const float ts = 1.0f / fs_hz;
-    const float wn = 2.0f * (float)M_PI * bw_hz;
+    const float wn = ESP_FOC_TWO_PI_F * bw_hz;
     const float half = 0.5f * wn * ts;
     if (half >= 1.2f) {
         return ESP_ERR_INVALID_ARG;
@@ -130,4 +131,13 @@ esp_err_t esp_foc_pid_set_ki(esp_foc_pid_t *p, float ki)
 esp_err_t esp_foc_pid_set_kd(esp_foc_pid_t *p, float kd)
 {
     return esp_foc_pid_soft_set_kd(p, kd);
+}
+
+esp_err_t esp_foc_pid_set_pi(esp_foc_pid_t *p, float kp, float ki)
+{
+    esp_err_t err = esp_foc_pid_set_kp(p, kp);
+    if (err == ESP_OK) {
+        err = esp_foc_pid_set_ki(p, ki);
+    }
+    return err;
 }

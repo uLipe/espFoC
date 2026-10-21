@@ -91,6 +91,45 @@ static inline q16_t q16_neg(q16_t v)
     return (q16_t)(-v);
 }
 
+static inline q16_t q16_abs(q16_t v)
+{
+    return (v < 0) ? q16_neg(v) : v;
+}
+
+/** 64-bit intermediate to Q16, saturated symmetrically to ±INT32_MAX. */
+static inline q16_t q16_sat64(int64_t x)
+{
+    if (x > (int64_t)INT32_MAX) {
+        return (q16_t)INT32_MAX;
+    }
+    if (x < -(int64_t)INT32_MAX) {
+        return (q16_t)(-INT32_MAX);
+    }
+    return (q16_t)x;
+}
+
+/** Moves x toward target by at most step (step > 0); step 0 jumps to target. */
+static inline q16_t q16_slew(q16_t x, q16_t target, q16_t step)
+{
+    if (step == 0) {
+        return target;
+    }
+    const q16_t d = q16_sub(target, x);
+    if (d > step) {
+        return q16_add(x, step);
+    }
+    if (d < q16_neg(step)) {
+        return q16_sub(x, step);
+    }
+    return target;
+}
+
+/** Q16 to thousandths (integer), truncated toward −∞. */
+static inline int32_t q16_to_milli(q16_t v)
+{
+    return (int32_t)(((int64_t)v * 1000) >> 16);
+}
+
 static inline q16_t q16_min(q16_t a, q16_t b)
 {
     return a < b ? a : b;

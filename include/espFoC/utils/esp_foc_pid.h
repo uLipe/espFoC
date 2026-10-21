@@ -74,6 +74,24 @@ void esp_foc_pid_set_pmsm_ff(esp_foc_pid_t *pd, esp_foc_pid_t *pq, q16_t we,
 esp_err_t esp_foc_pid_set_kp(esp_foc_pid_t *p, float kp);
 esp_err_t esp_foc_pid_set_ki(esp_foc_pid_t *p, float ki);
 esp_err_t esp_foc_pid_set_kd(esp_foc_pid_t *p, float kd);
+/** set_kp then set_ki; on error p may hold the new kp only, so retune a copy. */
+esp_err_t esp_foc_pid_set_pi(esp_foc_pid_t *p, float kp, float ki);
+
+/**
+ * Copies the coefficients and gains of src into dst, keeping dst's delays,
+ * feed-forward and bypass: a live controller takes a retuned copy without a
+ * bump. The caller makes the copy atomic against the control interrupt.
+ */
+static inline void esp_foc_pid_take_gains(esp_foc_pid_t *dst, const esp_foc_pid_t *src)
+{
+    dst->b0 = src->b0;
+    dst->b1 = src->b1;
+    dst->b2 = src->b2;
+    dst->a1 = src->a1;
+    dst->a2 = src->a2;
+    dst->kp = src->kp;
+    dst->ki = src->ki;
+}
 
 #ifdef __cplusplus
 }

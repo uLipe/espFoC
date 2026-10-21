@@ -34,11 +34,6 @@ static uint32_t isqrt64(uint64_t v)
     return (uint32_t)(root >> 1);
 }
 
-static int32_t q16_to_milli(q16_t v)
-{
-    return (int32_t)(((int64_t)v * 1000) >> 16);
-}
-
 bool esp_foc_ident_zprobe_init(esp_foc_ident_zprobe_t *p,
                                const esp_foc_ident_excite_t *cfg)
 {
