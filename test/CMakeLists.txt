@@ -11,6 +11,7 @@ if(IDF_TARGET STREQUAL "linux")
                                "test_esp_foc_iir.c"
                                "test_esp_foc_lqr.c"
                                "test_esp_foc_mech_id.c"
+                               "test_esp_foc_motion_ctrl.c"
                                "test_esp_foc_motor_id.c"
                                "test_esp_foc_observer.c"
                                "test_esp_foc_observer_flux.c"
