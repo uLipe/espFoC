@@ -6,9 +6,8 @@ or a software observer) into one common description of the rotor: its angle,
 its speed, and how fresh that information is. espFoC defines that description
 once, in
 [`esp_foc_rotor_sensor.h`](../../include/espFoC/drivers/esp_foc_rotor_sensor.h),
-and ships four implementations: the AS5600 magnetic encoder over I2C, a Hall
-sensor driver, an incremental A/B quadrature encoder on the pulse counter, and
-an adapter that exposes a sensorless observer through the
+and ships three implementations: the AS5600 magnetic encoder over I2C, a Hall
+sensor driver, and an adapter that exposes a sensorless observer through the
 same interface. You need this chapter when you build a sensored application,
 when you bring up a new sensor, or when you want to write a driver for a
 sensor espFoC does not ship.
@@ -115,7 +114,6 @@ tell "the angle is zero" from "this sensor cannot know".
 |---|---|
 | AS5600 | `MECH_ABS`; `ELEC_ABS` if `pole_pairs` ≠ 0; `PREDICT` if `pwm_hz` ≠ 0 |
 | Hall | `ELEC_ABS`, `PREDICT`; `NEEDS_MAP` until a sector map is installed |
-| Quadrature | `MECH_ABS`; `ELEC_ABS` if `pole_pairs` ≠ 0 |
 | Sensorless adapter | `ELEC_ABS` |
 
 ### The coherent sample
@@ -335,66 +333,6 @@ The driver includes `esp_foc_hall_soc_gate.h`, which stops the build with
 `#error "espFoC hall rotor sensor requires ETM + timer-group capture (SOC_CAPS)"`
 unless `SOC_ETM_SUPPORTED` and `SOC_TIMER_SUPPORT_ETM` are true.
 
-### Quadrature encoder
-
-The quadrature driver is compiled with `CONFIG_ESP_FOC_ROTOR_QUADRATURE`
-(default y on chips with a pulse counter). It reads an incremental A/B
-encoder on one PCNT unit, decoded x4 in hardware: `ppr` pulses per channel
-give `4 × ppr` counts per turn. The index line (Z) is not used.
-
-```c
-#include "espFoC/drivers/esp_foc_rotor_quadrature.h"
-
-esp_foc_rotor_sensor_t *encoder = esp_foc_rotor_quadrature_acquire(0);
-
-const esp_foc_rotor_quadrature_config_t encoder_config = {
-    .gpio_a = 48,
-    .gpio_b = 49,
-    .pcnt_group = 0,
-    .pcnt_unit = 0,
-    .ppr = 2048,                  /* DIP setting of the encoder */
-    .glitch_ns = 100,
-    .dt_seconds = 1.0f / (float)CONFIG_ESP_FOC_SD_FETCH_HZ,
-    .invert = false,
-    .pole_pairs = CONFIG_EXAMPLE_MOTOR_POLE_PAIRS,
-    .irq_level = 1,
-};
-ESP_ERROR_CHECK(esp_foc_rotor_quadrature_init(encoder, &encoder_config));
-```
-
-| Field | Unit | If 0 | Meaning |
-|---|---|---|---|
-| `gpio_a`, `gpio_b` | GPIO | — | Encoder lines; A leading B counts up |
-| `pcnt_group`, `pcnt_unit` | index | — | Unit owned by this sensor |
-| `ppr` | pulses/rev | rejected | Pulses per turn per channel, 1..8191 |
-| `glitch_ns` | ns | filter off | Pulses shorter than this are dropped (max 1023 APB cycles) |
-| `dt_seconds` | s | rejected | Period between two `fetch()` calls; scales the speed |
-| `invert` | bool | — | Reverse the counting direction |
-| `pole_pairs` | — | no θe, `ELEC_ABS` off | Motor pole pairs |
-| `irq_level` | level | 1 | Limit interrupt level, 1 or 2 |
-
-What the driver does:
-
-- The unit counts within ±(4 × ppr) and resets to 0 at either limit. The
-  limit interrupt adds or removes one turn, so the count is cumulative
-  without an interrupt per edge.
-- **`step()`** reads the counter in the TEZ: the angle is the hardware count
-  of that period, not an extrapolation, so there is no `PREDICT` cap.
-- **`fetch()`** reads the counter and the turn count together (a limit that
-  fires during the read is folded in) and sets the speed to the count
-  change × 2π / (4 × ppr × `dt_seconds`). `fetch_start()` does the same read
-  synchronously.
-- **`calibrate_offset()`** zeroes the counter and the turns; the shaft
-  should be at rest.
-- `esp_foc_rotor_quadrature_get_count()` returns the cumulative signed count
-  (task context); `esp_foc_rotor_quadrature_get_cpr()` returns 4 × ppr.
-
-θm is relative to the count at init until `calibrate_offset()`; phase map
-discovery does that zeroing, so the driver reports `MECH_ABS`. The angle
-resolution is one count: 2π × pp / (4 × ppr) electrical, 0.57° at 2048 PPR
-and 13 pole pairs. The first init of a unit resets its PCNT group, so do not
-share the group with another PCNT user.
-
 ### Sensorless adapter
 
 [`esp_foc_rotor_sensorless.h`](../../include/espFoC/drivers/esp_foc_rotor_sensorless.h)
@@ -507,9 +445,8 @@ the sensored stack and motor identification call `fetch()` from their tasks.
 
 | Symbol | Default | Meaning |
 |---|---|---|
-| `CONFIG_ESP_FOC_MAX_ROTOR_SENSORS` | 1 | Size of each driver's static pool (range 1..2). The AS5600, Hall, quadrature and sensorless pools are separate. |
+| `CONFIG_ESP_FOC_MAX_ROTOR_SENSORS` | 1 | Size of each driver's static pool (range 1..2). The AS5600, Hall and sensorless pools are separate. |
 | `CONFIG_ESP_FOC_ROTOR_HALL` | y | Build the Hall driver and its timestamp strategies. |
-| `CONFIG_ESP_FOC_ROTOR_QUADRATURE` | y | Build the quadrature encoder driver (needs `SOC_PCNT_SUPPORTED`). |
 | `CONFIG_ESP_FOC_SD_FETCH_HZ` | 2500 | Encoder fetch rate of the sensored stack (range 100..20000). Must divide the PWM rate; the speed PI, the position P and the PLL run at this rate. |
 | `CONFIG_ESP_FOC_MOTOR_ID_FETCH_HZ` | 2500 | Rotor fetch rate of motor identification. Must divide the PWM rate and match the rate the sensor was configured for. |
 | `CONFIG_ESP_FOC_PHASE_DISCOVER_ZERO_SAMPLES` | 16 | Sensor reads averaged into the zero by phase map discovery. |
