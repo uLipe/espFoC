@@ -31,14 +31,6 @@
     gdma_ll_rx_connect_to_periph((dev), (ch), (periph_id))
 #define ESP_FOC_GDMA_RX_DISCONNECT(dev, ch) gdma_ll_rx_disconnect_all((dev), (ch))
 
-#define ESP_FOC_PCNT_GROUPS                 PCNT_LL_INST_NUM
-#define ESP_FOC_PCNT_UNITS                  PCNT_LL_UNITS_PER_INST
-#define ESP_FOC_PCNT_IRQ(group)             (soc_pcnt_signals[(group)].irq_id)
-#define ESP_FOC_PCNT_PULSE_SIG(group, unit, ch) \
-    (soc_pcnt_signals[(group)].units[(unit)].channels[(ch)].pulse_sig_id_matrix)
-#define ESP_FOC_PCNT_CTRL_SIG(group, unit, ch) \
-    (soc_pcnt_signals[(group)].units[(unit)].channels[(ch)].ctl_sig_id_matrix)
-
 #else
 
 #define ESP_FOC_ETM_CHANNELS                SOC_ETM_CHANNELS_PER_GROUP
@@ -55,13 +47,5 @@
 #define ESP_FOC_GDMA_RX_CONNECT_ADC(dev, ch, periph_id) \
     gdma_ll_rx_connect_to_periph((dev), (ch), GDMA_TRIG_PERIPH_ADC, (periph_id))
 #define ESP_FOC_GDMA_RX_DISCONNECT(dev, ch) gdma_ll_rx_disconnect_from_periph((dev), (ch))
-
-#define ESP_FOC_PCNT_GROUPS                 SOC_PCNT_GROUPS
-#define ESP_FOC_PCNT_UNITS                  SOC_PCNT_UNITS_PER_GROUP
-#define ESP_FOC_PCNT_IRQ(group)             (pcnt_periph_signals.groups[(group)].irq)
-#define ESP_FOC_PCNT_PULSE_SIG(group, unit, ch) \
-    (pcnt_periph_signals.groups[(group)].units[(unit)].channels[(ch)].pulse_sig)
-#define ESP_FOC_PCNT_CTRL_SIG(group, unit, ch) \
-    (pcnt_periph_signals.groups[(group)].units[(unit)].channels[(ch)].control_sig)
 
 #endif

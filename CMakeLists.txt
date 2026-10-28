@@ -117,12 +117,6 @@ if(CONFIG_ESP_FOC_ROTOR_HALL)
     )
 endif()
 
-if(CONFIG_ESP_FOC_ROTOR_QUADRATURE)
-    list(APPEND srcs
-        "source/drivers/rotor/quadrature/esp_foc_rotor_quadrature.c"
-    )
-endif()
-
 if(CONFIG_ESP_FOC_PHASE_DISCOVER)
     list(APPEND srcs "source/motor_control/esp_foc_phase_discover.c")
 endif()
@@ -151,7 +145,7 @@ set(priv_requires freertos hal soc esp_hw_support esp_rom esp_timer)
 if("${IDF_VERSION_MAJOR}" GREATER_EQUAL 6)
     list(APPEND priv_requires
         esp_hal_mcpwm esp_hal_ana_conv esp_hal_dma esp_hal_gpio
-        esp_hal_i2c esp_hal_timg esp_hal_cordic esp_hal_pcnt)
+        esp_hal_i2c esp_hal_timg esp_hal_cordic)
 endif()
 
 if(ESP_PLATFORM)

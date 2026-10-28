@@ -24,18 +24,6 @@ menu "espFoC Settings"
             coordination. The sensor detects the reverse order at init and
             refuses when its require_etm_ready config field is set.
 
-    config ESP_FOC_ROTOR_QUADRATURE
-        bool "Incremental A/B quadrature encoder rotor sensor driver"
-        default y
-        depends on SOC_PCNT_SUPPORTED
-        help
-            Mechanical and electrical angle from an A/B incremental encoder,
-            decoded x4 by one pulse-counter unit. The unit's limit interrupt
-            carries whole turns, so the count is cumulative. No index (Z).
-
-            The driver resets the PCNT group the first time one of its units
-            is brought up; do not share the group with other PCNT users.
-
     config ESP_FOC_MAX_MUTEXES
         int "Max OSAL mutex instances (static pool)"
         range 1 8
