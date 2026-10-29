@@ -1164,6 +1164,10 @@ static sd_out_t sd_sweep_leg(sd_t *sd, int8_t dir)
     sd->ref_abs = sd->pos_raw;
     sd->w_ff = q16_from_float(w);
     sd->learn_dth = (dth != 0) ? dth : ((dir == 0) ? 1 : -1);
+    /* The integral already carries the cogging current. Leaving it in while
+     * the learned table is also feedforward doubles the torque every pass
+     * until the sweep stalls. */
+    esp_foc_motion_ctrl_reset(sd->mctl, ESP_FOC_MOTION_POSITION, 0);
     esp_foc_critical_leave();
     sd_out_t o = sd_wait(sd, c->cogging.skip_ms);
     if (o == SD_OK) {
@@ -1239,8 +1243,9 @@ static bool sd_cog_build(sd_t *sd, esp_foc_sensored_cogging_info_t *info)
     int64_t sq = 0;
     q16_t lo_v = 0;
     q16_t hi_v = 0;
+    const q16_t lim = sd->i_max;
     for (uint32_t i = 0; i < SD_BINS; i++) {
-        const q16_t v = (q16_t)(acc / (int64_t)w - mean);
+        const q16_t v = q16_clamp((q16_t)(acc / (int64_t)w - mean), q16_neg(lim), lim);
         out[i] = v;
         const int64_t d = (int64_t)v - (int64_t)sd->cog[i];
         sq += d * d;
