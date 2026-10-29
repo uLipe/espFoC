@@ -475,6 +475,12 @@ static q16_t api_get_dc_link(esp_foc_inverter_t *self)
     return obj_from(self)->dc_link_q16;
 }
 
+static q16_t api_get_current_limit(esp_foc_inverter_t *self)
+{
+    esp_foc_inverter_mcpwm_obj_t *o = obj_from(self);
+    return o->i_limit_en ? o->i_limit_q16 : 0;
+}
+
 static uint32_t api_get_pwm_rate(esp_foc_inverter_t *self)
 {
     return obj_from(self)->pwm_hz;
@@ -627,6 +633,7 @@ static void bind_vtable(esp_foc_inverter_mcpwm_obj_t *o)
     o->iface.disable = api_disable;
     o->iface.set_duties = api_set_duties;
     o->iface.get_dc_link_voltage = api_get_dc_link;
+    o->iface.get_current_limit = api_get_current_limit;
     o->iface.get_pwm_rate_hz = api_get_pwm_rate;
     o->iface.fetch_currents = api_fetch;
     o->iface.fetch_currents_raw = api_fetch_raw;

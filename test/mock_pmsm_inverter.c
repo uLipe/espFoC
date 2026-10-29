@@ -203,6 +203,12 @@ static q16_t m_get_vdc(esp_foc_inverter_t *self)
     return q16_from_float(of(self)->p.vdc);
 }
 
+static q16_t m_get_current_limit(esp_foc_inverter_t *self)
+{
+    (void)self;
+    return q16_from_float(10.0f);
+}
+
 static uint32_t m_get_pwm_hz(esp_foc_inverter_t *self)
 {
     return of(self)->p.pwm_hz;
@@ -305,6 +311,7 @@ void mock_pmsm_init(mock_pmsm_t *m, const mock_pmsm_params_t *p)
     m->base.disable = m_disable;
     m->base.set_duties = m_set_duties;
     m->base.get_dc_link_voltage = m_get_vdc;
+    m->base.get_current_limit = m_get_current_limit;
     m->base.get_pwm_rate_hz = m_get_pwm_hz;
     m->base.fetch_currents = m_fetch;
     m->base.fetch_currents_raw = m_fetch_raw;
