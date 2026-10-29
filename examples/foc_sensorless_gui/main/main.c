@@ -53,9 +53,8 @@
 #define PWM_RATE_HZ ((uint32_t)CONFIG_ESP_FOC_PWM_RATE_HZ)
 #define POLE_PAIRS CONFIG_EXAMPLE_MOTOR_POLE_PAIRS
 #define DC_LINK_VOLTS ((float)CONFIG_EXAMPLE_DC_LINK_MILLIVOLT * 1.0e-3f)
-/* The controller works in electrical Hz: shaft rev/s times pole pairs. */
-#define RPM_TO_HZ_EL (1.0f / 60.0f * (float)POLE_PAIRS)
-#define RATED_ELECTRICAL_HZ ((float)CONFIG_EXAMPLE_RATED_SPEED_RPM * RPM_TO_HZ_EL)
+/* Seed until identification replaces it. Electrical Hz is rev/s times that. */
+#define RATED_RPM ((float)CONFIG_EXAMPLE_RATED_SPEED_RPM)
 
 #if CONFIG_EXAMPLE_BRIDGE_ENABLE_ACTIVE_LOW
 #define BRIDGE_ENABLE_ACTIVE_LOW true
@@ -67,11 +66,10 @@
 #define GUI_MAX_RPM ((float)CONFIG_EXAMPLE_GUI_MAX_RPM)
 #define GUI_MIN_IQ_A ((float)CONFIG_EXAMPLE_GUI_MIN_IQ_MA * 1.0e-3f)
 #define GUI_MAX_IQ_A ((float)CONFIG_EXAMPLE_GUI_MAX_IQ_MA * 1.0e-3f)
-#define GUI_ACCEL_HZ_S ((float)CONFIG_EXAMPLE_GUI_ACCEL_RPM_S * RPM_TO_HZ_EL)
+#define GUI_ACCEL_RPM_S ((float)CONFIG_EXAMPLE_GUI_ACCEL_RPM_S)
 
 #define TWO_PI (2.0f * (float)M_PI)
 #define DEG_PER_RAD (180.0f / (float)M_PI)
-#define RPM_PER_RADS_EL (60.0f / TWO_PI / (float)POLE_PAIRS)
 
 /* The console UART is driven straight through its 128-byte FIFOs, polled
  * from tasks: no UART driver, so no UART interrupt and no critical section
@@ -161,6 +159,23 @@ static volatile float reference;
 static volatile bool launch_enabled;
 static uint64_t startup_t0_us;
 
+/* Identification overwrites the seed. Before that, the Kconfig value. */
+static unsigned pole_pairs(void)
+{
+    return (controller_config.pole_pairs != 0u) ? controller_config.pole_pairs
+                                                : (unsigned)POLE_PAIRS;
+}
+
+static float rpm_to_hz(float rpm)
+{
+    return rpm / 60.0f * (float)pole_pairs();
+}
+
+static float rads_to_rpm(float we_rads)
+{
+    return we_rads * (60.0f / TWO_PI) / (float)pole_pairs();
+}
+
 /* ------------------------------------------------------------------------- */
 
 static uint8_t crc8(const uint8_t *data, size_t len)
@@ -236,7 +251,7 @@ static void send_info(void)
 {
     uint8_t payload[22];
 
-    payload[0] = (uint8_t)POLE_PAIRS;
+    payload[0] = (uint8_t)pole_pairs();
     put_f32(&payload[1], GUI_MAX_RPM);
     put_f32(&payload[5], GUI_MAX_IQ_A);
     put_f32(&payload[9], 0.0f);
@@ -324,8 +339,8 @@ static void send_telemetry(void)
     payload[2] = controller_ready ? (uint8_t)status.state : 0u;
     payload[3] = active_mode;
     payload[4] = flags;
-    put_f32(&payload[5], status.w_ref_rads * RPM_PER_RADS_EL);
-    put_f32(&payload[9], status.we_rads * RPM_PER_RADS_EL);
+    put_f32(&payload[5], rads_to_rpm(status.w_ref_rads));
+    put_f32(&payload[9], rads_to_rpm(status.we_rads));
     put_f32(&payload[13], 0.0f);
     put_f32(&payload[17], 0.0f);
     put_f32(&payload[21], status.iq_ref_a);
@@ -413,7 +428,7 @@ static void *step_data(step_t step, size_t *size)
 static uint32_t board_hash(void)
 {
     const int32_t board[] = {
-        POLE_PAIRS, CONFIG_EXAMPLE_DC_LINK_MILLIVOLT, CONFIG_ESP_FOC_PWM_RATE_HZ,
+        CONFIG_EXAMPLE_DC_LINK_MILLIVOLT, CONFIG_ESP_FOC_PWM_RATE_HZ,
         CONFIG_EXAMPLE_PWM_DEAD_TIME_NS, CONFIG_EXAMPLE_SHUNT_MILLIOHM,
         CONFIG_EXAMPLE_CURRENT_AMP_GAIN, CONFIG_EXAMPLE_PWM_U_HIGH_GPIO,
         CONFIG_EXAMPLE_PWM_U_LOW_GPIO, CONFIG_EXAMPLE_PWM_V_HIGH_GPIO,
@@ -556,7 +571,7 @@ static void on_controller_event(void *context, const esp_foc_sensorless_event_t 
 {
     (void)context;
     uint8_t payload[17];
-    const float rpm = event->we_rads * RPM_PER_RADS_EL;
+    const float rpm = rads_to_rpm(event->we_rads);
 
     if (event->ev == ESP_FOC_SL_EV_STARTUP) {
         startup_t0_us = esp_foc_now_us();
@@ -586,7 +601,7 @@ static void on_controller_event(void *context, const esp_foc_sensorless_event_t 
         /* The start-up used the controller's own slow slew; the GUI's
          * references move at the configured rate from here on. */
         if (active_mode == MODE_SPEED) {
-            esp_foc_sensorless_set_speed_slew(MOTOR_AXIS, GUI_ACCEL_HZ_S);
+            esp_foc_sensorless_set_speed_slew(MOTOR_AXIS, rpm_to_hz(GUI_ACCEL_RPM_S));
         }
         log_line("startup: running");
         break;
@@ -600,9 +615,24 @@ static void on_controller_event(void *context, const esp_foc_sensorless_event_t 
         log_line("startup: failed (reason %d, in state %d); STOP to clear", (int)event->fail,
                  (int)event->state);
         break;
-    case ESP_FOC_SL_EV_ABORT:
-        log_line("controller: abort %d, bridge off; STOP to clear", (int)event->abort);
+    case ESP_FOC_SL_EV_ABORT: {
+        esp_foc_sensorless_status_t status;
+        const char *why = "none";
+        memset(&status, 0, sizeof(status));
+        esp_foc_sensorless_get_status(MOTOR_AXIS, &status);
+        if (event->abort == ESP_FOC_SL_ABORT_LOCK_LOSS) {
+            why = "lock loss";
+        } else if (event->abort == ESP_FOC_SL_ABORT_OVERSPEED) {
+            why = "overspeed";
+        } else if (event->abort == ESP_FOC_SL_ABORT_BEMF) {
+            why = "bemf";
+        } else if (event->abort == ESP_FOC_SL_ABORT_COLLAPSE) {
+            why = "collapse";
+        }
+        log_line("controller: abort %s at %.0f rpm; STOP to clear", why,
+                 (double)rads_to_rpm(status.we_rads));
         break;
+    }
     case ESP_FOC_SL_EV_FAULT:
         log_line("controller: fault %d, bridge off; STOP to clear", (int)event->fault);
         break;
@@ -617,9 +647,10 @@ static esp_err_t build_controller(void)
     esp_foc_sensorless_default_config(&controller_config);
     controller_config.axis = MOTOR_AXIS;
     controller_config.pole_pairs = POLE_PAIRS;
-    controller_config.fe_rated_hz = RATED_ELECTRICAL_HZ;
     esp_foc_sensorless_config_from_motor_id(&controller_config, &record.plant);
     esp_foc_sensorless_config_from_phase_map(&controller_config, &record.phase_map);
+    /* Rated Hz follows the identified pair count, not the Kconfig seed. */
+    controller_config.fe_rated_hz = RATED_RPM / 60.0f * (float)controller_config.pole_pairs;
     controller_config.speed_loop = (active_mode == MODE_SPEED);
     /* Up to 10 Hz electrical the spin-up drives voltage (V/f) rather than
      * current, which breaks a cogging rotor loose. */
@@ -646,9 +677,9 @@ static esp_err_t apply_plant(void)
 {
     esp_err_t err = build_controller();
     if (err == ESP_OK) {
-        log_line("ident: Rs %.3f ohm, Ls %.0f uH, psi %.0f uWb", (double)controller_config.rs_ohm,
-                 (double)(controller_config.ls_h * 1.0e6f),
-                 (double)(controller_config.psi_wb * 1.0e6f));
+        log_line("ident: Rs %.3f ohm, Ls %.0f uH, psi %.0f uWb, pp %u",
+                 (double)controller_config.rs_ohm, (double)(controller_config.ls_h * 1.0e6f),
+                 (double)(controller_config.psi_wb * 1.0e6f), controller_config.pole_pairs);
     }
     return err;
 }
@@ -693,6 +724,10 @@ static void on_motor_id_event(void *context, const esp_foc_motor_id_event_t *eve
             send_progress(STEP_IDENT, pct);
         }
         log_line("ident: %s", esp_foc_motor_id_phase_name(event->phase));
+    } else if (event->ev == ESP_FOC_MOTOR_ID_EV_DIRECTION) {
+        log_line("ident: direction pp=%u fm=%.3f/end=%.3f Hz iq=%.3f A offset=%+.3f rad (%s)",
+                 (unsigned)event->pass, (double)event->v[0], (double)event->v[3],
+                 (double)event->v[1], (double)event->v[2], esp_err_to_name(event->err));
     }
 }
 
@@ -719,6 +754,7 @@ static esp_err_t identify_motor(void)
     err = apply_plant();
     if (err == ESP_OK) {
         save_step(STEP_IDENT);
+        send_info();
         log_line("controller: armed, press Start");
     }
     return err;
@@ -826,7 +862,7 @@ static esp_err_t apply_reference(void)
         return esp_foc_sensorless_set_iq(MOTOR_AXIS, clampf(reference, GUI_MAX_IQ_A));
     }
     return esp_foc_sensorless_set_speed_ref_hz(MOTOR_AXIS,
-                                               clampf(reference, GUI_MAX_RPM) * RPM_TO_HZ_EL);
+                                               rpm_to_hz(clampf(reference, GUI_MAX_RPM)));
 }
 
 static bool reference_can_start(void)
@@ -885,6 +921,16 @@ static esp_err_t change_mode(uint8_t mode)
     active_mode = mode;
     reference = 0.0f;
     esp_err_t err = build_controller();
+    if (err != ESP_OK) {
+        return err;
+    }
+    /* Arm holds zero. A reference only moves the shaft after START, so a
+     * mode click cannot replay the last command. */
+    if (mode == MODE_TORQUE) {
+        err = esp_foc_sensorless_set_iq(MOTOR_AXIS, 0.0f);
+    } else {
+        err = esp_foc_sensorless_set_speed_ref_hz(MOTOR_AXIS, 0.0f);
+    }
     if (err == ESP_OK) {
         log_line("controller: %s mode, armed", (mode == MODE_TORQUE) ? "torque" : "speed");
     }
@@ -1064,10 +1110,11 @@ void app_main(void)
         inverter->disable(inverter);
     }
 
-    send_info();
 #if CONFIG_EXAMPLE_GUI_PERSIST
     restore_commissioning();
 #endif
+    /* After restore the pair count may no longer be the Kconfig seed. */
+    send_info();
     if (steps_done == COMMISSIONED) {
         log_line("board ready: armed, set a reference and press Start, or run any step again");
     } else if (steps_done != 0u) {
