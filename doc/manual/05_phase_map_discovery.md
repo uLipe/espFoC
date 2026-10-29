@@ -56,8 +56,12 @@ motor with phases U, V, W in order and currents positive into the motor.
 
 Discovery runs a series of short voltage pulses with the rotor at rest,
 measures the current each pulse produces, and keeps the map under which the
-motor answers the way an ideal motor would. With a sensor, it then pulls the
-rotor onto a known electrical angle and zeroes the sensor there.
+motor answers the way an ideal motor would. The probe voltage is not fixed: it starts at 50 mV and rises or falls until
+the best d-axis current, taken over every wiring, sits between `id_min_a`
+and `i_probe_max_a`. One step at most doubles the voltage, and it never goes
+above `vd_v` or 25 % of the supply. The accepted wiring is the highest score
+at that voltage. With a sensor, it then pulls the rotor
+onto a known electrical angle and zeroes the sensor there.
 
 ![Phase discovery flow](diagram/phase_discover_flow.png)
 
@@ -161,7 +165,9 @@ After a map is accepted, and only if a sensor was given to `init`:
    up with the field, as a compass needle does, and comes to rest in this
    "well". The hold is applied as a voltage, sized from the measured admittance
    to give about `i_well_a` of current (capped at 25 % of the supply), so no
-   current loop is needed yet.
+   current loop is needed yet. If the sensor moves less than `motion_min_rad`,
+   the current doubles up to `i_well_max_a`. The electrical map stays in the
+   result when this stage fails.
 2. **Wait until still.** Discovery reads the sensor every 5 ms and waits until
    the mechanical angle has stayed within `still_tol_rad` for `calm_ms`. If
    that does not happen within `timeout_ms`, the run fails with
@@ -169,10 +175,12 @@ After a map is accepted, and only if a sensor was given to `init`:
 3. **Zero the sensor.** `esp_foc_rotor_sensor_calibrate_offset()` averages
    `zero_samples` reads and takes that angle as zero. From now on, sensor
    angle zero means "rotor magnet aligned with phase U".
-4. **Direction pulse.** A `+Vq` pulse of `dir_v` volts for `dir_ms` pushes the
-   rotor forward. If the sensor angle goes down, the sensor counts backwards
-   and `sensor_reversed` is set. If the shaft moved less than `dir_min_rad`,
-   the run fails with `ESP_ERR_INVALID_RESPONSE`.
+4. **Direction pulse.** A `+Vq` pulse for `dir_ms` starts at the current the
+   electrical probe accepted and doubles until the shaft moves at least
+   `dir_min_rad`, or until `i_dir_max_a` or the `dir_v` voltage ceiling. If
+   the sensor angle goes down, the sensor counts backwards and
+   `sensor_reversed` is set. No step inside that ceiling returns
+   `ESP_ERR_INVALID_RESPONSE` with `failed_at = direction`.
 
 The sweep matters because of **cogging**: the magnets are attracted to the
 stator teeth, which gives the rotor preferred rest positions independent of
@@ -244,11 +252,15 @@ use so that `cleanup` is safe even if `init` failed early.
 
 | Field | Meaning |
 |---|---|
-| `map` | The accepted map: `map.pwm_to_hw[3]` and `map.i_sign[3]`. |
+| `map` | The accepted electrical map: `map.pwm_to_hw[3]` and `map.i_sign[3]`. Kept when a later sensor stage fails. |
+| `map_valid` | The electrical map was accepted. |
+| `failed_at` | `done` on success, otherwise the stage that stopped the run (`electrical`, `well`, `still`, `zero`, `direction`). |
 | `attempts` | Attempts used (1 when the first one succeeded). |
 | `rank_idx` | Stage A index (0..11) of the accepted map; -1 if none. |
 | `id_verify`, `iq_verify` | d and q current of the verify pulse, amps (Q16.16). |
 | `admittance` | `id_verify` divided by the probe voltage, amps per unit of supply voltage (Q16.16). |
+| `sensor_sweep_rad` | Signed mechanical travel measured over the accepted well sweep. |
+| `sensor_well_i` | Well current that produced that travel. |
 | `sensor_zeroed` | The sensor offset was taken in the well. |
 | `sensor_reversed` | The sensor counts against the motor's forward direction. Reported only. |
 
@@ -266,7 +278,7 @@ before applying the direction, which the AS5600 driver does.
 | `ESP_ERR_INVALID_ARG` | `NULL` arguments. |
 | `ESP_ERR_INVALID_STATE` | Called from an interrupt, not initialised, or called again while running. |
 | `ESP_FAIL` | No candidate carried current, or the bridge tripped in the sensor stage. |
-| `ESP_ERR_INVALID_RESPONSE` | Current sense mirrored (stage C), no map verified, or the shaft did not answer the direction pulse. |
+| `ESP_ERR_INVALID_RESPONSE` | Current sense mirrored (stage C), no map verified, or a sensor stage saw no motion. `failed_at` names the stage and `map_valid` says whether the electrical map was kept. |
 | `ESP_ERR_TIMEOUT` | The rotor never came to rest in the well. |
 | other | An error returned by the sensor. |
 
@@ -354,25 +366,31 @@ into the config; every one has a matching config field.
 | Symbol | Default | Meaning |
 |---|---|---|
 | `CONFIG_ESP_FOC_PHASE_DISCOVER` | y | Build phase map discovery. |
-| `CONFIG_ESP_FOC_PHASE_DISCOVER_VD_MV` | 1200 | Probe voltage, mV (`vd_v`). Clamped to 5..25 % of the supply at `init`. |
+| `CONFIG_ESP_FOC_PHASE_DISCOVER_VD_MV` | 1200 | Probe voltage ceiling, mV (`vd_v`). The search starts at 50 mV. Capped at 25 % of the supply. |
 | `CONFIG_ESP_FOC_PHASE_DISCOVER_ID_MIN_MA` | 80 | Minimum d current to admit a candidate, mA (`id_min_a`). |
+| `CONFIG_ESP_FOC_PHASE_DISCOVER_I_PROBE_MAX_MA` | 800 | Maximum electrical-probe current, mA (`i_probe_max_a`). |
 | `CONFIG_ESP_FOC_PHASE_DISCOVER_PULSE_MS` | 6 | Pulse window, ms (`pulse_ms`). |
 | `CONFIG_ESP_FOC_PHASE_DISCOVER_CAL_ROUNDS` | 32 | Current-sense zero rounds per candidate (`cal_rounds`). |
 | `CONFIG_ESP_FOC_PHASE_DISCOVER_TRIES` | 3 | Attempts before giving up (`tries`). |
 | `CONFIG_ESP_FOC_PHASE_DISCOVER_NUDGE_MS` | 300 | Nudge hold between attempts, ms (`nudge_ms`). |
 | `CONFIG_ESP_FOC_PHASE_DISCOVER_SETTLE_MS` | 800 | Rest after a nudge, ms (`settle_ms`). |
-| `CONFIG_ESP_FOC_PHASE_DISCOVER_WELL_MA` | 600 | Well hold current, mA (`sensor.i_well_a`). |
+| `CONFIG_ESP_FOC_PHASE_DISCOVER_WELL_MA` | 600 | Initial well current, mA (`sensor.i_well_a`). |
+| `CONFIG_ESP_FOC_PHASE_DISCOVER_WELL_MAX_MA` | 5000 | Well current ceiling, mA (`sensor.i_well_max_a`). |
+| `CONFIG_ESP_FOC_PHASE_DISCOVER_WELL_MIN_MRAD` | 5 | Minimum shaft travel during the well sweep, mrad. |
 | `CONFIG_ESP_FOC_PHASE_DISCOVER_WELL_SWEEP_MS` | 500 | Duration of the one-revolution sweep, ms (`sensor.sweep_ms`). |
 | `CONFIG_ESP_FOC_PHASE_DISCOVER_STILL_TIMEOUT_MS` | 4000 | Give up waiting for rest after, ms (`sensor.timeout_ms`). |
-| `CONFIG_ESP_FOC_PHASE_DISCOVER_DIR_MV` | 1000 | Direction pulse q voltage, mV (`sensor.dir_v`). |
+| `CONFIG_ESP_FOC_PHASE_DISCOVER_DIR_MV` | 1000 | Direction-pulse voltage ceiling, mV (`sensor.dir_v`). |
+| `CONFIG_ESP_FOC_PHASE_DISCOVER_DIR_MAX_MA` | 1500 | Direction-pulse current ceiling, mA (`sensor.i_dir_max_a`). |
 
 The **Rotor sensor stage** submenu also holds the rest tolerance (12 mrad), the
 calm time (400 ms), the number of zero samples (16), the direction pulse length
 (25 ms) and the minimum travel over that pulse (5 mrad).
 
-The probe height is a voltage, not a fraction of the supply, on purpose: the
+The probe ceiling is a voltage, not a fraction of the supply, on purpose: the
 bridge dead time and the transistor drops eat a roughly fixed 0.7 V, so a
-fraction that works at 24 V can sit inside that dead zone at 12 V.
+fraction that works at 24 V can sit inside that dead zone at 12 V. The search
+is what keeps a low-impedance winding on a 24 V bus from being driven at that
+ceiling.
 
 Discovery also needs `CONFIG_FREERTOS_HZ=1000`; every example sets it in its
 `sdkconfig.defaults`.

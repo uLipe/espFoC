@@ -52,6 +52,8 @@ typedef struct {
 
     float theta_r;
     float dither_rad;
+    float breakaway_a;
+    float r_ohm;
     uint32_t ticks;
 } mock_inv_t;
 
@@ -63,6 +65,10 @@ typedef struct {
     float offset_rad;
     q16_t latch;
     uint32_t caps;
+    bool frozen;
+    bool freeze_after_zero;
+    esp_err_t fetch_err;
+    esp_err_t zero_err;
     int n_fetch;
     int n_zero;
     volatile uint32_t n_step;
@@ -76,6 +82,7 @@ typedef struct {
     esp_err_t reenter_err;
     int app_dma_at_entry;
     esp_foc_phase_discover_event_t dir;
+    esp_foc_phase_discover_event_t well;
 } ev_log_t;
 
 static volatile bool s_tick_run;
@@ -115,7 +122,7 @@ static void plant_eval(const mock_inv_t *m, const float duty_hw[3], float i_moto
     }
     const float vn = (v[0] + v[1] + v[2]) / 3.0f;
     for (int k = 0; k < 3; k++) {
-        i_motor[k] = m->open ? 0.0f : (v[k] - vn) / MOCK_R_OHM;
+        i_motor[k] = m->open ? 0.0f : (v[k] - vn) / m->r_ohm;
     }
     for (int L = 0; L < 3; L++) {
         i_leg[L] = i_motor[m->phase_of_leg[L]];
@@ -149,7 +156,8 @@ static void mock_tick(mock_inv_t *m)
     if (driving) {
         plant_eval(m, m->duty_hw, i_motor, i_log);
     }
-    if (driving && m->trip_at_enable > 0 && m->enable_count == m->trip_at_enable &&
+    if (driving && m->trip_at_enable > 0 && m->trips == 0 &&
+        m->enable_count >= m->trip_at_enable &&
         (fabsf(m->duty_hw[0] - 0.5f) > 0.01f || fabsf(m->duty_hw[1] - 0.5f) > 0.01f)) {
         m->faulted = true;
         m->enabled = false;
@@ -176,7 +184,7 @@ static void mock_tick(mock_inv_t *m)
     const float a = (2.0f * i_motor[0] - i_motor[1] - i_motor[2]) / 3.0f;
     const float b = (i_motor[1] - i_motor[2]) * 0.57735027f;
     const float mag = sqrtf(a * a + b * b);
-    if (mag > 1.0e-4f) {
+    if (mag > 1.0e-4f && mag >= m->breakaway_a) {
         const float phi = atan2f(b, a);
         m->theta_r = wrap_pi_f(m->theta_r +
                                MOCK_GAIN * mag * sinf(phi - m->theta_r) / (float)MOCK_PWM_HZ);
@@ -268,6 +276,12 @@ static void m_set_duties(esp_foc_inverter_t *self, q16_t du, q16_t dv, q16_t dw)
 static q16_t m_get_vdc(esp_foc_inverter_t *self)
 {
     return q16_from_float(inv_of(self)->vdc);
+}
+
+static q16_t m_get_current_limit(esp_foc_inverter_t *self)
+{
+    (void)self;
+    return q16_from_float(10.0f);
 }
 
 static uint32_t m_get_pwm_hz(esp_foc_inverter_t *self)
@@ -364,6 +378,7 @@ static void mock_inv_init(mock_inv_t *m, const uint8_t phase_of_leg[3], int8_t s
     m->base.disable = m_disable;
     m->base.set_duties = m_set_duties;
     m->base.get_dc_link_voltage = m_get_vdc;
+    m->base.get_current_limit = m_get_current_limit;
     m->base.get_pwm_rate_hz = m_get_pwm_hz;
     m->base.fetch_currents = m_fetch;
     m->base.fetch_currents_raw = m_fetch_raw;
@@ -384,6 +399,7 @@ static void mock_inv_init(mock_inv_t *m, const uint8_t phase_of_leg[3], int8_t s
     m->sense_leg[0] = 0;
     m->sense_leg[1] = 1;
     m->vdc = vdc;
+    m->r_ohm = MOCK_R_OHM;
     m->theta_r = 1.3f;
     esp_foc_phase_map_identity(&m->map);
     /* Stands for the app's handler: the block must take it out for the run. */
@@ -393,6 +409,9 @@ static void mock_inv_init(mock_inv_t *m, const uint8_t phase_of_leg[3], int8_t s
 
 static float rotor_raw(const mock_rotor_t *r)
 {
+    if (r->frozen || (r->freeze_after_zero && r->n_zero > 0)) {
+        return r->mount_rad;
+    }
     const mock_inv_t *p = r->plant;
     const float dither = p->dither_rad * sinf(TWO_PI_F * 4.0f * (float)p->ticks / (float)MOCK_PWM_HZ);
     return wrap_pi_f((float)r->dir * (p->theta_r + dither) / (float)MOCK_PP + r->mount_rad);
@@ -417,6 +436,9 @@ static q16_t r_zero_q16(esp_foc_rotor_sensor_t *self)
 static esp_err_t r_fetch(esp_foc_rotor_sensor_t *self)
 {
     mock_rotor_t *r = rot_of(self);
+    if (r->fetch_err != ESP_OK) {
+        return r->fetch_err;
+    }
     r->latch = q16_from_float(wrap_pi_f(rotor_raw(r) - r->offset_rad));
     r->n_fetch++;
     return ESP_OK;
@@ -431,6 +453,9 @@ static esp_err_t r_fetch_start(esp_foc_rotor_sensor_t *self)
 static esp_err_t r_zero(esp_foc_rotor_sensor_t *self, int samples)
 {
     mock_rotor_t *r = rot_of(self);
+    if (r->zero_err != ESP_OK) {
+        return r->zero_err;
+    }
     if (samples < 1) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -486,6 +511,9 @@ static void on_event(void *ctx, const esp_foc_phase_discover_event_t *e)
     if (e->ev == ESP_FOC_PHASE_DISCOVER_EV_DIR) {
         log->dir = *e;
     }
+    if (e->ev == ESP_FOC_PHASE_DISCOVER_EV_WELL) {
+        log->well = *e;
+    }
     if (log->try_reenter) {
         esp_foc_phase_discover_result_t r;
         log->try_reenter = false;
@@ -520,7 +548,7 @@ static void assert_released(const mock_inv_t *m)
 static void assert_consistent_frame(mock_inv_t *m, const esp_foc_phase_map_t *map)
 {
     const q16_t v = q16_from_float(0.1f);
-    const float expect = 0.1f * m->vdc / MOCK_R_OHM;
+    const float expect = 0.1f * m->vdc / m->r_ohm;
     const esp_foc_phase_map_t saved = m->map;
     m->map = *map;
     for (int axis = 0; axis < 2; axis++) {
@@ -616,10 +644,10 @@ TEST_CASE("phase_discover rejects bad arguments", "[espFoC][phase_discover]")
     TEST_ASSERT_EQUAL(0, m.duty_writes);
 }
 
-TEST_CASE("phase_discover clamps the probe to 5..25 % of Vdc", "[espFoC][phase_discover]")
+TEST_CASE("phase_discover caps the probe ceiling at 25 % of Vdc", "[espFoC][phase_discover]")
 {
     static const float vdc[5] = {3.0f, 6.0f, 12.0f, 24.0f, 48.0f};
-    static const float pu[5] = {0.25f, 0.20f, 0.10f, 0.05f, 0.05f};
+    static const float pu[5] = {0.25f, 0.20f, 0.10f, 0.05f, 0.025f};
     mock_inv_t m;
     esp_foc_phase_discover_t pd;
     esp_foc_phase_discover_config_t cfg;
@@ -633,6 +661,33 @@ TEST_CASE("phase_discover clamps the probe to 5..25 % of Vdc", "[espFoC][phase_d
     }
     mock_inv_init(&m, k_wirings[0], 1, 0.0f);
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_foc_phase_discover_init(&pd, &m.base, NULL, &cfg));
+}
+
+TEST_CASE("phase_discover keeps a low-impedance probe inside the current ceiling",
+          "[espFoC][phase_discover]")
+{
+    mock_inv_t m;
+    esp_foc_phase_discover_t pd;
+    esp_foc_phase_discover_result_t out;
+    esp_foc_phase_discover_config_t cfg;
+    ev_log_t log;
+    memset(&log, 0, sizeof(log));
+    mock_inv_init(&m, k_wirings[0], 1, 24.0f);
+    m.r_ohm = 0.20f;
+    cfg_test(&cfg, &log);
+    cfg.vd_v = 1.2f;
+    cfg.i_probe_max_a = 0.80f;
+    memset(&pd, 0, sizeof(pd));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_phase_discover_init(&pd, &m.base, NULL, &cfg));
+    ticker_start(&m);
+    esp_err_t err = esp_foc_phase_discover_run(&pd, &out);
+    ticker_stop();
+
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+    TEST_ASSERT_TRUE(q16_to_float(out.id_verify) >= cfg.id_min_a);
+    TEST_ASSERT_TRUE(q16_to_float(out.id_verify) <= cfg.i_probe_max_a);
+    TEST_ASSERT_TRUE(q16_to_float(pd.vd_pu) < (1.2f / 24.0f));
+    assert_released(&m);
 }
 
 TEST_CASE("phase_discover finds a consistent frame for every hidden wiring",
@@ -657,6 +712,8 @@ TEST_CASE("phase_discover finds a consistent frame for every hidden wiring",
 
         TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, err, "wiring");
         TEST_ASSERT_TRUE(esp_foc_phase_map_valid(&out.map));
+        TEST_ASSERT_TRUE(out.map_valid);
+        TEST_ASSERT_EQUAL(ESP_FOC_PHASE_DISCOVER_STAGE_DONE, out.failed_at);
         TEST_ASSERT_EQUAL_MEMORY(&out.map, &m.map, sizeof(out.map));
         for (int L = 0; L < 3; L++) {
             TEST_ASSERT_EQUAL(sign, out.map.i_sign[L]);
@@ -664,7 +721,8 @@ TEST_CASE("phase_discover finds a consistent frame for every hidden wiring",
         assert_consistent_frame(&m, &out.map);
         TEST_ASSERT_EQUAL(1, out.attempts);
         TEST_ASSERT_TRUE(out.rank_idx >= 0 && out.rank_idx < 12);
-        TEST_ASSERT_FLOAT_WITHIN(0.05f, 0.1f * 12.0f / MOCK_R_OHM, q16_to_float(out.id_verify));
+        TEST_ASSERT_TRUE(q16_to_float(out.id_verify) >= cfg.id_min_a);
+        TEST_ASSERT_TRUE(q16_to_float(out.id_verify) <= cfg.i_probe_max_a);
         TEST_ASSERT_FLOAT_WITHIN(0.5f, 12.0f / MOCK_R_OHM, q16_to_float(out.admittance));
         TEST_ASSERT_FALSE(out.sensor_zeroed);
         TEST_ASSERT_EQUAL(12, log.count[ESP_FOC_PHASE_DISCOVER_EV_CANDIDATE]);
@@ -694,6 +752,8 @@ TEST_CASE("phase_discover refuses a mirrored sense", "[espFoC][phase_discover]")
     ticker_stop();
 
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_RESPONSE, err);
+    TEST_ASSERT_FALSE(out.map_valid);
+    TEST_ASSERT_EQUAL(ESP_FOC_PHASE_DISCOVER_STAGE_ELECTRICAL, out.failed_at);
     TEST_ASSERT_EQUAL(2, out.attempts);
     TEST_ASSERT_EQUAL(1, log.count[ESP_FOC_PHASE_DISCOVER_EV_NUDGE]);
     TEST_ASSERT_EQUAL(2, log.count[ESP_FOC_PHASE_DISCOVER_EV_REFUSED]);
@@ -728,7 +788,7 @@ TEST_CASE("phase_discover fails an open winding after tries-1 nudges",
     assert_released(&m);
 }
 
-TEST_CASE("phase_discover clears a mid-sweep trip and carries on", "[espFoC][phase_discover]")
+TEST_CASE("phase_discover stops after a mid-sweep trip", "[espFoC][phase_discover]")
 {
     mock_inv_t m;
     esp_foc_phase_discover_t pd;
@@ -745,12 +805,12 @@ TEST_CASE("phase_discover clears a mid-sweep trip and carries on", "[espFoC][pha
     esp_err_t err = esp_foc_phase_discover_run(&pd, &out);
     ticker_stop();
 
-    TEST_ASSERT_EQUAL(ESP_OK, err);
+    TEST_ASSERT_EQUAL(ESP_FAIL, err);
+    TEST_ASSERT_FALSE(out.map_valid);
     TEST_ASSERT_EQUAL(1, m.trips);
-    TEST_ASSERT_EQUAL(1, log.tripped_candidates);
+    TEST_ASSERT_EQUAL(0, log.tripped_candidates);
     TEST_ASSERT_EQUAL(1, out.attempts);
-    TEST_ASSERT_FALSE(m.faulted);
-    assert_consistent_frame(&m, &out.map);
+    TEST_ASSERT_TRUE(m.faulted);
     assert_released(&m);
 }
 
@@ -773,6 +833,8 @@ static void run_sensored(int dir, int wiring)
     ticker_stop();
 
     TEST_ASSERT_EQUAL(ESP_OK, err);
+    TEST_ASSERT_TRUE(out.map_valid);
+    TEST_ASSERT_EQUAL(ESP_FOC_PHASE_DISCOVER_STAGE_DONE, out.failed_at);
     TEST_ASSERT_TRUE(out.sensor_zeroed);
     TEST_ASSERT_EQUAL(1, r.n_zero);
     TEST_ASSERT_TRUE(r.n_step > 0u);
@@ -783,6 +845,8 @@ static void run_sensored(int dir, int wiring)
     TEST_ASSERT_EQUAL(1, log.count[ESP_FOC_PHASE_DISCOVER_EV_WELL]);
     TEST_ASSERT_EQUAL(1, log.count[ESP_FOC_PHASE_DISCOVER_EV_STILL]);
     TEST_ASSERT_EQUAL(1, log.count[ESP_FOC_PHASE_DISCOVER_EV_ZERO]);
+    TEST_ASSERT_TRUE(log.well.good);
+    TEST_ASSERT_TRUE(q16_abs(log.well.motion) >= q16_from_float(cfg.sensor.motion_min_rad));
     assert_released(&m);
 }
 
@@ -816,9 +880,139 @@ TEST_CASE("phase_discover times out on a rotor that never rests", "[espFoC][phas
     ticker_stop();
 
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, err);
+    TEST_ASSERT_TRUE(out.map_valid);
+    TEST_ASSERT_EQUAL(ESP_FOC_PHASE_DISCOVER_STAGE_STILL, out.failed_at);
     TEST_ASSERT_FALSE(out.sensor_zeroed);
     TEST_ASSERT_EQUAL(0, r.n_zero);
     TEST_ASSERT_EQUAL(1, log.count[ESP_FOC_PHASE_DISCOVER_EV_STILL]);
+    assert_released(&m);
+}
+
+TEST_CASE("phase_discover raises well current until the shaft moves",
+          "[espFoC][phase_discover]")
+{
+    mock_inv_t m;
+    mock_rotor_t r;
+    esp_foc_phase_discover_t pd;
+    esp_foc_phase_discover_result_t out;
+    esp_foc_phase_discover_config_t cfg;
+    ev_log_t log;
+    memset(&log, 0, sizeof(log));
+    mock_inv_init(&m, k_wirings[0], 1, 12.0f);
+    m.breakaway_a = 0.30f;
+    mock_rotor_init(&r, &m, 1);
+    cfg_test(&cfg, &log);
+    cfg.sensor.i_well_a = 0.10f;
+    cfg.sensor.i_well_max_a = 0.80f;
+    cfg.sensor.dir_v = 3.0f;
+    cfg.sensor.dir_min_rad = 1.0e-6f;
+    memset(&pd, 0, sizeof(pd));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_phase_discover_init(&pd, &m.base, &r.base, &cfg));
+    ticker_start(&m);
+    esp_err_t err = esp_foc_phase_discover_run(&pd, &out);
+    ticker_stop();
+
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+    TEST_ASSERT_EQUAL(3, log.count[ESP_FOC_PHASE_DISCOVER_EV_WELL]);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.40f, q16_to_float(out.sensor_well_i));
+    TEST_ASSERT_TRUE(log.well.good);
+    assert_released(&m);
+}
+
+TEST_CASE("phase_discover preserves the electrical map when the rotor sensor is frozen",
+          "[espFoC][phase_discover]")
+{
+    mock_inv_t m;
+    mock_rotor_t r;
+    esp_foc_phase_discover_t pd;
+    esp_foc_phase_discover_result_t out;
+    esp_foc_phase_discover_config_t cfg;
+    ev_log_t log;
+    memset(&log, 0, sizeof(log));
+    mock_inv_init(&m, k_wirings[0], 1, 12.0f);
+    mock_rotor_init(&r, &m, 1);
+    r.frozen = true;
+    cfg_test(&cfg, &log);
+    memset(&pd, 0, sizeof(pd));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_phase_discover_init(&pd, &m.base, &r.base, &cfg));
+    ticker_start(&m);
+    esp_err_t err = esp_foc_phase_discover_run(&pd, &out);
+    ticker_stop();
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_RESPONSE, err);
+    TEST_ASSERT_TRUE(out.map_valid);
+    TEST_ASSERT_TRUE(esp_foc_phase_map_valid(&out.map));
+    TEST_ASSERT_EQUAL(ESP_FOC_PHASE_DISCOVER_STAGE_WELL, out.failed_at);
+    TEST_ASSERT_FALSE(out.sensor_zeroed);
+    TEST_ASSERT_EQUAL(0, r.n_zero);
+    TEST_ASSERT_EQUAL(1, log.count[ESP_FOC_PHASE_DISCOVER_EV_MAP]);
+    TEST_ASSERT_GREATER_THAN(1, log.count[ESP_FOC_PHASE_DISCOVER_EV_WELL]);
+    TEST_ASSERT_FALSE(log.well.good);
+    assert_released(&m);
+}
+
+TEST_CASE("phase_discover reports rotor fetch and zero failures after a valid map",
+          "[espFoC][phase_discover]")
+{
+    for (int fail_zero = 0; fail_zero < 2; fail_zero++) {
+        mock_inv_t m;
+        mock_rotor_t r;
+        esp_foc_phase_discover_t pd;
+        esp_foc_phase_discover_result_t out;
+        esp_foc_phase_discover_config_t cfg;
+        ev_log_t log;
+        memset(&log, 0, sizeof(log));
+        mock_inv_init(&m, k_wirings[1], 1, 12.0f);
+        mock_rotor_init(&r, &m, 1);
+        if (fail_zero) {
+            r.zero_err = ESP_FAIL;
+        } else {
+            r.fetch_err = ESP_FAIL;
+        }
+        cfg_test(&cfg, &log);
+        memset(&pd, 0, sizeof(pd));
+        TEST_ASSERT_EQUAL(ESP_OK, esp_foc_phase_discover_init(&pd, &m.base, &r.base, &cfg));
+        ticker_start(&m);
+        esp_err_t err = esp_foc_phase_discover_run(&pd, &out);
+        ticker_stop();
+
+        TEST_ASSERT_EQUAL(ESP_FAIL, err);
+        TEST_ASSERT_TRUE(out.map_valid);
+        TEST_ASSERT_TRUE(esp_foc_phase_map_valid(&out.map));
+        TEST_ASSERT_EQUAL(fail_zero ? ESP_FOC_PHASE_DISCOVER_STAGE_ZERO
+                                    : ESP_FOC_PHASE_DISCOVER_STAGE_WELL,
+                          out.failed_at);
+        TEST_ASSERT_FALSE(out.sensor_zeroed);
+        assert_released(&m);
+    }
+}
+
+TEST_CASE("phase_discover reports a direction failure after a valid sensor zero",
+          "[espFoC][phase_discover]")
+{
+    mock_inv_t m;
+    mock_rotor_t r;
+    esp_foc_phase_discover_t pd;
+    esp_foc_phase_discover_result_t out;
+    esp_foc_phase_discover_config_t cfg;
+    ev_log_t log;
+    memset(&log, 0, sizeof(log));
+    mock_inv_init(&m, k_wirings[4], 1, 12.0f);
+    mock_rotor_init(&r, &m, 1);
+    r.freeze_after_zero = true;
+    cfg_test(&cfg, &log);
+    memset(&pd, 0, sizeof(pd));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_foc_phase_discover_init(&pd, &m.base, &r.base, &cfg));
+    ticker_start(&m);
+    esp_err_t err = esp_foc_phase_discover_run(&pd, &out);
+    ticker_stop();
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_RESPONSE, err);
+    TEST_ASSERT_TRUE(out.map_valid);
+    TEST_ASSERT_TRUE(out.sensor_zeroed);
+    TEST_ASSERT_EQUAL(ESP_FOC_PHASE_DISCOVER_STAGE_DIRECTION, out.failed_at);
+    TEST_ASSERT_GREATER_THAN(1, log.count[ESP_FOC_PHASE_DISCOVER_EV_DIR]);
+    TEST_ASSERT_FALSE(log.dir.good);
     assert_released(&m);
 }
 

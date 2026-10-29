@@ -78,6 +78,16 @@ typedef enum {
     ESP_FOC_PHASE_DISCOVER_EV_DIR,         /* value = dtheta_m [rad] over the +Vq pulse */
 } esp_foc_phase_discover_ev_t;
 
+typedef enum {
+    ESP_FOC_PHASE_DISCOVER_STAGE_NONE = 0,
+    ESP_FOC_PHASE_DISCOVER_STAGE_ELECTRICAL,
+    ESP_FOC_PHASE_DISCOVER_STAGE_WELL,
+    ESP_FOC_PHASE_DISCOVER_STAGE_STILL,
+    ESP_FOC_PHASE_DISCOVER_STAGE_ZERO,
+    ESP_FOC_PHASE_DISCOVER_STAGE_DIRECTION,
+    ESP_FOC_PHASE_DISCOVER_STAGE_DONE,
+} esp_foc_phase_discover_stage_t;
+
 /** One step of the sequence, for logging. Currents are the pulse-pair half difference [A]. */
 typedef struct {
     esp_foc_phase_discover_ev_t ev;
@@ -87,6 +97,7 @@ typedef struct {
     q16_t id, iq, iu, iv, iw;
     q16_t score;
     q16_t value;
+    q16_t motion;           /* mechanical travel during the well sweep [rad] */
     uint32_t ms;
     esp_err_t err;
     bool good;
@@ -99,12 +110,13 @@ typedef void (*esp_foc_phase_discover_event_cb_t)(void *ctx,
 
 typedef struct {
     /*
-     * Probe height in volts, not a fraction of the bus: dead time and device
-     * drop eat a fixed ~0.7 V, so a bus fraction that works at 24 V sits
-     * inside the dead zone at 12 V. Clamped to [0.05, 0.25] of Vdc.
+     * Voltage ceiling of the electrical-probe search, not the voltage applied.
+     * The search starts low and accepts the first excitation whose current is
+     * inside [id_min_a, i_probe_max_a]. Clamped to 25 % of Vdc.
      */
     float vd_v;
     float id_min_a;
+    float i_probe_max_a;
     uint32_t pulse_ms;
     int cal_rounds;
     uint8_t tries;
@@ -114,13 +126,16 @@ typedef struct {
     uint32_t settle_ms;
     struct {
         float i_well_a;
+        float i_well_max_a;
         uint32_t sweep_ms;
+        float motion_min_rad; /* minimum travel proving that the sensor follows the shaft */
         float still_tol_rad;    /* max |theta_m - window start| counted as rest */
         /* Longer than one swing of the rotor in the well (~3 Hz pendulum here). */
         uint32_t calm_ms;
         uint32_t timeout_ms;
         int zero_samples;
         float dir_v;
+        float i_dir_max_a;
         uint32_t dir_ms;
         float dir_min_rad;
     } sensor;
@@ -135,6 +150,10 @@ typedef struct {
     q16_t id_verify;        /* [A] */
     q16_t iq_verify;        /* [A] */
     q16_t admittance;       /* id_verify / probe Vd [A per pu of Vdc] */
+    q16_t sensor_sweep_rad; /* signed mechanical travel during the well sweep */
+    q16_t sensor_well_i;    /* selected well current after the motion search [A] */
+    esp_foc_phase_discover_stage_t failed_at;
+    bool map_valid;         /* electrical map accepted and left in map */
     bool sensor_zeroed;
     /* Reported only: the block cannot flip a sensor through the portable API.
      * Offsets taken before the flip stay valid on sensors that subtract the
@@ -148,11 +167,15 @@ typedef struct {
     esp_foc_rotor_sensor_t *rotor;
     esp_foc_phase_discover_config_t cfg;
     q16_t vd_pu;
+    q16_t vd_cap;
     q16_t id_min;
+    q16_t i_probe_max;
     q16_t dir_vq_pu;
+    q16_t dir_i_max;
     q16_t dir_min;
     q16_t still_tol;
     q16_t i_well;
+    q16_t i_well_max;
     q16_t sweep_step;       /* rad per PWM period */
     volatile q16_t vd;
     volatile q16_t vq;
@@ -167,6 +190,8 @@ typedef struct {
 } esp_foc_phase_discover_t;
 
 void esp_foc_phase_discover_default_config(esp_foc_phase_discover_config_t *cfg);
+
+const char *esp_foc_phase_discover_stage_name(esp_foc_phase_discover_stage_t stage);
 
 /**
  * Bind the block to an inverter and an optional rotor sensor. A sensor must
