@@ -112,7 +112,7 @@ menu "espFoC example: sensorless torque"
         config EXAMPLE_MOTOR_POLE_PAIRS
             int "Pole pairs"
             range 1 64
-            default 13
+            default 7
             help
                 Magnet poles / 2. Identification measures R, L and the flux
                 linkage, but not this.
@@ -120,7 +120,7 @@ menu "espFoC example: sensorless torque"
         config EXAMPLE_DC_LINK_MILLIVOLT
             int "DC link voltage [mV]"
             range 3000 60000
-            default 12000
+            default 24000
             help
                 Supply voltage of the bridge. It scales every voltage the
                 controller asks for, so set the value you actually feed.
