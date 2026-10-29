@@ -41,11 +41,19 @@
 #include "esp_log.h"
 #include "sdkconfig.h"
 #include "espFoC/drivers/esp_foc_inverter_mcpwm.h"
+#ifdef CONFIG_EXAMPLE_ROTOR_SENSOR_QUADRATURE
+#include "espFoC/drivers/esp_foc_rotor_quadrature.h"
+#else
 #include "espFoC/drivers/esp_foc_rotor_as5600.h"
+#endif
 #include "espFoC/motor_control/esp_foc_motor_id.h"
 #include "espFoC/motor_control/esp_foc_phase_discover.h"
 #include "espFoC/motor_control/esp_foc_sensored.h"
 #include "espFoC/osal/esp_foc_osal.h"
+#include "espFoC/utils/esp_foc_clarke.h"
+#include "espFoC/utils/esp_foc_park.h"
+#include "espFoC/utils/esp_foc_svm.h"
+#include "espFoC/utils/esp_foc_trig.h"
 #include "commissioning_store.h"
 
 #define MOTOR_AXIS 0u
@@ -166,8 +174,27 @@ static volatile uint8_t active_mode = ESP_FOC_SD_MODE_POSITION;
 /* Whole turns between the shaft and the origin when position mode was last
  * entered, taken off every angle the GUI sees or sends. */
 static volatile int32_t turns_folded;
+/* Quadrature count is 0 after every boot. Park and the cogging table from
+ * NVS belong to the previous count, so the first start has to seat them. */
+static bool frame_seated;
 
 /* ------------------------------------------------------------------------- */
+
+static unsigned pole_pairs(void)
+{
+    return (controller_config.pole_pairs != 0u) ? controller_config.pole_pairs
+                                                : (unsigned)POLE_PAIRS;
+}
+
+static float rpm_to_hz(float rpm)
+{
+    return rpm / 60.0f * (float)pole_pairs();
+}
+
+static float rads_to_rpm(float we_rads)
+{
+    return we_rads * RPM_PER_RADS_MECH / (float)pole_pairs();
+}
 
 static uint8_t crc8(const uint8_t *data, size_t len)
 {
@@ -225,7 +252,7 @@ static void send_info(void)
 {
     uint8_t payload[13];
 
-    payload[0] = (uint8_t)POLE_PAIRS;
+    payload[0] = (uint8_t)pole_pairs();
     put_f32(&payload[1], GUI_MAX_RPM);
     put_f32(&payload[5], GUI_MAX_IQ_A);
     put_f32(&payload[9], GUI_MAX_DEG);
@@ -295,7 +322,6 @@ static void send_telemetry(void)
     uint8_t payload[35];
     esp_foc_sensored_status_t status;
     uint8_t flags = 0;
-    const float rpm_per_rads_el = RPM_PER_RADS_MECH / (float)POLE_PAIRS;
 
     memset(&status, 0, sizeof(status));
     if (controller_ready) {
@@ -329,8 +355,8 @@ static void send_telemetry(void)
     payload[2] = controller_ready ? (uint8_t)status.state : 0u;
     payload[3] = active_mode;
     payload[4] = flags;
-    put_f32(&payload[5], status.w_ref_rads * rpm_per_rads_el);
-    put_f32(&payload[9], status.we_rads * rpm_per_rads_el);
+    put_f32(&payload[5], rads_to_rpm(status.w_ref_rads));
+    put_f32(&payload[9], rads_to_rpm(status.we_rads));
     put_f32(&payload[13], status.theta_ref_rad * DEG_PER_RAD);
     put_f32(&payload[17], status.theta_m_rad * DEG_PER_RAD);
     put_f32(&payload[21], status.iq_ref_a);
@@ -390,8 +416,38 @@ static esp_err_t setup_inverter(void)
     return esp_foc_inverter_mcpwm_init(inverter, &inverter_config);
 }
 
+static void encoder_set_invert(bool invert)
+{
+#ifdef CONFIG_EXAMPLE_ROTOR_SENSOR_QUADRATURE
+    esp_foc_rotor_quadrature_set_invert(encoder, invert);
+#else
+    esp_foc_rotor_as5600_set_invert(encoder, invert);
+#endif
+}
+
 static esp_err_t setup_encoder(void)
 {
+#ifdef CONFIG_EXAMPLE_ROTOR_SENSOR_QUADRATURE
+    encoder = esp_foc_rotor_quadrature_acquire(0);
+    if (encoder == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    const esp_foc_rotor_quadrature_config_t encoder_config = {
+        .gpio_a = CONFIG_EXAMPLE_QUADRATURE_GPIO_A,
+        .gpio_b = CONFIG_EXAMPLE_QUADRATURE_GPIO_B,
+        .pcnt_group = 0,
+        .pcnt_unit = 0,
+        .ppr = CONFIG_EXAMPLE_QUADRATURE_PPR,
+        .glitch_ns = 100u,
+        .dt_seconds = 1.0f / (float)ENCODER_RATE_HZ,
+        /* Phase discovery measures the counting direction; start unflipped. */
+        .invert = false,
+        .pole_pairs = POLE_PAIRS,
+        .irq_level = 1,
+    };
+    return esp_foc_rotor_quadrature_init(encoder, &encoder_config);
+#else
     encoder = esp_foc_rotor_as5600_acquire(0);
     if (encoder == NULL) {
         return ESP_ERR_NO_MEM;
@@ -409,6 +465,7 @@ static esp_err_t setup_encoder(void)
         .pwm_hz = PWM_RATE_HZ,
     };
     return esp_foc_rotor_as5600_init(encoder, &encoder_config);
+#endif
 }
 
 /* ---------------------------------------------------------------------------
@@ -445,15 +502,20 @@ static void *step_data(step_t step, size_t *size)
 static uint32_t board_hash(void)
 {
     const int32_t board[] = {
-        POLE_PAIRS, CONFIG_EXAMPLE_DC_LINK_MILLIVOLT, CONFIG_ESP_FOC_PWM_RATE_HZ,
+        CONFIG_EXAMPLE_DC_LINK_MILLIVOLT, CONFIG_ESP_FOC_PWM_RATE_HZ,
         CONFIG_EXAMPLE_PWM_DEAD_TIME_NS, CONFIG_EXAMPLE_SHUNT_MILLIOHM,
         CONFIG_EXAMPLE_CURRENT_AMP_GAIN, CONFIG_EXAMPLE_PWM_U_HIGH_GPIO,
         CONFIG_EXAMPLE_PWM_U_LOW_GPIO, CONFIG_EXAMPLE_PWM_V_HIGH_GPIO,
         CONFIG_EXAMPLE_PWM_V_LOW_GPIO, CONFIG_EXAMPLE_PWM_W_HIGH_GPIO,
         CONFIG_EXAMPLE_PWM_W_LOW_GPIO, CONFIG_EXAMPLE_CURRENT_U_GPIO,
         CONFIG_EXAMPLE_CURRENT_V_GPIO, CONFIG_EXAMPLE_CURRENT_W_GPIO,
+#ifdef CONFIG_EXAMPLE_ROTOR_SENSOR_QUADRATURE
+        CONFIG_EXAMPLE_QUADRATURE_GPIO_A, CONFIG_EXAMPLE_QUADRATURE_GPIO_B, CONFIG_EXAMPLE_QUADRATURE_PPR,
+#else
         CONFIG_EXAMPLE_ENCODER_SDA_GPIO, CONFIG_EXAMPLE_ENCODER_SCL_GPIO,
-        CONFIG_EXAMPLE_ENCODER_I2C_HZ, ENCODER_RATE_HZ, CONFIG_ESP_FOC_SD_COG_BINS,
+        CONFIG_EXAMPLE_ENCODER_I2C_HZ,
+#endif
+        ENCODER_RATE_HZ, CONFIG_ESP_FOC_SD_COG_BINS,
     };
     return commissioning_store_crc(0, board, sizeof(board));
 }
@@ -530,10 +592,12 @@ static void on_discover_event(void *context, const esp_foc_phase_discover_event_
         log_line("map: attempt refused (%s)", esp_err_to_name(event->err));
         break;
     case ESP_FOC_PHASE_DISCOVER_EV_MAP:
-        log_line("map: phase order accepted");
+        log_line("map: electrical phase order accepted");
         send_progress(STEP_MAP, 70);
         break;
     case ESP_FOC_PHASE_DISCOVER_EV_WELL:
+        log_line("sensor: well travel %+.4f rad, %s", (double)q16_to_float(event->motion),
+                 event->good ? "accepted" : "refused");
         send_progress(STEP_MAP, 80);
         break;
     case ESP_FOC_PHASE_DISCOVER_EV_STILL:
@@ -565,7 +629,7 @@ static esp_err_t apply_phase_map(void)
         return err;
     }
     /* From here on the encoder counts positive in the motor's forward direction. */
-    esp_foc_rotor_as5600_set_invert(encoder, map->sensor_reversed);
+    encoder_set_invert(map->sensor_reversed);
     log_line("map: U->%c(%+d) V->%c(%+d) W->%c(%+d), encoder %s",
              letters[map->map.pwm_to_hw[0] % 3u], map->map.i_sign[0],
              letters[map->map.pwm_to_hw[1] % 3u], map->map.i_sign[1],
@@ -587,7 +651,7 @@ static esp_err_t discover_phases(void)
     discovery_config.on_event = on_discover_event;
     memset(&record.map, 0, sizeof(record.map));
     /* Discovery measures the counting direction from the raw sensor. */
-    esp_foc_rotor_as5600_set_invert(encoder, false);
+    encoder_set_invert(false);
     esp_err_t err = esp_foc_phase_discover_init(&discovery, inverter, encoder, &discovery_config);
     if (err == ESP_OK) {
         err = esp_foc_phase_discover_run(&discovery, &record.map.result);
@@ -597,7 +661,9 @@ static esp_err_t discover_phases(void)
         err = esp_foc_rotor_sensor_get_offset(encoder, &record.map.encoder_zero_rad);
     }
     if (err != ESP_OK) {
-        log_line("map: failed (%s)", esp_err_to_name(err));
+        log_line("commissioning: failed at %s (%s), electrical map %s",
+                 esp_foc_phase_discover_stage_name(record.map.result.failed_at),
+                 esp_err_to_name(err), record.map.result.map_valid ? "preserved" : "not found");
         return err;
     }
     return apply_phase_map();
@@ -629,6 +695,11 @@ static void on_motor_id_event(void *context, const esp_foc_motor_id_event_t *eve
         }
         log_line("ident: %s", esp_foc_motor_id_phase_name(event->phase));
         break;
+    case ESP_FOC_MOTOR_ID_EV_DIRECTION:
+        log_line("ident: direction pp=%u fm=%.3f/end=%.3f Hz iq=%.3f A offset=%+.3f rad (%s)",
+                 (unsigned)event->pass, (double)event->v[0], (double)event->v[3],
+                 (double)event->v[1], (double)event->v[2], esp_err_to_name(event->err));
+        break;
     case ESP_FOC_MOTOR_ID_EV_MECH:
         log_line("ident: K %.0f rad/s2/A, J %.2e kg m2", (double)event->v[0],
                  (double)event->v[3]);
@@ -648,9 +719,23 @@ static void on_controller_event(void *context, const esp_foc_sensored_event_t *e
         send_progress(STEP_COG,
                       (uint8_t)((event->pass * 100u) / controller_config.cogging.passes_max));
         break;
-    case ESP_FOC_SD_EV_ABORT:
-        log_line("controller: abort %d, bridge off", (int)event->abort);
+    case ESP_FOC_SD_EV_ABORT: {
+        esp_foc_sensored_status_t status;
+        const char *why = "none";
+        memset(&status, 0, sizeof(status));
+        esp_foc_sensored_get_status(MOTOR_AXIS, &status);
+        if (event->abort == ESP_FOC_SD_ABORT_OVERSPEED) {
+            why = "overspeed";
+        } else if (event->abort == ESP_FOC_SD_ABORT_SENSOR_STALE) {
+            why = "sensor stale";
+        } else if (event->abort == ESP_FOC_SD_ABORT_SENSOR_FAIL) {
+            why = "sensor fail";
+        }
+        log_line("controller: abort %s, we %.0f Hz, err %.0f deg", why,
+                 (double)(status.we_rads / TWO_PI),
+                 (double)((status.theta_ref_rad - status.theta_m_rad) * DEG_PER_RAD));
         break;
+    }
     case ESP_FOC_SD_EV_FAULT:
         log_line("controller: fault %d, bridge off", (int)event->fault);
         break;
@@ -673,7 +758,7 @@ static void build_controller_config(void)
     esp_foc_sensored_config_from_motor_id(&controller_config, &record.plant);
     esp_foc_sensored_config_from_phase_map(&controller_config, &record.map.result);
     controller_config.guard.overspeed_hz =
-        (float)CONFIG_EXAMPLE_OVERSPEED_RPM / 60.0f * (float)POLE_PAIRS;
+        rpm_to_hz((float)CONFIG_EXAMPLE_OVERSPEED_RPM);
     controller_config.on_event = on_controller_event;
 }
 
@@ -683,6 +768,9 @@ static void build_controller_config(void)
  * position mode takes the whole turns off, so the angle comes back within
  * half a turn of the origin, the same physical point the cogging learn set.
  */
+static esp_err_t apply_plant(void);
+static esp_err_t apply_cogging(void);
+
 static void fold_turns(void)
 {
     esp_foc_sensored_status_t status;
@@ -691,23 +779,203 @@ static void fold_turns(void)
     turns_folded = (int32_t)lroundf(status.theta_m_rad * DEG_PER_RAD / 360.0f);
 }
 
+static float wrap_pi(float angle)
+{
+    while (angle > (float)M_PI) {
+        angle -= TWO_PI;
+    }
+    while (angle < -(float)M_PI) {
+        angle += TWO_PI;
+    }
+    return angle;
+}
+
+static void rotate_cogging(int shift)
+{
+    static q16_t rotated[CONFIG_ESP_FOC_SD_COG_BINS];
+    const int n = CONFIG_ESP_FOC_SD_COG_BINS;
+
+    shift %= n;
+    if (shift < 0) {
+        shift += n;
+    }
+    if (shift == 0) {
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        const int src = i - shift;
+        rotated[i] = record.cog.table[(src < 0) ? (src + n) : src];
+    }
+    memcpy(record.cog.table, rotated, sizeof(record.cog.table));
+}
+
+/*
+ * PCNT starts at 0 on this boot, wherever the shaft happens to be. The saved
+ * park offset and cogging bins were learned on the previous count, so closing
+ * the loop on them is positive feedback: one turn, then the overspeed trip.
+ * A short d-axis hold measures the new electrical angle and slides the table
+ * by the same mechanical delta. An absolute encoder keeps its zero.
+ */
+static esp_err_t seat_incremental_frame(bool *did)
+{
+    *did = false;
+#ifdef CONFIG_EXAMPLE_ROTOR_SENSOR_QUADRATURE
+    if (frame_seated) {
+        return ESP_OK;
+    }
+    const unsigned pp = controller_config.pole_pairs;
+    if ((pp == 0u) || !(controller_config.rs_ohm > 0.0f)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    float volts = 0.7f * controller_config.rs_ohm + record.plant.v_deadzone_v;
+    if (volts < 0.4f) {
+        volts = 0.4f;
+    }
+    if (volts > 1.5f) {
+        volts = 1.5f;
+    }
+    q16_t s;
+    q16_t c;
+    q16_t alpha;
+    q16_t beta;
+    q16_t du;
+    q16_t dv;
+    q16_t dw;
+    esp_foc_sincos(0, &s, &c);
+    esp_foc_inv_park(s, c, q16_from_float(volts / DC_LINK_VOLTS), 0, &alpha, &beta);
+    esp_foc_svm(alpha, beta, &du, &dv, &dw);
+
+    if (inverter->is_faulted(inverter)) {
+        (void)inverter->clear_fault(inverter);
+    }
+    /* The sensored DMA hook clears the flag calibrate waits on. */
+    inverter->set_dma_callback(inverter, NULL, NULL);
+    esp_err_t err = inverter->enable(inverter);
+    if (err != ESP_OK) {
+        log_line("seat: bridge enable failed (%s)", esp_err_to_name(err));
+        return err;
+    }
+    inverter->set_sense_watchdog(inverter, false);
+    inverter->calibrate_currents(inverter, 32);
+    inverter->set_duties(inverter, du, dv, dw);
+
+    float i_hold = 0.0f;
+    for (int n = 0; n < 12; n++) {
+        q16_t iu;
+        q16_t iv;
+        q16_t iw;
+        q16_t ia;
+        q16_t ib;
+        esp_foc_sleep_ms(50);
+        inverter->fetch_currents(inverter, &iu, &iv, &iw);
+        esp_foc_clarke(iu, iv, iw, &ia, &ib);
+        i_hold = hypotf(q16_to_float(ia), q16_to_float(ib));
+        if (i_hold > 2.5f) {
+            inverter->disable(inverter);
+            log_line("seat: current %.2f A, bridge off", (double)i_hold);
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+    }
+    if (inverter->is_faulted(inverter)) {
+        inverter->disable(inverter);
+        (void)inverter->clear_fault(inverter);
+        log_line("seat: inverter fault, bridge off");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_foc_rotor_sensor_fetch(encoder);
+    esp_foc_rotor_state_t st;
+    esp_foc_rotor_sensor_snapshot(encoder, &st);
+    inverter->disable(inverter);
+
+    const float w_m = fabsf(q16_to_float(st.omega_m));
+    if ((i_hold < 0.15f) || (w_m > 3.0f)) {
+        log_line("seat: did not settle, I %.2f A, wm %.2f rad/s", (double)i_hold,
+                 (double)w_m);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    const float th_e = q16_to_float(st.theta_e);
+    const float old_off = controller_config.park_offset_rad;
+    const float new_off = wrap_pi(-th_e);
+    const bool have_cog = (steps_done & (1u << STEP_COG)) != 0u;
+    int shift = 0;
+    if (have_cog) {
+        const float dmech = wrap_pi(th_e + old_off) / (float)pp;
+        shift = (int)lroundf(dmech / TWO_PI * (float)CONFIG_ESP_FOC_SD_COG_BINS);
+        rotate_cogging(shift);
+    }
+    record.plant.park_offset_rad = new_off;
+    log_line("seat: park %+.3f -> %+.3f rad, cog %+d, I %.2f A", (double)old_off,
+             (double)new_off, shift, (double)i_hold);
+
+    const uint8_t mode = active_mode;
+    esp_foc_sensored_deinit(MOTOR_AXIS);
+    controller_ready = false;
+    err = apply_plant();
+    active_mode = mode;
+    if (err != ESP_OK) {
+        record.plant.park_offset_rad = old_off;
+        if (have_cog) {
+            rotate_cogging(-shift);
+        }
+        return err;
+    }
+    if (have_cog) {
+        err = apply_cogging();
+        if (err != ESP_OK) {
+            record.plant.park_offset_rad = old_off;
+            rotate_cogging(-shift);
+            esp_foc_sensored_deinit(MOTOR_AXIS);
+            controller_ready = false;
+            (void)apply_plant();
+            active_mode = mode;
+            return err;
+        }
+    }
+    frame_seated = true;
+    *did = true;
+#else
+    frame_seated = true;
+#endif
+    return ESP_OK;
+}
+
 static esp_err_t start_controller(void)
 {
-    esp_err_t err = esp_foc_sensored_run(MOTOR_AXIS);
+    bool seated = false;
+    esp_err_t err = seat_incremental_frame(&seated);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = esp_foc_sensored_run(MOTOR_AXIS);
     if (err == ESP_OK) {
-        esp_foc_sensored_set_speed_slew(MOTOR_AXIS, GUI_ACCEL_RPM_S / 60.0f * (float)POLE_PAIRS);
+        esp_foc_sensored_set_speed_slew(MOTOR_AXIS, rpm_to_hz(GUI_ACCEL_RPM_S));
         err = esp_foc_sensored_set_mode(MOTOR_AXIS, (esp_foc_sensored_mode_t)active_mode);
     }
-    if ((err == ESP_OK) && (active_mode == ESP_FOC_SD_MODE_POSITION)) {
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (seated) {
+        turns_folded = 0;
+        return esp_foc_sensored_set_origin(MOTOR_AXIS);
+    }
+    if (active_mode == ESP_FOC_SD_MODE_POSITION) {
         fold_turns();
     }
-    return err;
+    return ESP_OK;
 }
 
 /* Builds the controller from the identified plant; the bridge stays off. */
 static esp_err_t apply_plant(void)
 {
     build_controller_config();
+#ifdef CONFIG_EXAMPLE_ROTOR_SENSOR_QUADRATURE
+    esp_foc_rotor_quadrature_set_pole_pairs(encoder, controller_config.pole_pairs);
+#else
+    esp_foc_rotor_as5600_set_pole_pairs(encoder, controller_config.pole_pairs);
+#endif
     log_line("ident: Rs %.3f ohm, Ls %.0f uH, psi %.0f uWb, K %.0f rad/s2/A",
              (double)controller_config.rs_ohm, (double)(controller_config.ls_h * 1.0e6f),
              (double)(controller_config.psi_wb * 1.0e6f), (double)controller_config.k_rads2_a);
@@ -730,6 +998,7 @@ static void teardown_controller(void)
         return;
     }
     controller_ready = false;
+    frame_seated = false;
     esp_foc_sensored_stop(MOTOR_AXIS);
     esp_foc_sensored_deinit(MOTOR_AXIS);
 }
@@ -762,6 +1031,8 @@ static esp_err_t identify_motor(void)
     if (err != ESP_OK) {
         return err;
     }
+    /* This boot's count is the one identification just fitted. */
+    frame_seated = true;
     save_step(STEP_IDENT);
     err = start_controller();
     if (err != ESP_OK) {
@@ -939,6 +1210,13 @@ static void worker_task(void *arg)
         break;
     case CMD_MODE:
         err = start_controller();
+        if (err == ESP_OK) {
+            if (active_mode == ESP_FOC_SD_MODE_TORQUE) {
+                err = esp_foc_sensored_set_iq(MOTOR_AXIS, 0.0f);
+            } else if (active_mode == ESP_FOC_SD_MODE_VELOCITY) {
+                err = esp_foc_sensored_set_speed_ref_hz(MOTOR_AXIS, 0.0f);
+            }
+        }
         break;
     default:
         err = ESP_ERR_NOT_SUPPORTED;
@@ -975,7 +1253,7 @@ static esp_err_t apply_reference(float value)
         return esp_foc_sensored_set_iq(MOTOR_AXIS, clampf(value, GUI_MAX_IQ_A));
     case ESP_FOC_SD_MODE_VELOCITY:
         return esp_foc_sensored_set_speed_ref_hz(
-            MOTOR_AXIS, clampf(value, GUI_MAX_RPM) / 60.0f * (float)POLE_PAIRS);
+            MOTOR_AXIS, rpm_to_hz(clampf(value, GUI_MAX_RPM)));
     case ESP_FOC_SD_MODE_POSITION:
         return esp_foc_sensored_set_position_ref_rad(
             MOTOR_AXIS, (clampf(value, GUI_MAX_DEG) + (float)turns_folded * 360.0f) / DEG_PER_RAD);
@@ -1056,6 +1334,11 @@ static void handle_command(uint8_t type, const uint8_t *payload, uint8_t len)
         active_mode = payload[0];
         if (esp_foc_sensored_get_state(MOTOR_AXIS) == ESP_FOC_SD_STATE_RUNNING) {
             err = esp_foc_sensored_set_mode(MOTOR_AXIS, (esp_foc_sensored_mode_t)active_mode);
+            if ((err == ESP_OK) && (active_mode == ESP_FOC_SD_MODE_TORQUE)) {
+                err = esp_foc_sensored_set_iq(MOTOR_AXIS, 0.0f);
+            } else if ((err == ESP_OK) && (active_mode == ESP_FOC_SD_MODE_VELOCITY)) {
+                err = esp_foc_sensored_set_speed_ref_hz(MOTOR_AXIS, 0.0f);
+            }
             if ((err == ESP_OK) && (was != ESP_FOC_SD_MODE_POSITION) &&
                 (active_mode == ESP_FOC_SD_MODE_POSITION)) {
                 fold_turns();

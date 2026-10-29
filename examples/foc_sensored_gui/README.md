@@ -31,7 +31,7 @@ flowchart LR
             FOC["espFoC sensored stack<br/>current / speed / position"]
         end
     end
-    INV["3-phase inverter<br/>12 V DC link"]
+    INV["3-phase inverter<br/>24 V DC link"]
     MOT["PMSM / BLDC motor<br/>+ AS5600 on the shaft"]
 
     GUI <-- "USB cable<br/>binary frames" --> BRIDGE
@@ -103,7 +103,7 @@ With the option off, nothing is saved and every boot starts at step 1.
 
 The board clamps every reference to the ranges in `menuconfig`
 (**espFoC example: sensored GUI → GUI limits**), whatever the host sends:
-±2000 rpm, ±0.5 A, ±3600 deg by default. The overspeed trip (2900 rpm)
+±2000 rpm, ±1.5 A, ±3600 deg by default. The overspeed trip (2900 rpm)
 protects torque mode, where an unloaded shaft keeps speeding up.
 
 ## Getting started
