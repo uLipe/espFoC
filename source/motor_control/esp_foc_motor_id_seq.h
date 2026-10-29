@@ -161,6 +161,10 @@ typedef struct {
 
     bool do_flux;           /**< false keeps the whole run at standstill */
     float i_flux_a;
+    float i_flux_max_a;
+    /** Flux plausibility window used to qualify each current-ladder step. */
+    float psi_min_wb;
+    float psi_max_wb;
     int flux_hz;
     uint32_t ramp_ms;
     uint32_t flux_hold_ms;
