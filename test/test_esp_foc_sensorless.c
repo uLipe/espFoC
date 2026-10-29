@@ -14,6 +14,7 @@
 
 #include "unity.h"
 #include "esp_err.h"
+#include "espFoC/motor_control/esp_foc_motor_id.h"
 #include "espFoC/motor_control/esp_foc_sensorless.h"
 #include "espFoC/osal/esp_foc_osal.h"
 #include "espFoC/utils/esp_foc_pid.h"
@@ -762,6 +763,49 @@ TEST_CASE("sensorless: two axes run independently on their own inverters",
     TEST_ASSERT_EQUAL(0, s_ev_n[ESP_FOC_SL_EV_ABORT]);
     TEST_ASSERT_EQUAL(0, s_ev_n[ESP_FOC_SL_EV_STARTUP_FAILED]);
     bench_reset();
+}
+#endif
+
+#if CONFIG_ESP_FOC_ENABLE_MOTOR_ID
+TEST_CASE("sensorless launch current follows the identified motion", "[espFoC][sensorless]")
+{
+    esp_foc_sensorless_config_t cfg;
+    esp_foc_motor_id_result_t result;
+
+    esp_foc_sensorless_default_config(&cfg);
+    cfg.i_max_a = 1.5f;
+    cfg.i_align_a = 0.45f;
+    cfg.id_run_a = 0.45f;
+    cfg.handoff.iq_start_a = 0.20f;
+    cfg.catch_up.floor_a = 0.18f;
+    cfg.startup.ramp_id_err_a = 0.20f;
+    const float seed = cfg.i_align_a;
+    memset(&result, 0, sizeof(result));
+    result.flux_i_a = 0.90f;
+    esp_foc_sensorless_config_from_motor_id(&cfg, &result);
+    TEST_ASSERT_FLOAT_WITHIN(1.0e-3f, 0.90f, cfg.i_align_a);
+    TEST_ASSERT_FLOAT_WITHIN(1.0e-3f, 0.90f, cfg.id_run_a);
+    TEST_ASSERT_FLOAT_WITHIN(1.0e-3f, 0.90f, cfg.handoff.iq_start_a);
+    TEST_ASSERT_FLOAT_WITHIN(1.0e-3f, 0.90f, cfg.catch_up.floor_a);
+    TEST_ASSERT_FLOAT_WITHIN(1.0e-3f, 0.35f * 0.90f, cfg.startup.ramp_id_err_a);
+    TEST_ASSERT_GREATER_THAN_FLOAT(seed, cfg.i_align_a);
+
+    esp_foc_sensorless_default_config(&cfg);
+    cfg.i_max_a = 1.5f;
+    const float kept = cfg.i_align_a;
+    memset(&result, 0, sizeof(result));
+    esp_foc_sensorless_config_from_motor_id(&cfg, &result);
+    TEST_ASSERT_FLOAT_WITHIN(1.0e-4f, kept, cfg.i_align_a);
+
+    esp_foc_sensorless_default_config(&cfg);
+    cfg.i_max_a = 0.80f;
+    cfg.i_align_a = 0.45f;
+    cfg.catch_up.floor_a = 0.18f;
+    memset(&result, 0, sizeof(result));
+    result.flux_i_a = 2.0f;
+    esp_foc_sensorless_config_from_motor_id(&cfg, &result);
+    TEST_ASSERT_FLOAT_WITHIN(1.0e-3f, 0.80f, cfg.i_align_a);
+    TEST_ASSERT_LESS_THAN_FLOAT(cfg.i_max_a, cfg.catch_up.floor_a);
 }
 #endif
 
