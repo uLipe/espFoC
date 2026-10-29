@@ -585,6 +585,22 @@ class Backend(QObject):
 
     # --- connection --------------------------------------------------------
 
+    def _reset_board_state(self):
+        self._pole_pairs = 0
+        self._max_rpm, self._max_iq, self._max_deg = 2000.0, 0.5, 3600.0
+        self._kind = KIND_SENSORED
+        self._min_rpm = self._min_iq = 0.0
+        self._steps_done = self._busy = self._state = self._flags = 0
+        self._mode = 2
+        self._vdc = 0.0
+        self._last = (0.0,) * 6
+        self._progress = [0, 0, 0]
+        self._failed = [False, False, False]
+        self._pending_ref = None
+        self.infoChanged.emit()
+        self.statusChanged.emit()
+        self.progressChanged.emit()
+
     def _get_ports(self):
         return self._ports
 
@@ -609,6 +625,7 @@ class Backend(QObject):
     def connectPort(self, name):
         if self._link.is_open():
             self._link.close()
+        self._reset_board_state()
         try:
             self._link.open(name)
         except (serial.SerialException, OSError) as exc:
@@ -621,11 +638,13 @@ class Backend(QObject):
 
     @Slot()
     def disconnectPort(self):
+        self._reset_board_state()
         self._link.close()
         self.connectionChanged.emit()
         self.logLine.emit("disconnected")
 
     def _on_link_closed(self, reason):
+        self._reset_board_state()
         self.logLine.emit(f"port closed: {reason}")
         self._link.close()
         self.connectionChanged.emit()
@@ -955,7 +974,14 @@ ApplicationWindow {
                                   && backend.stepsDone === backend.commissioned
     // A sensorless controller that latched a failure, abort or fault.
     readonly property bool tripped: (backend.flags & (2 | 4 | 32)) !== 0
-    onReadyChanged: if (ready) control.resetFields(backend.mode)
+    onReadyChanged: {
+        if (ready) {
+            control.resetFields(backend.mode)
+        } else {
+            for (let i = 0; i < scopes.count; ++i)
+                scopes.itemAt(i).scope.clear()
+        }
+    }
 
     // Esc is STOP from anywhere in the window.
     Shortcut { sequence: "Esc"; onActivated: backend.stop() }
