@@ -16,8 +16,9 @@
 
 #define PD_CANDIDATES      12
 #define PD_MIN_SAMPLES     3
-#define PD_VD_PU_MIN       0.05f
 #define PD_VD_PU_MAX       0.25f
+#define PD_SEEK_STEPS      12
+#define PD_V_SEED_V        0.05f
 /* Lets the inverter drain the previous candidate's last DMA frames before the
  * fault check and the shunt re-zero. */
 #define PD_IDLE_SETTLE_MS  20u
@@ -309,8 +310,66 @@ static void pd_event_obs(esp_foc_phase_discover_event_t *e, esp_foc_phase_discov
     }
 }
 
-static esp_err_t pd_stage_a(esp_foc_phase_discover_t *pd, uint8_t attempt,
-                            pd_cand_t *rank, int *n_rank)
+static bool pd_in_probe_band(const esp_foc_phase_discover_t *pd, q16_t current)
+{
+    const q16_t i = q16_abs(current);
+    return (i >= pd->id_min) && (i <= pd->i_probe_max);
+}
+
+static q16_t pd_phase_peak(const pd_obs_t *o)
+{
+    q16_t m = q16_abs(o->u);
+    const q16_t vb = q16_abs(o->v);
+    const q16_t wb = q16_abs(o->w);
+    if (vb > m) {
+        m = vb;
+    }
+    if (wb > m) {
+        m = wb;
+    }
+    return m;
+}
+
+typedef struct {
+    pd_obs_t obs;
+    bool ok;
+    bool tripped;
+} pd_slot_t;
+
+/* One voltage, every wiring. The peak is the largest phase current, so a
+ * frame that has not been accepted yet cannot hide a low-impedance winding
+ * behind a small Park current. */
+static esp_err_t pd_sweep(esp_foc_phase_discover_t *pd, q16_t v, pd_slot_t *slot,
+                          q16_t *peak, bool *any_trip)
+{
+    *peak = 0;
+    *any_trip = false;
+    for (int cand = 0; cand < PD_CANDIDATES; cand++) {
+        const int8_t sg = (cand & 1) ? -1 : 1;
+        esp_foc_phase_map_t map;
+        for (int L = 0; L < 3; L++) {
+            map.pwm_to_hw[L] = k_perms[cand / 2][L];
+            map.i_sign[L] = sg;
+        }
+        esp_err_t err = pd_probe(pd, &map, v, 0, &slot[cand].obs, &slot[cand].ok,
+                                 &slot[cand].tripped);
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (slot[cand].tripped) {
+            *any_trip = true;
+            return ESP_FAIL;
+        }
+        const q16_t ip = pd_phase_peak(&slot[cand].obs);
+        if (ip > *peak) {
+            *peak = ip;
+        }
+    }
+    return ESP_OK;
+}
+
+static void pd_emit_sweep(esp_foc_phase_discover_t *pd, uint8_t attempt,
+                          const pd_slot_t *slot, pd_cand_t *rank, int *n_rank)
 {
     *n_rank = 0;
     for (int cand = 0; cand < PD_CANDIDATES; cand++) {
@@ -320,33 +379,108 @@ static esp_err_t pd_stage_a(esp_foc_phase_discover_t *pd, uint8_t attempt,
             map.pwm_to_hw[L] = k_perms[cand / 2][L];
             map.i_sign[L] = sg;
         }
-        pd_obs_t o;
-        bool ok;
-        bool tripped;
-        esp_err_t err = pd_probe(pd, &map, pd->vd_pu, 0, &o, &ok, &tripped);
-        if (err != ESP_OK) {
-            return err;
-        }
+        const pd_obs_t *o = &slot[cand].obs;
         /*
          * Admission is only "real current on +d". Return-leg balance and q
          * leakage are compared across candidates: as absolute gates they sat
          * on the median of the measured population (split/id 0.643 against a
          * 0.600 gate) and refused whole sweeps.
          */
-        const int64_t score = (int64_t)o.d - 2 * (int64_t)q16_abs(o.q) -
-                              2 * (int64_t)q16_abs(q16_sub(o.v, o.w));
-        const bool good = ok && !tripped && (o.d > pd->id_min);
+        const int64_t score = (int64_t)o->d - 2 * (int64_t)q16_abs(o->q) -
+                              2 * (int64_t)q16_abs(q16_sub(o->v, o->w));
+        const bool good = slot[cand].ok && !slot[cand].tripped && (o->d > pd->id_min);
         esp_foc_phase_discover_event_t e;
-        pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_CANDIDATE, (int8_t)cand, attempt, &map, &o);
+        pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_CANDIDATE, (int8_t)cand, attempt, &map, o);
         e.score = (q16_t)score;
         e.good = good;
-        e.tripped = tripped;
+        e.tripped = slot[cand].tripped;
         pd_emit(pd, &e);
         if (good) {
             pd_rank_insert(rank, n_rank, &map, (q16_t)score, (int8_t)cand);
         }
     }
-    return (*n_rank > 0) ? ESP_OK : ESP_FAIL;
+}
+
+static q16_t pd_imax(const pd_slot_t *slot)
+{
+    q16_t imax = 0;
+    for (int cand = 0; cand < PD_CANDIDATES; cand++) {
+        if (!slot[cand].ok || slot[cand].tripped) {
+            continue;
+        }
+        if (slot[cand].obs.d > imax) {
+            imax = slot[cand].obs.d;
+        }
+    }
+    return imax;
+}
+
+/* Raise a 50 mV seed until the best d current is inside [id_min, i_probe_max].
+ * A single step at most doubles, so crossing the bridge dead time cannot jump
+ * straight to the voltage ceiling. Ranking is the existing score: on this
+ * drive every wiring conducts, and the frame is the one with id ahead of iq. */
+static esp_err_t pd_seek_frame(esp_foc_phase_discover_t *pd, uint8_t attempt,
+                               pd_cand_t *rank, int *n_rank)
+{
+    const float vdc = q16_to_float(pd->inv->get_dc_link_voltage(pd->inv));
+    q16_t v_hi = pd->vd_cap;
+    q16_t v_lo = 0;
+    q16_t v = q16_from_float(PD_V_SEED_V / vdc);
+    pd_slot_t slot[PD_CANDIDATES];
+    if (v < 1) {
+        v = 1;
+    }
+    if (v > v_hi) {
+        v = v_hi;
+    }
+
+    *n_rank = 0;
+    for (int step = 0; step < PD_SEEK_STEPS; step++) {
+        q16_t peak = 0;
+        bool any_trip = false;
+        esp_err_t err = pd_sweep(pd, v, slot, &peak, &any_trip);
+        if (err != ESP_OK) {
+            return err;
+        }
+        const q16_t imax = pd_imax(slot);
+        const bool over = any_trip || peak > pd->i_probe_max || imax > pd->i_probe_max;
+        const bool good = !over && pd_in_probe_band(pd, imax);
+        esp_foc_phase_discover_event_t e;
+        pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_ATTEMPT, (int8_t)step, attempt, NULL, NULL);
+        e.id = peak;
+        e.iq = imax;
+        e.value = v;
+        e.good = good;
+        e.tripped = any_trip;
+        pd_emit(pd, &e);
+        if (good) {
+            pd->vd_pu = v;
+            pd_emit_sweep(pd, attempt, slot, rank, n_rank);
+            return (*n_rank > 0) ? ESP_OK : ESP_FAIL;
+        }
+        if (over) {
+            v_hi = v;
+            if (v_hi <= v_lo + 1) {
+                pd_emit_sweep(pd, attempt, slot, rank, n_rank);
+                return any_trip ? ESP_FAIL : ESP_ERR_INVALID_RESPONSE;
+            }
+            v = v_lo + ((v_hi - v_lo) / 2);
+            continue;
+        }
+
+        v_lo = v;
+        q16_t next = (q16_t)(v * 2);
+        if (next > v_hi) {
+            next = v_hi;
+        }
+        if (next <= v) {
+            pd_emit_sweep(pd, attempt, slot, rank, n_rank);
+            return (peak < pd->id_min) ? ESP_FAIL : ESP_ERR_INVALID_RESPONSE;
+        }
+        v = next;
+    }
+    pd_emit_sweep(pd, attempt, slot, rank, n_rank);
+    return ESP_FAIL;
 }
 
 /*
@@ -436,7 +570,7 @@ static esp_err_t pd_once(esp_foc_phase_discover_t *pd, uint8_t attempt,
     pd_cand_t rank[PD_CANDIDATES];
     int n_rank = 0;
 
-    esp_err_t err = pd_stage_a(pd, attempt, rank, &n_rank);
+    esp_err_t err = pd_seek_frame(pd, attempt, rank, &n_rank);
     if (err != ESP_OK) {
         return err;
     }
@@ -554,32 +688,69 @@ static esp_err_t pd_sensor_stage(esp_foc_phase_discover_t *pd,
 {
     esp_foc_inverter_t *inv = pd->inv;
     esp_foc_phase_discover_event_t e;
-    const q16_t v_well = q16_clamp(q16_div(q16_mul(pd->i_well, pd->vd_pu), out->id_verify),
-                                   0, q16_from_float(PD_VD_PU_MAX));
 
     if (inv->is_faulted(inv)) {
         (void)inv->clear_fault(inv);
     }
+    out->failed_at = ESP_FOC_PHASE_DISCOVER_STAGE_WELL;
     esp_foc_bridge_neutral(inv);
     esp_err_t err = pd_bridge_enable(pd);
     if (err != ESP_OK) {
         return err;
     }
-    pd->fault_count = 0;
-    pd_set_vector(pd, v_well, 0, 0, pd->sweep_step);
-    pd->drive = true;
-    esp_foc_sleep_ms(pd->cfg.sensor.sweep_ms);
-    pd_set_vector(pd, v_well, 0, 0, 0);
 
-    pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_WELL, 0, out->attempts, &out->map, NULL);
-    e.value = v_well;
-    e.tripped = pd_tripped(pd);
-    pd_emit(pd, &e);
-    if (e.tripped) {
-        return ESP_FAIL;
+    q16_t well_i = pd->i_well;
+    for (int8_t step = 0;; step++) {
+        q16_t sweep_start = 0;
+        err = pd_read_theta(pd, &sweep_start);
+        if (err != ESP_OK) {
+            return err;
+        }
+        const q16_t v_well =
+            q16_clamp(q16_div(q16_mul(well_i, pd->vd_pu), out->id_verify),
+                      0, q16_from_float(PD_VD_PU_MAX));
+        pd->fault_count = 0;
+        pd_set_vector(pd, v_well, 0, 0, pd->sweep_step);
+        pd->drive = true;
+        esp_foc_sleep_ms(pd->cfg.sensor.sweep_ms);
+        pd_set_vector(pd, v_well, 0, 0, 0);
+        q16_t sweep_end = 0;
+        err = pd_read_theta(pd, &sweep_end);
+        if (err == ESP_OK) {
+            out->sensor_sweep_rad = q16_angle_delta(sweep_start, sweep_end);
+        }
+
+        pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_WELL, step, out->attempts,
+                     &out->map, NULL);
+        e.id = well_i;
+        e.value = v_well;
+        e.motion = out->sensor_sweep_rad;
+        e.tripped = pd_tripped(pd);
+        e.err = err;
+        e.good = (err == ESP_OK) &&
+                 (q16_abs(out->sensor_sweep_rad) >=
+                  q16_from_float(pd->cfg.sensor.motion_min_rad));
+        pd_emit(pd, &e);
+        if (e.tripped) {
+            return ESP_FAIL;
+        }
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (e.good) {
+            out->sensor_well_i = well_i;
+            break;
+        }
+        if (well_i >= pd->i_well_max) {
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+        well_i = q16_clamp(well_i * 2, 0, pd->i_well_max);
+        pd_set_vector(pd, 0, 0, 0, 0);
+        esp_foc_sleep_ms(pd->cfg.settle_ms);
     }
 
     uint32_t still_ms = 0;
+    out->failed_at = ESP_FOC_PHASE_DISCOVER_STAGE_STILL;
     err = pd_wait_still(pd, &still_ms);
     pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_STILL, 0, out->attempts, &out->map, NULL);
     e.ms = still_ms;
@@ -591,6 +762,7 @@ static esp_err_t pd_sensor_stage(esp_foc_phase_discover_t *pd,
         return err;
     }
 
+    out->failed_at = ESP_FOC_PHASE_DISCOVER_STAGE_ZERO;
     err = pd_zero(pd);
     pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_ZERO, 0, out->attempts, &out->map, NULL);
     e.err = err;
@@ -601,32 +773,62 @@ static esp_err_t pd_sensor_stage(esp_foc_phase_discover_t *pd,
     }
     out->sensor_zeroed = true;
 
-    q16_t th0 = 0;
-    q16_t th1 = 0;
-    err = pd_read_theta(pd, &th0);
-    if (err != ESP_OK) {
-        return err;
+    out->failed_at = ESP_FOC_PHASE_DISCOVER_STAGE_DIRECTION;
+    q16_t i_dir = out->id_verify;
+    if (i_dir < pd->id_min) {
+        i_dir = pd->id_min;
     }
-    pd_set_vector(pd, 0, pd->dir_vq_pu, 0, 0);
-    esp_foc_sleep_ms(pd->cfg.sensor.dir_ms);
-    err = pd_read_theta(pd, &th1);
-    pd_park_idle(pd);
-    if (err != ESP_OK) {
-        return err;
+    if (i_dir > pd->dir_i_max) {
+        i_dir = pd->dir_i_max;
     }
-    const q16_t dth = q16_angle_delta(th0, th1);
-    out->sensor_reversed = (dth < 0);
-
-    pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_DIR, 0, out->attempts, &out->map, NULL);
-    e.value = dth;
-    e.reversed = out->sensor_reversed;
-    e.tripped = pd_tripped(pd);
-    e.good = !e.tripped && (q16_abs(dth) >= pd->dir_min);
-    pd_emit(pd, &e);
-    if (e.tripped) {
-        return ESP_FAIL;
+    for (int8_t step = 0;; step++) {
+        q16_t th0 = 0;
+        q16_t th1 = 0;
+        err = pd_read_theta(pd, &th0);
+        if (err != ESP_OK) {
+            return err;
+        }
+        const q16_t vq = (out->id_verify > 0)
+                             ? q16_clamp(q16_div(q16_mul(i_dir, pd->vd_pu), out->id_verify),
+                                         0, pd->dir_vq_pu)
+                             : pd->dir_vq_pu;
+        pd_set_vector(pd, 0, vq, 0, 0);
+        esp_foc_sleep_ms(pd->cfg.sensor.dir_ms);
+        err = pd_read_theta(pd, &th1);
+        pd_park_idle(pd);
+        if (err != ESP_OK) {
+            return err;
+        }
+        const q16_t dth = q16_angle_delta(th0, th1);
+        out->sensor_reversed = (dth < 0);
+        pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_DIR, step, out->attempts, &out->map, NULL);
+        e.id = i_dir;
+        e.value = dth;
+        e.reversed = out->sensor_reversed;
+        e.tripped = pd_tripped(pd);
+        e.good = !e.tripped && (q16_abs(dth) >= pd->dir_min);
+        pd_emit(pd, &e);
+        if (e.tripped) {
+            return ESP_FAIL;
+        }
+        if (e.good) {
+            break;
+        }
+        if (i_dir >= pd->dir_i_max) {
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+        q16_t next = (q16_t)(i_dir * 2);
+        if (next > pd->dir_i_max) {
+            next = pd->dir_i_max;
+        }
+        if (next <= i_dir) {
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+        i_dir = next;
+        esp_foc_sleep_ms(pd->cfg.settle_ms);
     }
-    return e.good ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
+    out->failed_at = ESP_FOC_PHASE_DISCOVER_STAGE_DONE;
+    return ESP_OK;
 }
 
 static esp_err_t pd_sequence(esp_foc_phase_discover_t *pd, esp_foc_phase_discover_result_t *out)
@@ -636,9 +838,6 @@ static esp_err_t pd_sequence(esp_foc_phase_discover_t *pd, esp_foc_phase_discove
 
     for (uint8_t attempt = 1; attempt <= pd->cfg.tries; attempt++) {
         out->attempts = attempt;
-        pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_ATTEMPT, (int8_t)attempt, attempt, NULL, NULL);
-        e.value = pd->vd_pu;
-        pd_emit(pd, &e);
         err = pd_once(pd, attempt, out);
         if (err == ESP_OK) {
             break;
@@ -646,6 +845,9 @@ static esp_err_t pd_sequence(esp_foc_phase_discover_t *pd, esp_foc_phase_discove
         pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_REFUSED, (int8_t)attempt, attempt, NULL, NULL);
         e.err = err;
         pd_emit(pd, &e);
+        if (pd_tripped(pd)) {
+            return err;
+        }
         if (attempt < pd->cfg.tries) {
             pd_nudge(pd, attempt);
         }
@@ -653,6 +855,8 @@ static esp_err_t pd_sequence(esp_foc_phase_discover_t *pd, esp_foc_phase_discove
     if (err != ESP_OK) {
         return err;
     }
+    out->map_valid = true;
+    out->failed_at = ESP_FOC_PHASE_DISCOVER_STAGE_DONE;
     pd_event_obs(&e, ESP_FOC_PHASE_DISCOVER_EV_MAP, out->rank_idx, out->attempts, &out->map, NULL);
     e.id = out->id_verify;
     e.iq = out->iq_verify;
@@ -666,6 +870,20 @@ static esp_err_t pd_sequence(esp_foc_phase_discover_t *pd, esp_foc_phase_discove
     return pd_sensor_stage(pd, out);
 }
 
+const char *esp_foc_phase_discover_stage_name(esp_foc_phase_discover_stage_t stage)
+{
+    switch (stage) {
+    case ESP_FOC_PHASE_DISCOVER_STAGE_NONE: return "none";
+    case ESP_FOC_PHASE_DISCOVER_STAGE_ELECTRICAL: return "electrical";
+    case ESP_FOC_PHASE_DISCOVER_STAGE_WELL: return "well";
+    case ESP_FOC_PHASE_DISCOVER_STAGE_STILL: return "still";
+    case ESP_FOC_PHASE_DISCOVER_STAGE_ZERO: return "zero";
+    case ESP_FOC_PHASE_DISCOVER_STAGE_DIRECTION: return "direction";
+    case ESP_FOC_PHASE_DISCOVER_STAGE_DONE: return "done";
+    default: return "?";
+    }
+}
+
 void esp_foc_phase_discover_default_config(esp_foc_phase_discover_config_t *cfg)
 {
     if (cfg == NULL) {
@@ -674,40 +892,50 @@ void esp_foc_phase_discover_default_config(esp_foc_phase_discover_config_t *cfg)
     memset(cfg, 0, sizeof(*cfg));
     cfg->vd_v = (float)CONFIG_ESP_FOC_PHASE_DISCOVER_VD_MV * 1.0e-3f;
     cfg->id_min_a = (float)CONFIG_ESP_FOC_PHASE_DISCOVER_ID_MIN_MA * 1.0e-3f;
+    cfg->i_probe_max_a = (float)CONFIG_ESP_FOC_PHASE_DISCOVER_I_PROBE_MAX_MA * 1.0e-3f;
     cfg->pulse_ms = CONFIG_ESP_FOC_PHASE_DISCOVER_PULSE_MS;
     cfg->cal_rounds = CONFIG_ESP_FOC_PHASE_DISCOVER_CAL_ROUNDS;
     cfg->tries = CONFIG_ESP_FOC_PHASE_DISCOVER_TRIES;
     cfg->nudge_ms = CONFIG_ESP_FOC_PHASE_DISCOVER_NUDGE_MS;
     cfg->settle_ms = CONFIG_ESP_FOC_PHASE_DISCOVER_SETTLE_MS;
     cfg->sensor.i_well_a = (float)CONFIG_ESP_FOC_PHASE_DISCOVER_WELL_MA * 1.0e-3f;
+    cfg->sensor.i_well_max_a =
+        (float)CONFIG_ESP_FOC_PHASE_DISCOVER_WELL_MAX_MA * 1.0e-3f;
     cfg->sensor.sweep_ms = CONFIG_ESP_FOC_PHASE_DISCOVER_WELL_SWEEP_MS;
+    cfg->sensor.motion_min_rad =
+        (float)CONFIG_ESP_FOC_PHASE_DISCOVER_WELL_MIN_MRAD * 1.0e-3f;
     cfg->sensor.still_tol_rad = (float)CONFIG_ESP_FOC_PHASE_DISCOVER_STILL_TOL_MRAD * 1.0e-3f;
     cfg->sensor.calm_ms = CONFIG_ESP_FOC_PHASE_DISCOVER_STILL_CALM_MS;
     cfg->sensor.timeout_ms = CONFIG_ESP_FOC_PHASE_DISCOVER_STILL_TIMEOUT_MS;
     cfg->sensor.zero_samples = CONFIG_ESP_FOC_PHASE_DISCOVER_ZERO_SAMPLES;
     cfg->sensor.dir_v = (float)CONFIG_ESP_FOC_PHASE_DISCOVER_DIR_MV * 1.0e-3f;
+    cfg->sensor.i_dir_max_a = (float)CONFIG_ESP_FOC_PHASE_DISCOVER_DIR_MAX_MA * 1.0e-3f;
     cfg->sensor.dir_ms = CONFIG_ESP_FOC_PHASE_DISCOVER_DIR_MS;
     cfg->sensor.dir_min_rad = (float)CONFIG_ESP_FOC_PHASE_DISCOVER_DIR_MIN_MRAD * 1.0e-3f;
 }
 
-static float pd_clamp_pu(float v, float vdc)
+static float pd_cap_pu(float v, float vdc)
 {
     float pu = v / vdc;
     if (pu > PD_VD_PU_MAX) {
         pu = PD_VD_PU_MAX;
     }
-    if (pu < PD_VD_PU_MIN) {
-        pu = PD_VD_PU_MIN;
+    if (pu < 0.0f) {
+        pu = 0.0f;
     }
     return pu;
 }
 
 static esp_err_t pd_check_sensor_cfg(const esp_foc_phase_discover_config_t *c, uint32_t pwm_hz)
 {
-    if (c->sensor.i_well_a <= 0.0f || c->sensor.sweep_ms == 0u ||
+    if (c->sensor.i_well_a <= 0.0f ||
+        c->sensor.i_well_max_a < c->sensor.i_well_a ||
+        c->sensor.sweep_ms == 0u ||
+        c->sensor.motion_min_rad <= 0.0f ||
         c->sensor.still_tol_rad <= 0.0f || c->sensor.calm_ms == 0u ||
         c->sensor.timeout_ms < c->sensor.calm_ms || c->sensor.zero_samples < 1 ||
-        c->sensor.dir_v <= 0.0f || c->sensor.dir_ms == 0u ||
+        c->sensor.dir_v <= 0.0f || c->sensor.i_dir_max_a <= 0.0f ||
+        c->sensor.dir_ms == 0u ||
         c->sensor.dir_min_rad <= 0.0f || pwm_hz == 0u) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -736,7 +964,8 @@ esp_err_t esp_foc_phase_discover_init(esp_foc_phase_discover_t *pd,
     } else {
         esp_foc_phase_discover_default_config(&c);
     }
-    if (c.vd_v <= 0.0f || c.id_min_a <= 0.0f || c.pulse_ms < (uint32_t)PD_MIN_SAMPLES ||
+    if (c.vd_v <= 0.0f || c.id_min_a <= 0.0f || c.i_probe_max_a < c.id_min_a ||
+        c.pulse_ms < (uint32_t)PD_MIN_SAMPLES ||
         c.cal_rounds < 0 || c.tries == 0u) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -763,14 +992,37 @@ esp_err_t esp_foc_phase_discover_init(esp_foc_phase_discover_t *pd,
     pd->inv = inv;
     pd->rotor = rotor;
     pd->cfg = c;
-    pd->vd_pu = q16_from_float(pd_clamp_pu(c.vd_v, vdc));
+    pd->vd_cap = q16_from_float(pd_cap_pu(c.vd_v, vdc));
+    pd->vd_pu = pd->vd_cap;
     pd->id_min = q16_from_float(c.id_min_a);
+    pd->i_probe_max = q16_from_float(c.i_probe_max_a);
+    if (inv->get_current_limit != NULL) {
+        const q16_t current_limit = inv->get_current_limit(inv);
+        if ((current_limit > 0) && (pd->i_probe_max > current_limit)) {
+            pd->i_probe_max = current_limit;
+        }
+    }
+    if (pd->i_probe_max < pd->id_min) {
+        return ESP_ERR_INVALID_ARG;
+    }
     if (rotor != NULL) {
         const float ticks = (float)pwm_hz * (float)c.sensor.sweep_ms * 1.0e-3f;
-        pd->dir_vq_pu = q16_from_float(pd_clamp_pu(c.sensor.dir_v, vdc));
+        const q16_t current_limit = inv->get_current_limit(inv);
+        if (current_limit <= 0) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        pd->dir_vq_pu = q16_from_float(pd_cap_pu(c.sensor.dir_v, vdc));
+        pd->dir_i_max = q16_clamp(q16_from_float(c.sensor.i_dir_max_a), pd->id_min,
+                                  current_limit);
         pd->dir_min = q16_from_float(c.sensor.dir_min_rad);
         pd->still_tol = q16_from_float(c.sensor.still_tol_rad);
-        pd->i_well = q16_from_float(c.sensor.i_well_a);
+        pd->i_well_max = q16_clamp(q16_from_float(c.sensor.i_well_max_a), 0,
+                                   current_limit);
+        pd->i_well = q16_clamp(q16_from_float(c.sensor.i_well_a), 0,
+                               pd->i_well_max);
+        if (pd->i_well <= 0) {
+            return ESP_ERR_INVALID_ARG;
+        }
         pd->sweep_step = q16_from_float(ESP_FOC_TWO_PI_F / ticks);
     }
     pd->fault_reason = ESP_FOC_FAULT_NONE;
@@ -789,6 +1041,7 @@ esp_err_t esp_foc_phase_discover_run(esp_foc_phase_discover_t *pd,
     }
     memset(out, 0, sizeof(*out));
     out->rank_idx = -1;
+    out->failed_at = ESP_FOC_PHASE_DISCOVER_STAGE_ELECTRICAL;
     pd_install(pd);
     esp_err_t err = pd_sequence(pd, out);
     esp_foc_phase_discover_cleanup(pd);
