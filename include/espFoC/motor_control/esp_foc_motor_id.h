@@ -102,6 +102,8 @@ typedef struct {
     /** Mechanical Hz and electrical rad/s at the flux hold (0 if no rotor). */
     float flux_fm_hz;
     float flux_we_rad_s;
+    /** D-axis current that first produced measurable motion in the flux leg. */
+    float flux_i_a;
     float kp;
     float ki;
     float probe_hz;
@@ -111,6 +113,7 @@ typedef struct {
     int pole_pairs;
 
     int32_t terminal_ma[3];
+    int32_t terminal_v_mv;
     int32_t probe_phase_cdeg;
     int32_t probe_i_ma;
     int32_t probe_v_mv;     /**< excitation the amplitude search settled on */
@@ -156,7 +159,9 @@ typedef enum {
     /** An electrical leg ended; @c pass 0 standstill / 1 flux, @c attempt,
      *  @c err, @c result as the sequence left it. */
     ESP_FOC_MOTOR_ID_EV_ATTEMPT,
-    /** v[0] fm Hz under +Iq, v[1] the iq that produced it. */
+    /** pass is the pole-pair candidate; v[0] is window fm Hz, v[1] the iq,
+     *  v[2] the electrical offset, v[3] endpoint fm Hz; direction_frame
+     *  contains window means from the same measurement. */
     ESP_FOC_MOTOR_ID_EV_DIRECTION,
     /** @c pass 0 raw / 1 compensated, @c err; v[0] K, v[1] drag A,
      *  v[2] ω_e Hz at entry, v[3] J. */
@@ -171,6 +176,13 @@ typedef enum {
     ESP_FOC_MOTOR_ID_EV_ANGLE_FIT,
 } esp_foc_motor_id_ev_t;
 
+typedef enum {
+    ESP_FOC_MOTOR_ID_PROBE_ABORT_NONE = 0,
+    ESP_FOC_MOTOR_ID_PROBE_ABORT_FAULT,
+    ESP_FOC_MOTOR_ID_PROBE_ABORT_OVERCURRENT,
+    ESP_FOC_MOTOR_ID_PROBE_ABORT_TIMEOUT,
+} esp_foc_motor_id_probe_abort_t;
+
 typedef struct {
     esp_foc_motor_id_ev_t ev;
     esp_foc_motor_id_phase_t phase;
@@ -179,6 +191,18 @@ typedef struct {
     esp_err_t err;
     float v[4];
     const esp_foc_motor_id_result_t *result;
+    /** Last probe diagnostics; meaningful on ESP_FOC_MOTOR_ID_EV_ATTEMPT. */
+    esp_foc_motor_id_probe_abort_t probe_abort;
+    float probe_peak_a;
+    float probe_avg_a;
+    uint32_t probe_samples;
+    struct {
+        float theta_e_rad;
+        float id_a;
+        float iq_a;
+        float vd_v;
+        float vq_v;
+    } direction_frame;
 } esp_foc_motor_id_event_t;
 
 typedef struct {
@@ -188,6 +212,8 @@ typedef struct {
     float pll_zeta;
     /** Current-loop bandwidth while spinning on the encoder. */
     float i_bw_hz;
+    /** Starting +Iq of the direction check. Doubled until the shaft reaches
+     *  fm_min_hz or i_max_a, and never above the inverter current limit. */
     float iq_dir_a;
     uint32_t dir_ramp_ms;
     float fm_min_hz;
@@ -234,8 +260,6 @@ typedef struct {
     /* Electrical stages. */
     float i_probe_target_a;
     float i_probe_max_a;
-    /** Guard average a probe window is discarded at; keep it under the trip. */
-    float i_abort_a;
     float v_deadzone_v;
     int32_t sym_limit_permil;
     uint32_t probe_periods;
@@ -244,7 +268,13 @@ typedef struct {
     bool skip_terminal;
     float i_bw_hz;
     float tune_backoff;
+    /** Starting D-axis current of the I-f flux leg. */
     float i_flux_a;
+    /**
+     * Largest D-axis current the I-f flux leg may command while looking for
+     * measurable rotor motion. 0 uses the inverter current limit.
+     */
+    float i_flux_max_a;
     int flux_hz;
     /** Plausibility windows; loose, the dq plant carries the bridge and wiring. */
     float r_min_ohm;

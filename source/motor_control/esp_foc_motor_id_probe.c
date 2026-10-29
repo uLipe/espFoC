@@ -40,8 +40,6 @@
  */
 #define PROBE_STEP_PERIOD 40u
 #define PROBE_STEP_REPS 96u
-/* How much looser the DC and terminal windows are guarded; see i_abort_dc. */
-#define PROBE_DC_ABORT_RATIO 2.0f
 
 static void park_idle(esp_foc_motor_id_probe_t *p)
 {
@@ -52,7 +50,7 @@ static void park_idle(esp_foc_motor_id_probe_t *p)
 static void finish(esp_foc_motor_id_probe_t *p, esp_foc_motor_id_probe_abort_t why)
 {
     p->abort_why = why;
-    p->aborted = (why != ESP_FOC_MOTOR_ID_ABORT_NONE);
+    p->aborted = (why != ESP_FOC_MOTOR_ID_PROBE_ABORT_NONE);
     park_idle(p);
     /* Auto: a test inverter delivers the PWM callback from a task. */
     esp_foc_event_post_auto(p->waiter);
@@ -106,7 +104,7 @@ bool esp_foc_motor_id_probe_isr(esp_foc_motor_id_probe_t *p)
 
     esp_foc_inverter_t *inv = p->inv;
     if (inv->is_faulted(inv)) {
-        finish(p, ESP_FOC_MOTOR_ID_ABORT_FAULT);
+        finish(p, ESP_FOC_MOTOR_ID_PROBE_ABORT_FAULT);
         return true;
     }
 
@@ -141,13 +139,8 @@ bool esp_foc_motor_id_probe_isr(esp_foc_motor_id_probe_t *p)
      */
     p->i_avg = q16_add(p->i_avg, (mag - p->i_avg) >> PROBE_GUARD_SHIFT);
     p->n_win++;
-    const q16_t ceiling =
-        (mode == ESP_FOC_MOTOR_ID_PROBE_DC ||
-         mode == ESP_FOC_MOTOR_ID_PROBE_TERMINAL)
-            ? p->i_abort_dc
-            : p->i_abort;
-    if (ceiling > 0 && p->i_avg > ceiling && p->n_win > p->guard_after) {
-        finish(p, ESP_FOC_MOTOR_ID_ABORT_OVERCURRENT);
+    if (p->i_guard > 0 && p->i_avg > p->i_guard && p->n_win > p->guard_after) {
+        finish(p, ESP_FOC_MOTOR_ID_PROBE_ABORT_OVERCURRENT);
         return true;
     }
 
@@ -157,7 +150,7 @@ bool esp_foc_motor_id_probe_isr(esp_foc_motor_id_probe_t *p)
         esp_foc_ident_dcprobe_add(&p->dc[2], iw);
         drive_terminal(p);
         if (esp_foc_ident_dcprobe_done(&p->dc[0])) {
-            finish(p, ESP_FOC_MOTOR_ID_ABORT_NONE);
+            finish(p, ESP_FOC_MOTOR_ID_PROBE_ABORT_NONE);
         }
         return true;
     }
@@ -183,7 +176,7 @@ bool esp_foc_motor_id_probe_isr(esp_foc_motor_id_probe_t *p)
         }
         drive_dq(p, (k >= p->step_pre && k < ESP_FOC_IDENT_STEP_MAX) ? p->v_pu : 0);
         if (rep + 1u >= p->step_reps && k + 1u >= p->step_period) {
-            finish(p, ESP_FOC_MOTOR_ID_ABORT_NONE);
+            finish(p, ESP_FOC_MOTOR_ID_PROBE_ABORT_NONE);
         }
         return true;
     }
@@ -192,7 +185,7 @@ bool esp_foc_motor_id_probe_isr(esp_foc_motor_id_probe_t *p)
         esp_foc_ident_dcprobe_add(&p->dc[0], id);
         drive_dq(p, ramped(p, p->v_pu));
         if (esp_foc_ident_dcprobe_done(&p->dc[0])) {
-            finish(p, ESP_FOC_MOTOR_ID_ABORT_NONE);
+            finish(p, ESP_FOC_MOTOR_ID_PROBE_ABORT_NONE);
         }
         return true;
     }
@@ -202,15 +195,14 @@ bool esp_foc_motor_id_probe_isr(esp_foc_motor_id_probe_t *p)
     p->i_dq = id;
     drive_dq(p, p->v_pu);
     if (esp_foc_ident_zprobe_done(&p->z)) {
-        finish(p, ESP_FOC_MOTOR_ID_ABORT_NONE);
+        finish(p, ESP_FOC_MOTOR_ID_PROBE_ABORT_NONE);
     }
     return true;
 }
 
 esp_err_t esp_foc_motor_id_probe_init(esp_foc_motor_id_probe_t *p,
                                      esp_foc_inverter_t *inv,
-                                     float vdc,
-                                     float i_abort_a)
+                                     float vdc)
 {
     if (p == NULL || inv == NULL || vdc <= 0.0f) {
         return ESP_ERR_INVALID_ARG;
@@ -219,10 +211,7 @@ esp_err_t esp_foc_motor_id_probe_init(esp_foc_motor_id_probe_t *p,
     p->inv = inv;
     p->inv_vdc = q16_from_float(1.0f / vdc);
     p->v_max_pu = Q16_INV_SQRT3;
-    p->i_abort = (i_abort_a > 0.0f) ? q16_from_float(i_abort_a) : 0;
-    p->i_abort_dc = (i_abort_a > 0.0f)
-                        ? q16_from_float(i_abort_a * PROBE_DC_ABORT_RATIO)
-                        : 0;
+    p->i_guard = (inv->get_current_limit != NULL) ? inv->get_current_limit(inv) : 0;
     p->settle_samples = PROBE_DC_SETTLE;
     p->avg_samples = PROBE_DC_AVG;
     p->timeout_ms = PROBE_TIMEOUT_MS;
@@ -246,7 +235,7 @@ static bool wait_window(esp_foc_motor_id_probe_t *p,
     p->i_peak = 0;
     p->i_avg = 0;
     p->aborted = false;
-    p->abort_why = ESP_FOC_MOTOR_ID_ABORT_NONE;
+    p->abort_why = ESP_FOC_MOTOR_ID_PROBE_ABORT_NONE;
     p->waiter = esp_foc_event_handle_self();
     esp_foc_event_clear();
     p->mode = mode;
@@ -268,12 +257,12 @@ static bool wait_window(esp_foc_motor_id_probe_t *p,
         }
         left -= slice;
         if (p->inv->is_faulted(p->inv)) {
-            p->abort_why = ESP_FOC_MOTOR_ID_ABORT_FAULT;
+            p->abort_why = ESP_FOC_MOTOR_ID_PROBE_ABORT_FAULT;
             park_idle(p);
             return false;
         }
     }
-    p->abort_why = ESP_FOC_MOTOR_ID_ABORT_TIMEOUT;
+    p->abort_why = ESP_FOC_MOTOR_ID_PROBE_ABORT_TIMEOUT;
     park_idle(p);
     return false;
 }

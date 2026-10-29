@@ -137,47 +137,80 @@ menu "espFoC Settings"
             range 50 5000
             default 450
             help
-                The excitation amplitude is searched toward this response. High
-                enough to be read over the current-sense floor.
+                Current the excitation search aims for. The voltage is raised
+                or lowered until the reading sits near this value, so the same
+                sequence can measure a low-resistance winding and a high-
+                inductance one. Set it high enough to clear the current-sense
+                floor. I_PROBE_MAX_MA is a separate, higher ceiling: a reading
+                above that is refused even when the search has not reached
+                this target.
 
         config ESP_FOC_MOTOR_ID_I_PROBE_MAX_MA
-            int "AC probe response ceiling (mA)"
+            int "Probe current ceiling (mA)"
             range 100 10000
-            default 900
-
-        config ESP_FOC_MOTOR_ID_I_ABORT_MA
-            int "Probe window abort average (mA)"
-            range 100 20000
-            default 1200
+            default 2500
             help
-                A probe window whose guard average reaches this is discarded.
-                Keep it under the bridge trip so the identification names the
-                state that failed before the trip latches.
+                Highest probe current the identification will accept. The
+                terminal symmetry stage and the AC amplitude search both
+                compare against it, and a window above it is discarded.
+
+                This is not the inverter trip. The trip is configured on the
+                bridge and is what actually cuts the PWM. Keep this ceiling
+                under that trip, and above the current a normal probe of the
+                motor draws. A value below the motor's probe current refuses
+                a healthy machine; a value above the trip lets the bridge
+                latch before identification can name the stage.
 
         config ESP_FOC_MOTOR_ID_V_DEADZONE_MV
             int "Bridge dead zone the AC probes are biased past (mV)"
             range 0 5000
             default 700
+            help
+                Voltage the bridge drops before the winding carries current.
+                An AC probe that crosses this zone is clipped, and the
+                demodulator then reports a resistance and an inductance that
+                do not belong to the machine. The probes are biased past this
+                value. The DC resistance stage replaces it with a measured
+                dead zone when that stage succeeds.
 
         config ESP_FOC_MOTOR_ID_I_BW_HZ
             int "Current-loop bandwidth of the flux leg (Hz)"
             range 20 5000
             default 300
+            help
+                Bandwidth used to design the current-loop gains from the
+                measured resistance and inductance. Those gains drive the
+                open-loop flux leg only. The sensored stages that spin on the
+                encoder use SPIN_I_BW_HZ instead.
 
         config ESP_FOC_MOTOR_ID_I_FLUX_MA
             int "I-f current of the flux leg (mA)"
             range 50 10000
             default 450
+            help
+                Q-axis current of the open-loop spin that measures flux
+                linkage. The shaft turns. Keep it inside what the motor and
+                the bridge can hold for the length of that leg.
 
         config ESP_FOC_MOTOR_ID_FLUX_HZ
             int "I-f electrical frequency of the flux leg (Hz)"
             range 10 2000
             default 100
+            help
+                Electrical frequency of the open-loop flux spin. With a rotor
+                sensor, pole pairs are counted from this frequency divided by
+                the measured shaft speed. A count within 20% of the configured
+                pole pairs is accepted. A larger disagreement refuses the attempt.
 
         config ESP_FOC_MOTOR_ID_TRIES
             int "Attempts per electrical leg"
             range 1 10
             default 3
+            help
+                How many times the standstill leg, and then the flux leg, may
+                run. A refused attempt rests before the next one, because the
+                probe current heats the winding and a hot winding reads a
+                higher resistance.
 
         menu "Sensored stages"
 
@@ -193,16 +226,31 @@ menu "espFoC Settings"
                 int "Current-loop bandwidth while spinning on the encoder (Hz)"
                 range 20 5000
                 default 200
+                help
+                    Bandwidth of the current loop while the shaft is spinning
+                    on the rotor sensor: the direction check, the mechanical
+                    plant and the Park-angle fit. Independent of I_BW_HZ,
+                    which designs the open-loop flux leg.
 
             config ESP_FOC_MOTOR_ID_IQ_DIR_MA
-                int "+Iq of the direction check (mA)"
+                int "Starting +Iq of the direction check (mA)"
                 range 50 10000
                 default 700
+                help
+                    First torque current of the direction check. It doubles
+                    until the shaft turns forward or I_MAX_MA is reached, and
+                    it never commands more than the inverter current limit.
+                    The shaft must accelerate forward, which is what shows
+                    that the phase map and the sensor direction agree.
 
             config ESP_FOC_MOTOR_ID_I_MAX_MA
                 int "iq ceiling of the mechanical stage and speed hold (mA)"
                 range 50 10000
                 default 700
+                help
+                    Highest torque current the mechanical-plant measurement
+                    and the speed hold of the Park-angle fit may command.
+                    Separate from the probe ceiling and from the inverter trip.
 
             config ESP_FOC_MOTOR_ID_K_FALLBACK
                 int "K the speed hold falls back to (rad/s^2/A)"
@@ -217,11 +265,20 @@ menu "espFoC Settings"
             config ESP_FOC_MOTOR_ID_ANGLE_COMP
                 bool "Fit the Park-angle offset and latency on the encoder"
                 default y
+                help
+                    Runs the Park-angle stage: an offset plus a speed-proportional
+                    delay fitted on the encoder, then the mechanical plant is
+                    measured again with that correction applied. Off skips the
+                    stage and leaves the raw encoder angle.
 
             config ESP_FOC_MOTOR_ID_OVERSPEED_HZ
                 int "Abort above this electrical speed (Hz)"
                 range 10 10000
                 default 625
+                help
+                    Electrical speed at which a sensored stage aborts and the
+                    bridge is disabled. Set it above the fastest speed those
+                    stages command and below a speed the rig must not reach.
 
         endmenu
 
@@ -239,19 +296,29 @@ menu "espFoC Settings"
                 esp_foc_phase_discover_default_config() only.
 
         config ESP_FOC_PHASE_DISCOVER_VD_MV
-            int "Probe voltage [mV]"
+            int "Probe voltage ceiling [mV]"
             depends on ESP_FOC_PHASE_DISCOVER
             range 200 12000
             default 1200
             help
-                A voltage, not a bus fraction: dead time and device drop take
-                a fixed ~0.7 V. Clamped to 5..25 % of Vdc at init.
+                Upper bound of the current search. The applied voltage starts
+                low and rises only until the measured current is inside the
+                acceptance band. Clamped to 25 % of Vdc.
 
         config ESP_FOC_PHASE_DISCOVER_ID_MIN_MA
             int "Minimum d-axis current to admit a candidate [mA]"
             depends on ESP_FOC_PHASE_DISCOVER
             range 10 2000
             default 80
+
+        config ESP_FOC_PHASE_DISCOVER_I_PROBE_MAX_MA
+            int "Maximum electrical-probe current [mA]"
+            depends on ESP_FOC_PHASE_DISCOVER
+            range 50 5000
+            default 800
+            help
+                The probe search refuses a voltage whose current exceeds this
+                ceiling and tries a lower one. Keep it under the supply limit.
 
         config ESP_FOC_PHASE_DISCOVER_PULSE_MS
             int "Pulse window [ms]"
@@ -290,17 +357,35 @@ menu "espFoC Settings"
             depends on ESP_FOC_PHASE_DISCOVER
 
             config ESP_FOC_PHASE_DISCOVER_WELL_MA
-                int "Well hold current [mA]"
+                int "Initial well hold current [mA]"
                 range 50 5000
                 default 600
                 help
-                    Cogging holds the rotor within asin(cog / i_well) of the
-                    well; the encoder zero is taken there.
+                    The motion search starts here and doubles the current until
+                    the encoder observes the well sweep.
+
+            config ESP_FOC_PHASE_DISCOVER_WELL_MAX_MA
+                int "Maximum well hold current [mA]"
+                range 50 10000
+                default 5000
+                help
+                    Upper bound for the adaptive well motion search. The
+                    inverter current limit remains authoritative.
 
             config ESP_FOC_PHASE_DISCOVER_WELL_SWEEP_MS
                 int "One electrical revolution sweep before the hold [ms]"
                 range 50 5000
                 default 500
+
+            config ESP_FOC_PHASE_DISCOVER_WELL_MIN_MRAD
+                int "Minimum shaft travel during the well sweep [mrad]"
+                range 1 1000
+                default 5
+                help
+                    Minimum mechanical travel proving that the rotor sensor
+                    follows the shaft before its offset is calibrated. A
+                    detached, frozen, or magnet-less sensor must fail here
+                    instead of reporting a false successful zero.
 
             config ESP_FOC_PHASE_DISCOVER_STILL_TOL_MRAD
                 int "Rest tolerance on the mechanical angle [mrad]"
@@ -323,9 +408,18 @@ menu "espFoC Settings"
                 default 16
 
             config ESP_FOC_PHASE_DISCOVER_DIR_MV
-                int "Direction pulse q voltage [mV]"
+                int "Direction pulse voltage ceiling [mV]"
                 range 200 12000
                 default 1000
+                help
+                    The direction pulse starts at the current the electrical
+                    probe already accepted and raises it until the shaft moves.
+                    This is the voltage ceiling of that search.
+
+            config ESP_FOC_PHASE_DISCOVER_DIR_MAX_MA
+                int "Direction pulse current ceiling [mA]"
+                range 50 5000
+                default 1500
 
             config ESP_FOC_PHASE_DISCOVER_DIR_MS
                 int "Direction pulse length [ms]"

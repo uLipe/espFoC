@@ -138,9 +138,12 @@ vq = R·iq + ω·L·id + ω·ψ
 
 so ψ is what is left after the resistive and inductive terms are subtracted,
 divided by the speed. With a sensor, the leg also measures the shaft speed and
-counts the pole pairs from the ratio of electrical to mechanical speed; an
-attempt whose count differs from `pole_pairs` is refused, because a rotor that
-slipped behind the field reads a wrong ψ.
+counts the pole pairs from the ratio of electrical to mechanical speed. A count
+within 20 % of the configured `pole_pairs` is accepted and logged as a warning;
+the configured value is the one kept. A larger disagreement refuses the
+attempt. Without a sensor, shaft speed cannot qualify a ladder step, so the
+same ladder accepts a step only when the voltage balance produces ψ inside the
+configured flux plausibility window.
 
 ### Retries and plausibility checks
 
@@ -155,7 +158,7 @@ An attempt that finishes is still refused if its numbers are implausible:
 
 | Check | Default window |
 |---|---|
-| Loop resistance `r_loop_ohm` | `r_min_ohm` 0.20 .. `r_max_ohm` 40 ohm |
+| Loop resistance `r_loop_ohm` | `r_min_ohm` 0.10 .. `r_max_ohm` 40 ohm |
 | Inductance `ls_h` | `l_min_h` 20 µH .. `l_max_h` 50 mH |
 | Flux linkage `psi_f_wb` | `psi_min_wb` 200 µWb .. `psi_max_wb` 50 mWb |
 | Winding symmetry (`terminal`) | spread under `sym_limit_permil` 600 ‰ |
@@ -167,13 +170,24 @@ the wiring, not only the motor.
 
 With a sensor, after the electrical legs:
 
-1. **Direction (`direction`).** +Iq is ramped to `iq_dir_a` and the shaft must
-   reach at least `fm_min_hz` forward on the sensor. This proves that the phase
-   map and the sensor direction agree.
+1. **Direction (`direction`).** At each current, the electrical offset tries
+   0°, +90°, -90° and 180° for the measured pole count, the configured count
+   and its ±1 neighbours before +Iq doubles. The signed window travel must
+   reach `fm_min_hz` (0.05 Hz, about 9 deg over the 500 ms window). The
+   endpoint PLL sample only has to stay above `-fm_min_hz`, so a shaft that
+   moved and then stopped in a cogging detent still counts; a clear reversal
+   does not. The first accepted candidate becomes
+   `pole_pairs` and the coarse `park_offset_rad`. Current starts at
+   `iq_dir_a` and stops at `i_max_a`; the inverter limit only clamps that
+   ceiling.
 2. **Mechanical plant (`mech`, first pass).** The shaft is brought into an
-   electrical speed band (`band_lo_hz` .. `band_hi_hz`), then the torque
-   current is stepped between two levels. The acceleration at each level is a
-   least-squares slope over many speed reads, and K is the change of
+   electrical speed band (`band_lo_hz` .. `band_hi_hz`). When the direction
+   check proves a lower reachable speed, that measured electrical speed
+   lowers `band_lo_hz`, with a 2 Hz floor. The starting `nudge_a` doubles once
+   per second up to `i_max_a` until it reaches that band. The torque current
+   is then stepped between two levels. The
+   acceleration at each level is a least-squares slope over many speed reads,
+   and K is the change of
    acceleration over the change of current. A refused fit is not fatal; the
    next stage then uses `k_fallback`.
 3. **Park angle (`park_angle`).** Only when `angle_comp` is set. The sequence
@@ -190,6 +204,10 @@ With a sensor, after the electrical legs:
 
 J is then computed as `1.5 · pp² · ψ / K`. In sensored mode a failed flux leg
 is not fatal: ψ is then taken from the back-EMF the Park-angle probe reads.
+When the flux leg resolves a pole count within the configured 20% warning
+window, that measured count drives the sensored Park angle and electrical
+speed. Keeping the configured count there would turn an accepted warning into
+a proportional angle error as the shaft turns.
 
 ### Lower-level kernels
 
@@ -376,8 +394,7 @@ config.
 | `CONFIG_ESP_FOC_MOTOR_ID_TASK_PRIO` | 5 | Priority of the identification task. |
 | `CONFIG_ESP_FOC_MOTOR_ID_PROBE_PERIODS` | 128 | Whole excitation periods per impedance probe. More is slower and less noisy. |
 | `CONFIG_ESP_FOC_MOTOR_ID_I_TARGET_MA` | 450 | AC probe response target, mA. |
-| `CONFIG_ESP_FOC_MOTOR_ID_I_PROBE_MAX_MA` | 900 | AC probe response ceiling, mA. |
-| `CONFIG_ESP_FOC_MOTOR_ID_I_ABORT_MA` | 1200 | A probe window averaging this much is discarded. Keep under the bridge trip. |
+| `CONFIG_ESP_FOC_MOTOR_ID_I_PROBE_MAX_MA` | 2500 | Highest probe current accepted, mA. Terminal and AC stages. Not the inverter trip. |
 | `CONFIG_ESP_FOC_MOTOR_ID_V_DEADZONE_MV` | 700 | Bridge dead zone the AC probes are biased past, mV. |
 | `CONFIG_ESP_FOC_MOTOR_ID_I_BW_HZ` | 300 | Current-loop bandwidth of the flux leg, Hz. |
 | `CONFIG_ESP_FOC_MOTOR_ID_I_FLUX_MA` | 450 | I-f current of the flux leg, mA. |
@@ -385,7 +402,7 @@ config.
 | `CONFIG_ESP_FOC_MOTOR_ID_TRIES` | 3 | Attempts per electrical leg. |
 | `CONFIG_ESP_FOC_MOTOR_ID_FETCH_HZ` | 2500 | Sensored: sensor read rate, Hz. Must divide the PWM rate. |
 | `CONFIG_ESP_FOC_MOTOR_ID_SPIN_I_BW_HZ` | 200 | Sensored: current-loop bandwidth while spinning on the sensor, Hz. |
-| `CONFIG_ESP_FOC_MOTOR_ID_IQ_DIR_MA` | 700 | Sensored: +Iq of the direction check, mA. |
+| `CONFIG_ESP_FOC_MOTOR_ID_IQ_DIR_MA` | 700 | Sensored: starting +Iq of the direction check, mA. Doubled up to the inverter trip. |
 | `CONFIG_ESP_FOC_MOTOR_ID_I_MAX_MA` | 700 | Sensored: iq ceiling of the mechanical stage and the speed hold, mA. |
 | `CONFIG_ESP_FOC_MOTOR_ID_K_FALLBACK` | 6500 | Sensored: K the speed hold is designed on if the first mechanical stage fails, rad/s²/A. |
 | `CONFIG_ESP_FOC_MOTOR_ID_ANGLE_COMP` | y | Sensored: run the Park-angle stage. |
@@ -441,11 +458,13 @@ and can be changed in code, for example the plausibility windows above,
   removed and the bridge is disabled on every return. Initialise the stack
   after identification, not before.
 - **Correct inputs.** `vdc` must be the real supply voltage and `pole_pairs`
-  the real count; neither can be measured from scratch. With a sensor, a wrong
-  `pole_pairs` makes the flux leg refuse its attempts.
-- **Stay under the trip.** Keep `i_abort_a` (`CONFIG_ESP_FOC_MOTOR_ID_I_ABORT_MA`)
-  below the inverter's over-current trip, so that the identification names the
-  stage that drew too much current before the bridge trips.
+  the real count; neither can be measured from scratch. With a sensor, a
+  `pole_pairs` more than 20 % away from the shaft-speed count makes the flux
+  leg refuse its attempts. A smaller gap is a warning and the configured count
+  is kept.
+- **Set the inverter trip.** The probe guard uses the inverter's configured
+  current limit. It is not an identification setting; configure the bridge trip
+  for the power stage and motor before running identification.
 - **Callback stack.** `on_event` runs on the identification task; a formatted
   log line with floats is the usual peak, so size
   `CONFIG_ESP_FOC_MOTOR_ID_TASK_STACK` for what the callback does.

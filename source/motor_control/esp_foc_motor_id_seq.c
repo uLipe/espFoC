@@ -15,8 +15,8 @@
 #define MOTOR_ID_MIN_PROBE_MA 40
 /* Fewer samples per period than this and the probe cannot demodulate. */
 #define MOTOR_ID_MIN_PROBE_DIV 8
-/* Excitation search attempts per probe frequency. */
-#define MOTOR_ID_AMP_TRIES 5
+/* Covers the public 50 mA seed through a 10 A ceiling by powers of two. */
+#define MOTOR_ID_AMP_TRIES 12
 /*
  * Where the trough of a biased excitation is placed, in dead zones. One would
  * leave it exactly on the edge; two keeps the whole waveform in the region where
@@ -125,6 +125,9 @@ void esp_foc_motor_id_seq_default_config(esp_foc_motor_id_seq_config_t *cfg)
     cfg->sym_limit_permil = 150;
     cfg->tune_backoff = 0.5f;
     cfg->i_flux_a = 0.30f;
+    cfg->i_flux_max_a = 0.30f;
+    cfg->psi_min_wb = 200e-6f;
+    cfg->psi_max_wb = 50e-3f;
     cfg->flux_hz = 100;
     cfg->ramp_ms = 600u;
     cfg->flux_hold_ms = 400u;
@@ -195,7 +198,9 @@ static esp_err_t check_args(const esp_foc_motor_id_seq_t *s)
         return ESP_ERR_INVALID_ARG;
     }
     if (c->do_flux && (o->set_idq == NULL || o->set_fe_hz == NULL ||
-                       o->fetch_dq == NULL || c->flux_hz <= 0)) {
+                       o->fetch_dq == NULL || c->flux_hz <= 0 ||
+                       c->i_flux_a <= 0.0f || c->i_flux_max_a < c->i_flux_a ||
+                       c->psi_min_wb <= 0.0f || c->psi_max_wb < c->psi_min_wb)) {
         return ESP_ERR_INVALID_ARG;
     }
     return ESP_OK;
@@ -385,16 +390,60 @@ static bool probe_adapt(esp_foc_motor_id_seq_t *s, uint32_t f_hz,
 
 static esp_err_t run_terminal(esp_foc_motor_id_seq_t *s)
 {
+    const esp_foc_motor_id_seq_config_t *c = &s->cfg;
     esp_foc_motor_id_result_t *r = &s->result;
-    q16_t v = q16_from_float(s->cfg.v_dc_probe_frac * s->cfg.vdc);
+    const int32_t target_ma = (int32_t)(c->i_probe_target_a * 1000.0f);
+    const int32_t max_ma = (int32_t)(c->i_probe_max_a * 1000.0f);
+    const float v_max = c->v_dc_probe_frac * c->vdc;
+    float v = v_max / 16.0f;
+    bool qualified = false;
 
-    for (int t = 0; t < 3; t++) {
-        if (!s->ops.probe_terminal(s->ops.ctx, t, v, &r->terminal_ma[t])) {
-            return bail(s, ESP_FAIL);
+    for (int attempt = 0; attempt < MOTOR_ID_AMP_TRIES; attempt++) {
+        int32_t max_seen_ma = 0;
+        for (int t = 0; t < 3; t++) {
+            if (!s->ops.probe_terminal(s->ops.ctx, t, q16_from_float(v),
+                                        &r->terminal_ma[t])) {
+                return bail(s, ESP_FAIL);
+            }
+            if (faulted(s)) {
+                return bail(s, ESP_ERR_INVALID_STATE);
+            }
+            const int32_t current_ma = (r->terminal_ma[t] < 0) ?
+                                           -r->terminal_ma[t] :
+                                           r->terminal_ma[t];
+            if (current_ma > max_seen_ma) {
+                max_seen_ma = current_ma;
+            }
         }
-        if (faulted(s)) {
-            return bail(s, ESP_ERR_INVALID_STATE);
+        r->terminal_v_mv = (int32_t)(v * 1000.0f);
+
+        if (max_seen_ma >= (target_ma * 3) / 5 && max_seen_ma <= (target_ma * 8) / 5 &&
+            (max_ma <= 0 || max_seen_ma <= max_ma)) {
+            qualified = true;
+            break;
         }
+
+        float scale = 4.0f;
+        if (max_seen_ma > 0) {
+            scale = (float)target_ma / (float)max_seen_ma;
+            if (max_seen_ma > max_ma && max_ma > 0) {
+                scale = (float)max_ma / (float)max_seen_ma * 0.7f;
+            }
+        }
+        if (scale > 4.0f) {
+            scale = 4.0f;
+        } else if (scale < 0.125f) {
+            scale = 0.125f;
+        }
+        const float next = v * scale;
+        if (next <= v * 1.02f && next >= v * 0.98f) {
+            break;
+        }
+        v = (next < v_max) ? next : v_max;
+    }
+
+    if (!qualified) {
+        return bail(s, ESP_ERR_INVALID_RESPONSE);
     }
 
     /* A ratio across three near-zero readings is noise, not a verdict. */
@@ -1041,80 +1090,89 @@ static esp_err_t run_flux(esp_foc_motor_id_seq_t *s)
 {
     const esp_foc_motor_id_seq_config_t *c = &s->cfg;
     esp_foc_motor_id_result_t *r = &s->result;
+    float i_flux = c->i_flux_a;
 
-    s->ops.set_idq(s->ops.ctx, q16_from_float(c->i_flux_a), 0);
-    esp_err_t err = ramp_fe(s, 0, c->flux_hz, c->ramp_ms);
-    if (err != ESP_OK) {
-        return err;
-    }
+    for (int attempt = 0; attempt < MOTOR_ID_AMP_TRIES; attempt++) {
+        s->ops.set_idq(s->ops.ctx, q16_from_float(i_flux), 0);
+        esp_err_t err = ramp_fe(s, 0, c->flux_hz, c->ramp_ms);
+        if (err != ESP_OK) {
+            return err;
+        }
 
-    go(s, ESP_FOC_MOTOR_ID_RATED_FLUX);
-    nap(s, c->flux_hold_ms);
-    if (faulted(s)) {
-        return bail(s, ESP_ERR_INVALID_STATE);
-    }
-
-    q16_t vd = 0;
-    q16_t vq = 0;
-    q16_t id = 0;
-    q16_t iq = 0;
-    s->ops.fetch_dq(s->ops.ctx, &vd, &vq, &id, &iq);
-
-    int32_t w = (int32_t)(((int64_t)Q16_TWO_PI * c->flux_hz) >> 16);
-    if (s->ops.fetch_rotor != NULL) {
-        q16_t th_m = 0;
-        q16_t w_m = 0;
-        if (!s->ops.fetch_rotor(s->ops.ctx, &th_m, &w_m)) {
+        go(s, ESP_FOC_MOTOR_ID_RATED_FLUX);
+        nap(s, c->flux_hold_ms);
+        if (faulted(s)) {
             return bail(s, ESP_ERR_INVALID_STATE);
         }
-        float wm = q16_to_float(w_m);
-        if (wm < 0.0f) {
-            wm = -wm;
+
+        q16_t vd = 0;
+        q16_t vq = 0;
+        q16_t id = 0;
+        q16_t iq = 0;
+        s->ops.fetch_dq(s->ops.ctx, &vd, &vq, &id, &iq);
+
+        int32_t w = (int32_t)(((int64_t)Q16_TWO_PI * c->flux_hz) >> 16);
+        bool motion_ok = true;
+        if (s->ops.fetch_rotor != NULL) {
+            q16_t th_m = 0;
+            q16_t w_m = 0;
+            if (!s->ops.fetch_rotor(s->ops.ctx, &th_m, &w_m)) {
+                return bail(s, ESP_ERR_INVALID_STATE);
+            }
+            float wm = q16_to_float(w_m);
+            if (wm < 0.0f) {
+                wm = -wm;
+            }
+            const float fm = wm / ESP_FOC_TWO_PI_F;
+            const float ppr = (fm > 0.0f) ? (float)c->flux_hz / fm : 0.0f;
+            const int pp = (int)(ppr + 0.5f);
+            float rem = ppr - (float)pp;
+            if (rem < 0.0f) {
+                rem = -rem;
+            }
+            motion_ok = (fm >= 1.0f) && (pp >= 1) && (pp <= 40) && (rem <= 0.35f);
+            if (motion_ok) {
+                r->pole_pairs = pp;
+                r->valid_mask |= ESP_FOC_MOTOR_ID_VALID_PP;
+                r->flux_fm_hz = fm;
+                r->flux_we_rad_s = wm * (float)pp;
+            }
         }
-        const float fm = wm / ESP_FOC_TWO_PI_F;
-        if (fm < 1.0f) {
-            return bail(s, ESP_ERR_INVALID_RESPONSE);
-        }
-        const float ppr = (float)c->flux_hz / fm;
-        int pp = (int)(ppr + 0.5f);
-        if (pp < 1 || pp > 40) {
-            return bail(s, ESP_ERR_INVALID_RESPONSE);
-        }
-        float rem = ppr - (float)pp;
-        if (rem < 0.0f) {
-            rem = -rem;
-        }
-        if (rem > 0.35f) {
-            return bail(s, ESP_ERR_INVALID_RESPONSE);
-        }
-        r->pole_pairs = pp;
-        r->valid_mask |= ESP_FOC_MOTOR_ID_VALID_PP;
-        r->flux_fm_hz = fm;
-        r->flux_we_rad_s = wm * (float)pp;
-        w = (int32_t)(r->flux_we_rad_s + 0.5f);
-        if (w <= 0) {
-            return bail(s, ESP_ERR_INVALID_RESPONSE);
-        }
-    }
-    int32_t psi = esp_foc_ident_psi_uwb(q16_to_milli(vq),
+
+        int32_t psi = 0;
+        if (motion_ok) {
+            psi = esp_foc_ident_psi_uwb(q16_to_milli(vq),
                                         q16_to_milli(iq),
                                         q16_to_milli(id),
                                         (int32_t)(r->r_loop_ohm * 1000.0f),
                                         (int32_t)(r->ls_h * 1000000.0f),
                                         w);
+        }
+        const float psi_wb = (float)psi * 1e-6f;
+        const bool flux_ok = motion_ok && (psi_wb >= c->psi_min_wb) &&
+                             (psi_wb <= c->psi_max_wb);
 
-    go(s, ESP_FOC_MOTOR_ID_RAMPDOWN);
-    err = ramp_fe(s, c->flux_hz, 0, c->ramp_ms / 2u);
-    s->ops.set_idq(s->ops.ctx, 0, 0);
-    if (err != ESP_OK) {
-        return err;
+        go(s, ESP_FOC_MOTOR_ID_RAMPDOWN);
+        err = ramp_fe(s, c->flux_hz, 0, c->ramp_ms / 2u);
+        s->ops.set_idq(s->ops.ctx, 0, 0);
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (flux_ok) {
+            r->flux_i_a = i_flux;
+            r->psi_f_wb = psi_wb;
+            r->valid_mask |= ESP_FOC_MOTOR_ID_VALID_PSI_F;
+            return ESP_OK;
+        }
+        if (i_flux >= c->i_flux_max_a) {
+            break;
+        }
+        i_flux *= 2.0f;
+        if (i_flux > c->i_flux_max_a) {
+            i_flux = c->i_flux_max_a;
+        }
     }
-
-    if (psi > 0) {
-        r->psi_f_wb = (float)psi / 1000000.0f;
-        r->valid_mask |= ESP_FOC_MOTOR_ID_VALID_PSI_F;
-    }
-    return ESP_OK;
+    return bail(s, ESP_ERR_INVALID_RESPONSE);
 }
 
 esp_err_t esp_foc_motor_id_seq_run(esp_foc_motor_id_seq_t *s)

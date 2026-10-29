@@ -81,7 +81,6 @@ static void fast_config(esp_foc_motor_id_config_t *c)
     c->settle_ms = 50u;
     c->coast_ms = 50u;
     c->retry_ms = 50u;
-    c->i_abort_a = 2.0f;
     c->sensored.fetch_hz = 1000u;
     c->sensored.pll_bw_hz = 60.0f;
     c->sensored.probe_base_hz = 40;
@@ -296,6 +295,8 @@ TEST_CASE("motor_id fails on a trip and still releases the inverter",
     TEST_ASSERT_NOT_EQUAL(ESP_FOC_MOTOR_ID_IDLE, r.failed_at);
     TEST_ASSERT_EQUAL(0u, r.valid_mask & ESP_FOC_MOTOR_ID_VALID_GAINS);
     TEST_ASSERT_EQUAL(ESP_FOC_MOTOR_ID_FAIL, s_ev.last[ESP_FOC_MOTOR_ID_EV_PHASE].phase);
+    TEST_ASSERT_EQUAL(ESP_FOC_MOTOR_ID_PROBE_ABORT_FAULT,
+                      s_ev.last[ESP_FOC_MOTOR_ID_EV_ATTEMPT].probe_abort);
     TEST_ASSERT_NULL(s_m.pwm_cb);
     TEST_ASSERT_NULL(s_m.fault_cb);
     TEST_ASSERT_FALSE(s_m.enabled);

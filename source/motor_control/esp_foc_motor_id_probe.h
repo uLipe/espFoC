@@ -40,32 +40,12 @@ typedef enum {
     ESP_FOC_MOTOR_ID_PROBE_STEP,
 } esp_foc_motor_id_probe_mode_t;
 
-/** Why a window was discarded; a refused probe is otherwise indistinguishable
- *  from a machine that simply does not conduct. */
-typedef enum {
-    ESP_FOC_MOTOR_ID_ABORT_NONE = 0,
-    ESP_FOC_MOTOR_ID_ABORT_FAULT,
-    ESP_FOC_MOTOR_ID_ABORT_OVERCURRENT,
-    ESP_FOC_MOTOR_ID_ABORT_TIMEOUT,
-} esp_foc_motor_id_probe_abort_t;
-
 typedef struct {
     esp_foc_inverter_t *inv;
     q16_t inv_vdc;      /**< 1/Vdc, so the ISR never divides */
     q16_t v_max_pu;     /**< modulation ceiling, per-unit of Vdc */
-    q16_t i_abort;      /**< a window that reaches this is discarded */
-    /**
-     * Ceiling for the DC and terminal windows, which is deliberately looser.
-     *
-     * Holding a DC vector on a free shaft is not an electrical measurement alone:
-     * the rotor swings in the well the vector creates, and with 13 pole pairs a
-     * small mechanical swing is a fast electrical one, so the current carries real
-     * BEMF. This bench rang to 2180 mA around a 500 mA injection and the run before
-     * it did not, depending only on where the shaft happened to be resting. The
-     * mean is still bounded by the supply's constant current, and a genuine short
-     * is the bridge's own limit to catch.
-     */
-    q16_t i_abort_dc;
+    /** Same threshold as the driver's software current trip, or 0 when absent. */
+    q16_t i_guard;
     uint32_t settle_samples;
     uint32_t avg_samples;
     uint32_t timeout_ms;
@@ -107,13 +87,11 @@ typedef struct {
 } esp_foc_motor_id_probe_t;
 
 /**
- * @p vdc and the abort ceiling come from the caller rather than the inverter so
- * a bench can probe below its trip level.
+ * @p vdc comes from the caller because the identification contract requires it.
  */
 esp_err_t esp_foc_motor_id_probe_init(esp_foc_motor_id_probe_t *p,
                                      esp_foc_inverter_t *inv,
-                                     float vdc,
-                                     float i_abort_a);
+                                     float vdc);
 
 /**
  * Call from the PWM ISR. Returns false when no probe is armed, which is the
