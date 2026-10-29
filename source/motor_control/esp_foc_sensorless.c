@@ -29,8 +29,12 @@
 #define SL_SLOW_DIV        ((uint32_t)CONFIG_ESP_FOC_SL_SLOW_DIV)
 #define SL_POLL_MS         20u
 #define SL_REQ_TIMEOUT_MS  5000u
-/* Collapse is only judged with a real torque request on q. */
+/* Collapse is only judged with a real torque request on q. Both axes then
+ * have to stay under the larger of collapse_a and this share of that
+ * request. A fixed milliamp line is the noise of one motor and a healthy
+ * current on the next. */
 #define SL_COLLAPSE_IQREF_A 0.10f
+#define SL_COLLAPSE_FRAC ((q16_t)13107) /* 0.20 */
 /* Hunting this long under we_min during the settle refuses the commit. */
 #define SL_SETTLE_BELOW_MS 60u
 
@@ -261,8 +265,12 @@ static uint8_t sl_guards(sl_t *sl, q16_t w_obs, q16_t id, q16_t iq, bool lock)
         why = ESP_FOC_SL_ABORT_LOCK_LOSS;
     }
 
-    if ((q16_abs(sl->iq_ref) > sl->g_iq_col_ref) && (q16_abs(id) < sl->g_i_col) &&
-        (q16_abs(iq) < sl->g_i_col)) {
+    const q16_t asked = q16_abs(sl->iq_ref);
+    q16_t dead = q16_mul(asked, SL_COLLAPSE_FRAC);
+    if (dead < sl->g_i_col) {
+        dead = sl->g_i_col;
+    }
+    if ((asked > sl->g_iq_col_ref) && (q16_abs(id) < dead) && (q16_abs(iq) < dead)) {
         if (++sl->g_col_n >= sl->g_col_need) {
             why = ESP_FOC_SL_ABORT_COLLAPSE;
         }
@@ -1621,6 +1629,34 @@ void esp_foc_sensorless_default_config(esp_foc_sensorless_config_t *cfg)
 }
 
 #if CONFIG_ESP_FOC_ENABLE_MOTOR_ID
+static float sl_at_most(float amps, float ceiling)
+{
+    if (amps < 0.0f) {
+        return 0.0f;
+    }
+    if ((ceiling > 0.0f) && (amps > ceiling)) {
+        return ceiling;
+    }
+    return amps;
+}
+
+/* floor and brake must stay strictly under i_max or init refuses the config. */
+static float sl_under_max(float amps, float i_max)
+{
+    amps = sl_at_most(amps, i_max);
+    if ((i_max > 0.0f) && (amps >= i_max)) {
+        return i_max * 0.95f;
+    }
+    return amps;
+}
+
+static void sl_raise_i(float *slot, float motion, float ceiling)
+{
+    if (motion > *slot) {
+        *slot = sl_at_most(motion, ceiling);
+    }
+}
+
 void esp_foc_sensorless_config_from_motor_id(esp_foc_sensorless_config_t *cfg,
                                              const esp_foc_motor_id_result_t *r)
 {
@@ -1643,6 +1679,26 @@ void esp_foc_sensorless_config_from_motor_id(esp_foc_sensorless_config_t *cfg,
     }
     if (r->v_deadzone_v > 0.0f) {
         cfg->v_deadzone_v = r->v_deadzone_v;
+    }
+    /* The Kconfig launch currents are a small-motor seed. The flux leg
+     * already found the current that moves this rotor; the open-loop ramp,
+     * the handoff and the catch all need at least that much. */
+    if (r->flux_i_a > 0.0f) {
+        const float motion = sl_at_most(r->flux_i_a, cfg->i_max_a);
+        sl_raise_i(&cfg->i_align_a, motion, cfg->i_max_a);
+        sl_raise_i(&cfg->id_run_a, motion, cfg->i_max_a);
+        sl_raise_i(&cfg->handoff.iq_start_a, motion, cfg->i_max_a);
+        const float hold = sl_under_max(motion, cfg->i_max_a);
+        if (hold > cfg->catch_up.floor_a) {
+            cfg->catch_up.floor_a = hold;
+        }
+        if (hold > cfg->catch_up.brake_a) {
+            cfg->catch_up.brake_a = hold;
+        }
+        const float err = 0.35f * cfg->i_align_a;
+        if (err > cfg->startup.ramp_id_err_a) {
+            cfg->startup.ramp_id_err_a = err;
+        }
     }
 }
 #endif

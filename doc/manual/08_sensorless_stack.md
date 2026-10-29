@@ -161,7 +161,7 @@ after its hold time.
 |---|---|---|---|
 | Back EMF | From the plateau on, above `guard.bemf_fmin_hz` | `\|e\|` under `bemf_frac·ψ·\|ω\|` for `bemf_hold_ms`: the speed says there should be back EMF and there is none, as with a stalled rotor | `ESP_FOC_SL_ABORT_BEMF` |
 | Lock loss | After the handoff | Observer not locked for `lock_loss_ms`; aborts only if `guard.lock_loss_abort` is set (off by default, the lock flag can drop on healthy runs) | `ESP_FOC_SL_ABORT_LOCK_LOSS` |
-| Collapse | After the handoff | More than 0.10 A asked on q, but `\|id\|` and `\|iq\|` both under `collapse_a` for `collapse_hold_ms` | `ESP_FOC_SL_ABORT_COLLAPSE` |
+| Collapse | After the handoff | More than 0.10 A asked on q, but both `\|id\|` and `\|iq\|` stay under the larger of `collapse_a` and 20 % of that request for `collapse_hold_ms`. The fraction is what "no current" means once the launch current has been raised to the identified motion current | `ESP_FOC_SL_ABORT_COLLAPSE` |
 | Overspeed | After the handoff | `\|ω_obs\|` above `overspeed_frac·fe_rated_hz` for `overspeed_hold_ms` | `ESP_FOC_SL_ABORT_OVERSPEED` |
 
 The inverter's own faults (over-current trip, fault pin, software trip, frozen

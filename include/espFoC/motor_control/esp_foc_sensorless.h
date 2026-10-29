@@ -97,7 +97,7 @@ typedef enum {
     ESP_FOC_SL_ABORT_LOCK_LOSS,
     ESP_FOC_SL_ABORT_OVERSPEED,
     ESP_FOC_SL_ABORT_BEMF,        /* |e| under bemf_frac·psi·|w| */
-    ESP_FOC_SL_ABORT_COLLAPSE,    /* |id|,|iq| near zero with iq asked for */
+    ESP_FOC_SL_ABORT_COLLAPSE,    /* both axes under the larger of collapse_a and 20 % of |iq*| */
 } esp_foc_sensorless_abort_t;
 
 typedef struct {

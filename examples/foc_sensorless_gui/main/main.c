@@ -680,6 +680,9 @@ static esp_err_t apply_plant(void)
         log_line("ident: Rs %.3f ohm, Ls %.0f uH, psi %.0f uWb, pp %u",
                  (double)controller_config.rs_ohm, (double)(controller_config.ls_h * 1.0e6f),
                  (double)(controller_config.psi_wb * 1.0e6f), controller_config.pole_pairs);
+        log_line("launch: align %.2f A, iq start %.2f A",
+                 (double)controller_config.i_align_a,
+                 (double)controller_config.handoff.iq_start_a);
     }
     return err;
 }
