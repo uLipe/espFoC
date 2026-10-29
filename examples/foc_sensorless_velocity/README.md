@@ -108,7 +108,7 @@ chip only the GPIO numbers change, in `idf.py menuconfig`.
 | Current sense W                | not wired     | (two shunts)     |
 | GND                            | GND           | common to all    |
 
-- The inverter takes a 12 V DC supply. The default current sense is a 10 mΩ
+- The inverter takes a 24 V DC supply. The default current sense is a 10 mΩ
   shunt with a gain of 20, and the bridge trips at 4 A.
 - The motor phases go to the bridge outputs in any order; phase discovery
   finds the map.
@@ -176,8 +176,8 @@ the motor is wired.
   +----------------------------+-----------------+------------+
   | Parameter                  | Value           | Source     |
   +----------------------------+-----------------+------------+
-  | Pole pairs                 | 13              | Kconfig    |
-  | DC link                    | 12.00 V         | Kconfig    |
+  | Pole pairs                 | 7               | Kconfig    |
+  | DC link                    | 24.00 V         | Kconfig    |
   | Rated speed                | 2300 rpm        | Kconfig    |
   | Phase resistance           | 2.876 ohm       | identified |
   | Phase inductance           | 447 uH          | identified |

@@ -98,7 +98,23 @@ menu "espFoC example: sensored GUI"
 
     endmenu
 
+    choice EXAMPLE_ROTOR_SENSOR
+        prompt "Rotor sensor"
+        default EXAMPLE_ROTOR_SENSOR_AS5600
+        help
+            Shaft sensor read by this example.
+
+        config EXAMPLE_ROTOR_SENSOR_AS5600
+            bool "AS5600 magnetic encoder"
+
+        config EXAMPLE_ROTOR_SENSOR_QUADRATURE
+            bool "Quadrature encoder"
+            depends on SOC_PCNT_SUPPORTED
+            select ESP_FOC_ROTOR_QUADRATURE
+    endchoice
+
     menu "Board: rotor sensor (AS5600)"
+        depends on EXAMPLE_ROTOR_SENSOR_AS5600
 
         config EXAMPLE_ENCODER_SDA_GPIO
             int "AS5600 SDA GPIO"
@@ -117,12 +133,36 @@ menu "espFoC example: sensored GUI"
 
     endmenu
 
+    menu "Board: rotor sensor (quadrature)"
+        depends on EXAMPLE_ROTOR_SENSOR_QUADRATURE
+
+        config EXAMPLE_QUADRATURE_GPIO_A
+            int "Encoder A GPIO"
+            range 0 30
+            default 2
+
+        config EXAMPLE_QUADRATURE_GPIO_B
+            int "Encoder B GPIO"
+            range 0 30
+            default 3
+
+        config EXAMPLE_QUADRATURE_PPR
+            int "Pulses per revolution"
+            range 1 8191
+            default 2048
+            help
+                Pulses per turn of one channel. The counter decodes both
+                edges of A and B, so counts per turn are four times this.
+                The bench encoder is 2048.
+
+    endmenu
+
     menu "Motor"
 
         config EXAMPLE_MOTOR_POLE_PAIRS
             int "Pole pairs"
             range 1 64
-            default 13
+            default 7
             help
                 Magnet poles / 2. Identification measures everything else,
                 but not this.
@@ -130,7 +170,7 @@ menu "espFoC example: sensored GUI"
         config EXAMPLE_DC_LINK_MILLIVOLT
             int "DC link voltage [mV]"
             range 3000 60000
-            default 12000
+            default 24000
             help
                 Supply voltage of the bridge. It scales every voltage the
                 controller asks for, so set the value you actually feed.

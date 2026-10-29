@@ -36,7 +36,11 @@
 #include "esp_err.h"
 #include "sdkconfig.h"
 #include "espFoC/drivers/esp_foc_inverter_mcpwm.h"
+#ifdef CONFIG_EXAMPLE_ROTOR_SENSOR_QUADRATURE
+#include "espFoC/drivers/esp_foc_rotor_quadrature.h"
+#else
 #include "espFoC/drivers/esp_foc_rotor_as5600.h"
+#endif
 #include "espFoC/motor_control/esp_foc_motor_id.h"
 #include "espFoC/motor_control/esp_foc_phase_discover.h"
 #include "espFoC/motor_control/esp_foc_sensored.h"
@@ -120,8 +124,15 @@ static void print_board_table(void)
     print_gpio_row("Current sense U (ADC)", CONFIG_EXAMPLE_CURRENT_U_GPIO);
     print_gpio_row("Current sense V (ADC)", CONFIG_EXAMPLE_CURRENT_V_GPIO);
     print_gpio_row("Current sense W (ADC)", CONFIG_EXAMPLE_CURRENT_W_GPIO);
+#ifdef CONFIG_EXAMPLE_ROTOR_SENSOR_QUADRATURE
+    print_gpio_row("Encoder A", CONFIG_EXAMPLE_QUADRATURE_GPIO_A);
+    print_gpio_row("Encoder B", CONFIG_EXAMPLE_QUADRATURE_GPIO_B);
+    snprintf(text, sizeof(text), "%d", CONFIG_EXAMPLE_QUADRATURE_PPR);
+    printf("  | %-26s | %-21s |\n", "Encoder pulses / rev", text);
+#else
     print_gpio_row("Encoder AS5600 SDA", CONFIG_EXAMPLE_ENCODER_SDA_GPIO);
     print_gpio_row("Encoder AS5600 SCL", CONFIG_EXAMPLE_ENCODER_SCL_GPIO);
+#endif
     printf("  +----------------------------+-----------------------+\n");
     snprintf(text, sizeof(text), "%u kHz", (unsigned)(PWM_RATE_HZ / 1000u));
     printf("  | %-26s | %-21s |\n", "PWM frequency", text);
@@ -174,8 +185,38 @@ static esp_err_t setup_inverter(void)
     return esp_foc_inverter_mcpwm_init(inverter, &inverter_config);
 }
 
+static void encoder_set_invert(bool invert)
+{
+#ifdef CONFIG_EXAMPLE_ROTOR_SENSOR_QUADRATURE
+    esp_foc_rotor_quadrature_set_invert(encoder, invert);
+#else
+    esp_foc_rotor_as5600_set_invert(encoder, invert);
+#endif
+}
+
 static esp_err_t setup_encoder(void)
 {
+#ifdef CONFIG_EXAMPLE_ROTOR_SENSOR_QUADRATURE
+    encoder = esp_foc_rotor_quadrature_acquire(0);
+    if (encoder == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    const esp_foc_rotor_quadrature_config_t encoder_config = {
+        .gpio_a = CONFIG_EXAMPLE_QUADRATURE_GPIO_A,
+        .gpio_b = CONFIG_EXAMPLE_QUADRATURE_GPIO_B,
+        .pcnt_group = 0,
+        .pcnt_unit = 0,
+        .ppr = CONFIG_EXAMPLE_QUADRATURE_PPR,
+        .glitch_ns = 100u,
+        .dt_seconds = 1.0f / (float)ENCODER_RATE_HZ,
+        /* Phase discovery measures the counting direction; start unflipped. */
+        .invert = false,
+        .pole_pairs = POLE_PAIRS,
+        .irq_level = 1,
+    };
+    return esp_foc_rotor_quadrature_init(encoder, &encoder_config);
+#else
     encoder = esp_foc_rotor_as5600_acquire(0);
     if (encoder == NULL) {
         return ESP_ERR_NO_MEM;
@@ -194,6 +235,7 @@ static esp_err_t setup_encoder(void)
         .pwm_hz = PWM_RATE_HZ,
     };
     return esp_foc_rotor_as5600_init(encoder, &encoder_config);
+#endif
 }
 
 static const char *phase_letter(unsigned index)
@@ -216,12 +258,14 @@ static esp_err_t discover_phases(esp_foc_phase_discover_result_t *phase_map)
     }
     esp_foc_phase_discover_cleanup(&discovery);
     if (err != ESP_OK) {
-        printf("  Phase discovery failed: %s\n", esp_err_to_name(err));
+        printf("  Phase discovery failed at %s: %s (electrical map %s)\n",
+               esp_foc_phase_discover_stage_name(phase_map->failed_at),
+               esp_err_to_name(err), phase_map->map_valid ? "preserved" : "not found");
         return err;
     }
 
     /* From here on the encoder counts positive in the motor's forward direction. */
-    esp_foc_rotor_as5600_set_invert(encoder, phase_map->sensor_reversed);
+    encoder_set_invert(phase_map->sensor_reversed);
 
     printf("\n  Phase map\n");
     printf("  +-------------+---------------+--------------+\n");
