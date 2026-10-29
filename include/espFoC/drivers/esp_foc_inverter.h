@@ -99,6 +99,8 @@ struct esp_foc_inverter_s {
     void (*set_duties)(esp_foc_inverter_t *self,
                        q16_t duty_u, q16_t duty_v, q16_t duty_w);
     q16_t (*get_dc_link_voltage)(esp_foc_inverter_t *self);
+    /** Software phase-current trip; <= 0 when the driver has none. */
+    q16_t (*get_current_limit)(esp_foc_inverter_t *self);
     uint32_t (*get_pwm_rate_hz)(esp_foc_inverter_t *self);
     /** Canonical phase currents (LPF output when enabled). */
     void (*fetch_currents)(esp_foc_inverter_t *self,
